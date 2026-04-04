@@ -1,0 +1,396 @@
+{
+  "info": {
+    "name": "Quick Market API",
+    "description": "Variables: `baseUrl`, `storeId`, `productId`, `saleId`, `saleLineId` (primera línea de GET /sales/:id), `saleReturnId`, `supplierId`, `purchaseId`. Header `X-Store-Id` en casi todas las rutas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "storeId", "value": "" },
+    { "key": "productId", "value": "", "description": "UUID de producto (ej. tras POST /products)" },
+    { "key": "saleId", "value": "", "description": "UUID de venta (copiar de POST /sales)" },
+    { "key": "supplierId", "value": "", "description": "UUID proveedor (tras npm run db:seed o Prisma Studio)" },
+    { "key": "purchaseId", "value": "", "description": "UUID compra (respuesta POST /purchases)" },
+    { "key": "saleLineId", "value": "", "description": "UUID SaleLine (sale.saleLines[0].id tras GET /sales/:id)" },
+    { "key": "saleReturnId", "value": "", "description": "UUID devolución (POST /sale-returns)" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET / (sin X-Store-Id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/"
+          }
+        },
+        {
+          "name": "GET /api/v1/ops/metrics (M5, sin X-Store-Id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "ops", "metrics"],
+              "query": [
+                {
+                  "key": "storeId",
+                  "value": "{{storeId}}",
+                  "disabled": true,
+                  "description": "Opcional: limitar reconciliación inventario a una tienda"
+                }
+              ]
+            },
+            "description": "Reconciliación inventario vs movimientos, outbox, sync. Sin header de tienda."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "GET /api/v1/products",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products?source=auto&includeInactive=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"],
+              "query": [
+                { "key": "source", "value": "auto" },
+                { "key": "includeInactive", "value": "false" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/products",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"SKU-POSTMAN-001\",\n  \"name\": \"Producto demo\",\n  \"price\": \"10.00\",\n  \"cost\": \"5.00\",\n  \"currency\": \"VES\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/products"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "GET /api/v1/inventory",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/inventory"
+          }
+        },
+        {
+          "name": "GET /api/v1/inventory/:productId",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/inventory/{{productId}}"
+          }
+        },
+        {
+          "name": "GET /api/v1/inventory/movements",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventory/movements?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "inventory", "movements"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "productId", "value": "{{productId}}", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/inventory/adjustments (IN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"type\": \"IN_ADJUST\",\n  \"quantity\": \"5\",\n  \"unitCostFunctional\": \"2.00\",\n  \"reason\": \"Postman ingreso\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/inventory/adjustments"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sales",
+      "item": [
+        {
+          "name": "POST /api/v1/sales",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentCurrencyCode\": \"VES\",\n  \"lines\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": \"1\",\n      \"price\": \"10.00\"\n    }\n  ],\n  \"fxSnapshot\": {\n    \"baseCurrencyCode\": \"USD\",\n    \"quoteCurrencyCode\": \"VES\",\n    \"rateQuotePerBase\": \"36.50\",\n    \"effectiveDate\": \"2026-04-04\",\n    \"fxSource\": \"POS_OFFLINE\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sales",
+            "description": "Requiere stock del producto (ej. POST inventory/adjustments IN antes). Copia response.id a variable saleId para GET."
+          }
+        },
+        {
+          "name": "GET /api/v1/sales/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/sales/{{saleId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sale returns",
+      "item": [
+        {
+          "name": "POST /api/v1/sale-returns",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalSaleId\": \"{{saleId}}\",\n  \"lines\": [\n    {\n      \"saleLineId\": \"{{saleLineId}}\",\n      \"quantity\": \"1\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sale-returns",
+            "description": "Tras una venta: GET /sales/{{saleId}} y copia saleLines[0].id → saleLineId. No requiere fxSnapshot (hereda de la venta)."
+          }
+        },
+        {
+          "name": "GET /api/v1/sale-returns/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/sale-returns/{{saleReturnId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Purchases",
+      "item": [
+        {
+          "name": "POST /api/v1/purchases",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierId\": \"{{supplierId}}\",\n  \"documentCurrencyCode\": \"VES\",\n  \"lines\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": \"2\",\n      \"unitCost\": \"3.00\"\n    }\n  ],\n  \"fxSnapshot\": {\n    \"baseCurrencyCode\": \"USD\",\n    \"quoteCurrencyCode\": \"VES\",\n    \"rateQuotePerBase\": \"36.50\",\n    \"effectiveDate\": \"2026-04-04\",\n    \"fxSource\": \"POS_OFFLINE\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/purchases",
+            "description": "Rellena supplierId (seed crea un proveedor). Copia response.id a purchaseId."
+          }
+        },
+        {
+          "name": "GET /api/v1/purchases/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/purchases/{{purchaseId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Business settings",
+      "item": [
+        {
+          "name": "GET /api/v1/stores/:storeId/business-settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/stores/{{storeId}}/business-settings"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Exchange rates",
+      "item": [
+        {
+          "name": "GET /api/v1/exchange-rates/latest",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/exchange-rates/latest?baseCurrencyCode=USD&quoteCurrencyCode=VES",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "exchange-rates", "latest"],
+              "query": [
+                { "key": "baseCurrencyCode", "value": "USD" },
+                { "key": "quoteCurrencyCode", "value": "VES" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/exchange-rates",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseCurrencyCode\": \"USD\",\n  \"quoteCurrencyCode\": \"VES\",\n  \"rateQuotePerBase\": \"36.50\",\n  \"effectiveDate\": \"2026-04-04\",\n  \"source\": \"MANUAL\",\n  \"notes\": \"Postman\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/exchange-rates"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sync",
+      "item": [
+        {
+          "name": "GET /api/v1/sync/pull",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sync/pull?since=0&limit=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "sync", "pull"],
+              "query": [
+                { "key": "since", "value": "0", "description": "Ultimo serverVersion aplicado del log de pull (no el de push ack)" },
+                { "key": "limit", "value": "100" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/sync/push (INVENTORY_ADJUST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"postman-device-inv\",\n  \"ops\": [\n    {\n      \"opId\": \"11111111-2222-4333-8444-555555555555\",\n      \"opType\": \"INVENTORY_ADJUST\",\n      \"timestamp\": \"2026-04-04T15:00:00.000Z\",\n      \"payload\": {\n        \"inventoryAdjust\": {\n          \"productId\": \"{{productId}}\",\n          \"type\": \"IN_ADJUST\",\n          \"quantity\": \"1\",\n          \"unitCostFunctional\": \"1.00\",\n          \"reason\": \"sync test\"\n        }\n      }\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sync/push"
+          }
+        },
+        {
+          "name": "POST /api/v1/sync/push (SALE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"postman-device-sale\",\n  \"ops\": [\n    {\n      \"opId\": \"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\",\n      \"opType\": \"SALE\",\n      \"timestamp\": \"2026-04-04T16:00:00.000Z\",\n      \"payload\": {\n        \"sale\": {\n          \"storeId\": \"{{storeId}}\",\n          \"documentCurrencyCode\": \"VES\",\n          \"lines\": [\n            {\n              \"productId\": \"{{productId}}\",\n              \"quantity\": \"1\",\n              \"price\": \"10.00\"\n            }\n          ],\n          \"fxSnapshot\": {\n            \"baseCurrencyCode\": \"USD\",\n            \"quoteCurrencyCode\": \"VES\",\n            \"rateQuotePerBase\": \"36.50\",\n            \"effectiveDate\": \"2026-04-04\",\n            \"fxSource\": \"POS_OFFLINE\"\n          }\n        }\n      }\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sync/push",
+            "description": "Cambia opId (UUID v4) en cada prueba repetida. Mismo requisito de stock que POST /sales."
+          }
+        },
+        {
+          "name": "POST /api/v1/sync/push (SALE_RETURN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"postman-device-return\",\n  \"ops\": [\n    {\n      \"opId\": \"dddddddd-dddd-4ddd-dddd-dddddddddddd\",\n      \"opType\": \"SALE_RETURN\",\n      \"timestamp\": \"2026-04-04T18:00:00.000Z\",\n      \"payload\": {\n        \"saleReturn\": {\n          \"storeId\": \"{{storeId}}\",\n          \"originalSaleId\": \"{{saleId}}\",\n          \"lines\": [\n            {\n              \"saleLineId\": \"{{saleLineId}}\",\n              \"quantity\": \"1\"\n            }\n          ]\n        }\n      }\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sync/push",
+            "description": "Requiere venta previa con OUT_SALE; saleLineId de GET /sales/:id. Nuevo opId por prueba."
+          }
+        },
+        {
+          "name": "POST /api/v1/sync/push (PURCHASE_RECEIVE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"postman-device-purchase\",\n  \"ops\": [\n    {\n      \"opId\": \"cccccccc-cccc-4ccc-cccc-cccccccccccc\",\n      \"opType\": \"PURCHASE_RECEIVE\",\n      \"timestamp\": \"2026-04-04T17:00:00.000Z\",\n      \"payload\": {\n        \"purchase\": {\n          \"storeId\": \"{{storeId}}\",\n          \"supplierId\": \"{{supplierId}}\",\n          \"documentCurrencyCode\": \"VES\",\n          \"lines\": [\n            {\n              \"productId\": \"{{productId}}\",\n              \"quantity\": \"1\",\n              \"unitCost\": \"2.00\"\n            }\n          ],\n          \"fxSnapshot\": {\n            \"baseCurrencyCode\": \"USD\",\n            \"quoteCurrencyCode\": \"VES\",\n            \"rateQuotePerBase\": \"36.50\",\n            \"effectiveDate\": \"2026-04-04\",\n            \"fxSource\": \"POS_OFFLINE\"\n          }\n        }\n      }\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sync/push",
+            "description": "Nuevo opId UUID v4 por prueba. Requiere supplierId y productId válidos."
+          }
+        },
+        {
+          "name": "POST /api/v1/sync/push (NOOP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Store-Id", "value": "{{storeId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"postman-device-001\",\n  \"clientTime\": \"2026-04-04T12:00:00.000Z\",\n  \"lastServerVersion\": 0,\n  \"ops\": [\n    {\n      \"opId\": \"9c1b39e8-2f4a-4c17-9a89-8b5e7cb4b9d7\",\n      \"opType\": \"NOOP\",\n      \"timestamp\": \"2026-04-04T11:59:00.000Z\",\n      \"payload\": {}\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sync/push"
+          }
+        }
+      ]
+    }
+  ]
+}
