@@ -110,8 +110,7 @@ class _RegisterExchangeRateScreenState
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessage;
-      if (e.requestId != null) msg = '$msg\n(requestId: ${e.requestId})';
+      final msg = e.userMessageForSupport;
       setState(() => _error = msg);
     } catch (e) {
       if (!mounted) return;

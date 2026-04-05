@@ -140,7 +140,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       final s = await widget.storesApi.getBusinessSettings(widget.storeId);
       if (mounted) setState(() => _settings = s);
     } on ApiError catch (e) {
-      if (mounted) setState(() => _error = e.userMessage);
+      if (mounted) setState(() => _error = e.userMessageForSupport);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
@@ -249,7 +249,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       if (mounted) {
         setState(() {
           _loadingSale = false;
-          _error = e.userMessage;
+          _error = e.userMessageForSupport;
         });
       }
     } catch (e) {
@@ -371,7 +371,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.userMessage);
+      setState(() => _error = e.userMessageForSupport);
     } catch (e) {
       if (!mounted) return;
       if (isLikelyNetworkFailure(e)) {

@@ -154,10 +154,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
             final err = snapshot.error;
             String msg = err.toString();
             if (err is ApiError) {
-              msg = err.userMessage;
-              if (err.requestId != null) {
-                msg = '$msg\n(requestId: ${err.requestId})';
-              }
+              msg = err.userMessageForSupport;
             }
             return Center(
               child: Padding(

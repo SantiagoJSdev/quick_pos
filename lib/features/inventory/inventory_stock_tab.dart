@@ -7,6 +7,7 @@ import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/models/catalog_product.dart';
 import '../../core/models/inventory_line.dart';
 import '../sale/barcode_scanner_screen.dart';
 import 'inventory_product_detail_screen.dart';
@@ -72,16 +73,44 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     });
     try {
       final list = await widget.inventoryApi.listInventory(widget.storeId);
+      List<CatalogProduct> catalog = const [];
+      try {
+        final raw = await widget.productsApi.listProducts(
+          widget.storeId,
+          includeInactive: false,
+        );
+        catalog = raw.where((p) => p.active).toList();
+      } catch (_) {
+        // Sin catálogo: solo filas de inventario (p. ej. fallo de red secundario).
+      }
+      final inInventory = list.map((l) => l.productId).toSet();
+      final synthetic = <InventoryLine>[];
+      for (final p in catalog) {
+        if (!inInventory.contains(p.id)) {
+          synthetic.add(
+            InventoryLine.syntheticZeroStock(
+              productId: p.id,
+              sku: p.sku,
+              name: p.name,
+              barcode: p.barcode,
+            ),
+          );
+        }
+      }
+      final merged = [...list, ...synthetic]..sort(
+            (a, b) => a.displayName
+                .toLowerCase()
+                .compareTo(b.displayName.toLowerCase()),
+          );
       if (!mounted) return;
       setState(() {
-        _all = list;
+        _all = merged;
         _loading = false;
       });
       widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessage;
-      if (e.requestId != null) msg = '$msg\n(requestId: ${e.requestId})';
+      final msg = e.userMessageForSupport;
       setState(() {
         _all = [];
         _error = msg;
@@ -187,7 +216,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
           child: Text(
-            'Podés pegar o escanear el código: el filtro coincide con nombre, SKU y código de barras.',
+            'Incluye productos del catálogo sin movimientos aún (0 disp.). '
+            'Buscá por nombre, SKU o código de barras; escaneá con el ícono.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -244,9 +274,9 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           Center(
             child: Text(
               _all.isEmpty
-                  ? 'No hay stock registrado aún.\n\n'
-                      'Si recién creás la tienda, primero cargá productos en la pestaña '
-                      'Catálogo (arriba) y luego registrá entradas desde el detalle de cada ítem.'
+                  ? 'No hay productos en catálogo ni líneas de inventario.\n\n'
+                      'Creá productos en la pestaña Catálogo (arriba); '
+                      'aparecerán acá con 0 hasta la primera compra o ajuste de stock.'
                   : 'Ningún resultado para la búsqueda.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
@@ -263,12 +293,16 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final line = items[i];
+        final synth = line.isSyntheticInventoryRow;
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 8),
           title: Text(line.displayName),
           subtitle: Text(
-            'SKU: ${line.displaySku}'
-            '${line.product?.barcode != null && line.product!.barcode!.isNotEmpty ? ' · ${line.product!.barcode}' : ''}',
+            synth
+                ? 'Sin movimientos de inventario · SKU: ${line.displaySku}'
+                    '${line.product?.barcode != null && line.product!.barcode!.isNotEmpty ? ' · ${line.product!.barcode}' : ''}'
+                : 'SKU: ${line.displaySku}'
+                    '${line.product?.barcode != null && line.product!.barcode!.isNotEmpty ? ' · ${line.product!.barcode}' : ''}',
           ),
           onTap: () {
             Navigator.of(context).push<void>(
@@ -292,7 +326,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               Text(
-                'disp.',
+                synth ? 'catálogo' : 'disp.',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),

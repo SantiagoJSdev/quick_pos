@@ -8,6 +8,7 @@ import 'core/api/purchases_api.dart';
 import 'core/api/sale_returns_api.dart';
 import 'core/api/sales_api.dart';
 import 'core/api/stores_api.dart';
+import 'core/api/suppliers_api.dart';
 import 'core/api/sync_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
 import 'core/storage/local_prefs.dart';
@@ -34,6 +35,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
   late final SalesApi _salesApi;
   late final PurchasesApi _purchasesApi;
   late final SaleReturnsApi _saleReturnsApi;
+  late final SuppliersApi _suppliersApi;
   late final SyncApi _syncApi;
   late final CatalogInvalidationBus _catalogInvalidationBus;
   String? _storeId;
@@ -51,6 +53,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _salesApi = SalesApi(_apiClient);
     _purchasesApi = PurchasesApi(_apiClient);
     _saleReturnsApi = SaleReturnsApi(_apiClient);
+    _suppliersApi = SuppliersApi(_apiClient);
     _syncApi = SyncApi(_apiClient);
     _bootstrap();
   }
@@ -111,6 +114,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
                   salesApi: _salesApi,
                   purchasesApi: _purchasesApi,
                   saleReturnsApi: _saleReturnsApi,
+                  suppliersApi: _suppliersApi,
                   syncApi: _syncApi,
                   catalogInvalidationBus: _catalogInvalidationBus,
                   onChangeStore: _onChangeStore,

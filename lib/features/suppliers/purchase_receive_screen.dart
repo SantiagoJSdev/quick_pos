@@ -12,7 +12,8 @@ import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
-import '../../core/models/local_supplier.dart';
+import '../../core/models/supplier.dart';
+import '../../core/api/suppliers_api.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/pos/sale_checkout_payload.dart';
@@ -20,6 +21,7 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_purchase_receive_entry.dart';
 import '../../core/sync/purchase_receive_payload.dart';
 import '../../core/sync/sync_cycle.dart';
+import 'supplier_form_screen.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
 
@@ -33,6 +35,7 @@ class PurchaseReceiveScreen extends StatefulWidget {
     required this.exchangeRatesApi,
     required this.productsApi,
     required this.purchasesApi,
+    required this.suppliersApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
   });
@@ -43,6 +46,7 @@ class PurchaseReceiveScreen extends StatefulWidget {
   final ExchangeRatesApi exchangeRatesApi;
   final ProductsApi productsApi;
   final PurchasesApi purchasesApi;
+  final SuppliersApi suppliersApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
 
@@ -51,18 +55,22 @@ class PurchaseReceiveScreen extends StatefulWidget {
 }
 
 class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
-  List<LocalSupplier> _suppliers = [];
+  List<Supplier> _suppliers = [];
   List<CatalogProduct> _products = [];
   BusinessSettings? _settings;
   String? _contextError;
   String? _fxLoadError;
   SaleFxPair? _fxPair;
   String? _selectedDocumentCurrency;
-  LocalSupplier? _selectedSupplier;
+  Supplier? _selectedSupplier;
   CatalogProduct? _selectedProduct;
 
   final _quantity = TextEditingController();
   final _unitCost = TextEditingController();
+  final _productField = TextEditingController();
+  final _productFocus = FocusNode();
+  final _supplierField = TextEditingController();
+  final _supplierFocus = FocusNode();
   bool _loading = true;
   bool _submitting = false;
   String? _formError;
@@ -83,7 +91,89 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   void dispose() {
     _quantity.dispose();
     _unitCost.dispose();
+    _productField.dispose();
+    _productFocus.dispose();
+    _supplierField.dispose();
+    _supplierFocus.dispose();
     super.dispose();
+  }
+
+  Future<List<Supplier>> _loadAllActiveSuppliers() async {
+    final all = <Supplier>[];
+    String? cursor;
+    for (var i = 0; i < 40; i++) {
+      final page = await widget.suppliersApi.listSuppliers(
+        widget.storeId,
+        cursor: cursor,
+        limit: 200,
+        active: 'true',
+      );
+      all.addAll(page.items);
+      final next = page.nextCursor?.trim();
+      if (next == null || next.isEmpty) break;
+      cursor = next;
+    }
+    all.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return all;
+  }
+
+  String _supplierDisplay(Supplier s) {
+    final t = s.taxId?.trim();
+    if (t != null && t.isNotEmpty) return '${s.name} · $t';
+    return s.name;
+  }
+
+  Supplier? _effectiveSupplier() {
+    if (_suppliers.isEmpty) return null;
+    final raw = _supplierField.text.trim();
+    if (raw.isEmpty) return null;
+    final textLower = raw.toLowerCase();
+    if (_selectedSupplier != null &&
+        _supplierDisplay(_selectedSupplier!).toLowerCase() == textLower) {
+      return _selectedSupplier;
+    }
+    final filtered = _suppliers.where((s) {
+      final n = s.name.toLowerCase();
+      final tx = (s.taxId ?? '').toLowerCase();
+      final ph = (s.phone ?? '').toLowerCase();
+      return n.contains(textLower) ||
+          tx.contains(textLower) ||
+          ph.contains(textLower);
+    }).toList();
+    if (filtered.length == 1) return filtered.first;
+    return null;
+  }
+
+  String _productDisplay(CatalogProduct p) {
+    final bc = p.barcode?.trim();
+    if (bc != null && bc.isNotEmpty) {
+      return '${p.name} · ${p.sku} · $bc';
+    }
+    return '${p.name} · ${p.sku}';
+  }
+
+  /// Texto = último seleccionado, o filtro con una sola coincidencia; si no, null.
+  CatalogProduct? _effectiveProduct() {
+    if (_products.isEmpty) return null;
+    final raw = _productField.text.trim();
+    if (raw.isEmpty) return null;
+    final textLower = raw.toLowerCase();
+    if (_selectedProduct != null &&
+        _productDisplay(_selectedProduct!).toLowerCase() == textLower) {
+      return _selectedProduct;
+    }
+    final filtered = _products.where((p) {
+      final n = p.name.toLowerCase();
+      final s = p.sku.toLowerCase();
+      final b = (p.barcode ?? '').toLowerCase();
+      return n.contains(textLower) ||
+          s.contains(textLower) ||
+          b.contains(textLower);
+    }).toList();
+    if (filtered.length == 1) return filtered.first;
+    return null;
   }
 
   List<String> get _documentCurrencyOptions {
@@ -154,16 +244,13 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       _contextError = null;
     });
     try {
-      final suppliers = await widget.localPrefs.getLocalSuppliers();
-      suppliers.sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
       final settings =
           await widget.storesApi.getBusinessSettings(widget.storeId);
       final products = await widget.productsApi.listProducts(
         widget.storeId,
         includeInactive: false,
       );
+      final suppliers = await _loadAllActiveSuppliers();
       final active =
           products.where((p) => p.active).toList(growable: false);
       active.sort(
@@ -178,7 +265,12 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _selectedDocumentCurrency =
             opts.isNotEmpty ? opts.first : settings.functionalCurrency.code;
         _selectedSupplier = suppliers.isNotEmpty ? suppliers.first : null;
+        _supplierField.text = _selectedSupplier != null
+            ? _supplierDisplay(_selectedSupplier!)
+            : '';
         _selectedProduct = active.isNotEmpty ? active.first : null;
+        _productField.text =
+            _selectedProduct != null ? _productDisplay(_selectedProduct!) : '';
       });
       await _reloadFxForDocumentCurrency();
       if (mounted) setState(() => _loading = false);
@@ -186,7 +278,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _contextError = e.userMessage;
+        _contextError = e.userMessageForSupport;
       });
     } catch (e) {
       if (!mounted) return;
@@ -208,20 +300,36 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     setState(() => _formError = null);
     final s = _settings;
     final doc = _selectedDocumentCurrency;
-    final sup = _selectedSupplier;
-    final prod = _selectedProduct;
     if (s == null || doc == null) {
       setState(() => _formError = 'Configuración de tienda no disponible.');
       return;
     }
+    if (_supplierField.text.trim().isEmpty) {
+      setState(() => _formError = 'Buscá y elegí un proveedor activo.');
+      return;
+    }
+    final sup = _effectiveSupplier();
     if (sup == null) {
-      setState(() => _formError = 'Elegí un proveedor (lista local).');
+      setState(() {
+        _formError = 'Proveedor no identificado: tocá una opción de la lista '
+            'o dejá una sola coincidencia al filtrar.';
+      });
       return;
     }
+    setState(() => _selectedSupplier = sup);
+    if (_productField.text.trim().isEmpty) {
+      setState(() => _formError = 'Buscá y elegí un producto.');
+      return;
+    }
+    final prod = _effectiveProduct();
     if (prod == null) {
-      setState(() => _formError = 'Elegí un producto.');
+      setState(() {
+        _formError = 'Producto no identificado: tocá una opción de la lista o '
+            'dejá una sola coincidencia al filtrar.';
+      });
       return;
     }
+    setState(() => _selectedProduct = prod);
     final func = s.functionalCurrency.code;
     if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
       setState(() {
@@ -301,7 +409,15 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      setState(() => _formError = e.userMessage);
+      var msg = e.userMessageForSupport;
+      if (e.statusCode == 400) {
+        final blob = '${e.error} ${e.messages.join(' ')}'.toLowerCase();
+        if (blob.contains('inactive') || blob.contains('inactivo')) {
+          msg = 'El proveedor está dado de baja. Elegí otro activo o reactivalo '
+              'en Proveedores (editar y activar).\n$msg';
+        }
+      }
+      setState(() => _formError = msg);
     } catch (e) {
       if (!mounted) return;
       if (isLikelyNetworkFailure(e)) {
@@ -385,30 +501,122 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'No hay proveedores locales. Volvé a Proveedores y cargá al menos un UUID.',
-                            style: Theme.of(context).textTheme.bodyLarge,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'No hay proveedores activos en esta tienda. '
+                                'Creá uno con POST /suppliers (solo nombre obligatorio).',
+                                style: Theme.of(context).textTheme.bodyLarge,
+                              ),
+                              const SizedBox(height: 12),
+                              FilledButton.tonal(
+                                onPressed: () async {
+                                  final ok = await Navigator.of(context)
+                                      .push<bool>(
+                                    MaterialPageRoute(
+                                      builder: (ctx) => SupplierFormScreen(
+                                        storeId: widget.storeId,
+                                        suppliersApi: widget.suppliersApi,
+                                      ),
+                                    ),
+                                  );
+                                  if (ok == true && mounted) await _load();
+                                },
+                                child: const Text('Nuevo proveedor'),
+                              ),
+                            ],
                           ),
                         ),
                       )
                     else ...[
                       Text(
-                        'Proveedor',
+                        'Proveedor (activos de esta tienda)',
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       const SizedBox(height: 8),
-                      DropdownButton<LocalSupplier>(
-                        isExpanded: true,
-                        value: _selectedSupplier,
-                        items: _suppliers
-                            .map(
-                              (s) => DropdownMenuItem(
-                                value: s,
-                                child: Text(s.name),
+                      RawAutocomplete<Supplier>(
+                        textEditingController: _supplierField,
+                        focusNode: _supplierFocus,
+                        displayStringForOption: _supplierDisplay,
+                        optionsBuilder: (TextEditingValue tv) {
+                          final q = tv.text.trim().toLowerCase();
+                          if (q.isEmpty) return _suppliers.take(45);
+                          return _suppliers.where((s) {
+                            final n = s.name.toLowerCase();
+                            final tx = (s.taxId ?? '').toLowerCase();
+                            final ph = (s.phone ?? '').toLowerCase();
+                            return n.contains(q) ||
+                                tx.contains(q) ||
+                                ph.contains(q);
+                          }).take(80);
+                        },
+                        onSelected: (s) {
+                          setState(() {
+                            _selectedSupplier = s;
+                            _supplierField.text = _supplierDisplay(s);
+                          });
+                        },
+                        fieldViewBuilder:
+                            (context, controller, focusNode, onFieldSubmitted) {
+                          return TextField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              hintText:
+                                  'Nombre, taxId o teléfono',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onSubmitted: (_) => onFieldSubmitted(),
+                          );
+                        },
+                        optionsViewBuilder:
+                            (context, onSelected, options) {
+                          final opts = options.toList();
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 6,
+                              borderRadius: BorderRadius.circular(8),
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxHeight: 280),
+                                child: opts.isEmpty
+                                    ? const SizedBox.shrink()
+                                    : ListView.builder(
+                                        padding: EdgeInsets.zero,
+                                        shrinkWrap: true,
+                                        itemCount: opts.length,
+                                        itemBuilder: (context, index) {
+                                          final s = opts[index];
+                                          return ListTile(
+                                            dense: true,
+                                            title: Text(
+                                              s.name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            subtitle: Text(
+                                              [
+                                                if (s.taxId != null &&
+                                                    s.taxId!.trim().isNotEmpty)
+                                                  'taxId: ${s.taxId}',
+                                                if (s.phone != null &&
+                                                    s.phone!.trim().isNotEmpty)
+                                                  s.phone!,
+                                              ].where((x) => x.isNotEmpty).join(' · '),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            onTap: () => onSelected(s),
+                                          );
+                                        },
+                                      ),
                               ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() => _selectedSupplier = v),
+                            ),
+                          );
+                        },
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -420,21 +628,81 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       const SizedBox(height: 8),
-                      DropdownButton<CatalogProduct>(
-                        isExpanded: true,
-                        value: _selectedProduct,
-                        items: _products
-                            .map(
-                              (p) => DropdownMenuItem(
-                                value: p,
-                                child: Text(
-                                  '${p.name} · ${p.sku}',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                      RawAutocomplete<CatalogProduct>(
+                        textEditingController: _productField,
+                        focusNode: _productFocus,
+                        displayStringForOption: _productDisplay,
+                        optionsBuilder: (TextEditingValue tv) {
+                          final q = tv.text.trim().toLowerCase();
+                          if (q.isEmpty) return _products.take(45);
+                          return _products.where((p) {
+                            final n = p.name.toLowerCase();
+                            final s = p.sku.toLowerCase();
+                            final b = (p.barcode ?? '').toLowerCase();
+                            return n.contains(q) ||
+                                s.contains(q) ||
+                                b.contains(q);
+                          }).take(80);
+                        },
+                        onSelected: (p) {
+                          setState(() {
+                            _selectedProduct = p;
+                            _productField.text = _productDisplay(p);
+                          });
+                        },
+                        fieldViewBuilder:
+                            (context, controller, focusNode, onFieldSubmitted) {
+                          return TextField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              hintText:
+                                  'Escribí nombre, SKU o código de barras',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onSubmitted: (_) => onFieldSubmitted(),
+                          );
+                        },
+                        optionsViewBuilder:
+                            (context, onSelected, options) {
+                          final opts = options.toList();
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 6,
+                              borderRadius: BorderRadius.circular(8),
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxHeight: 280),
+                                child: opts.isEmpty
+                                    ? const SizedBox.shrink()
+                                    : ListView.builder(
+                                        padding: EdgeInsets.zero,
+                                        shrinkWrap: true,
+                                        itemCount: opts.length,
+                                        itemBuilder: (context, index) {
+                                          final p = opts[index];
+                                          return ListTile(
+                                            dense: true,
+                                            title: Text(
+                                              p.name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            subtitle: Text(
+                                              '${p.sku}${p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : ''}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            onTap: () => onSelected(p),
+                                          );
+                                        },
+                                      ),
                               ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() => _selectedProduct = v),
+                            ),
+                          );
+                        },
                       ),
                     ],
                     const SizedBox(height: 16),

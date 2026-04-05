@@ -1,19 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/purchases_api.dart';
 import '../../core/api/stores_api.dart';
+import '../../core/api/suppliers_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/models/local_supplier.dart';
+import '../../core/models/supplier.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'purchase_receive_screen.dart';
 import 'supplier_form_screen.dart';
 
-/// C1 — lista local de proveedores (nombre + UUID).
+/// Lista de proveedores vía `GET /suppliers` (búsqueda `q`, paginación, filtro activos).
 class SuppliersListScreen extends StatefulWidget {
   const SuppliersListScreen({
     super.key,
@@ -23,6 +27,7 @@ class SuppliersListScreen extends StatefulWidget {
     required this.exchangeRatesApi,
     required this.productsApi,
     required this.purchasesApi,
+    required this.suppliersApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
   });
@@ -33,6 +38,7 @@ class SuppliersListScreen extends StatefulWidget {
   final ExchangeRatesApi exchangeRatesApi;
   final ProductsApi productsApi;
   final PurchasesApi purchasesApi;
+  final SuppliersApi suppliersApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
 
@@ -41,39 +47,100 @@ class SuppliersListScreen extends StatefulWidget {
 }
 
 class _SuppliersListScreenState extends State<SuppliersListScreen> {
-  List<LocalSupplier> _list = [];
+  final _search = TextEditingController();
+  Timer? _debounce;
+  List<Supplier> _list = [];
+  String? _nextCursor;
   bool _loading = true;
+  bool _loadingMore = false;
+  String? _error;
+  bool _includeInactive = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _search.addListener(_onSearchChanged);
+    _load(reset: true);
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    final list = await widget.localPrefs.getLocalSuppliers();
-    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    if (!mounted) return;
-    setState(() {
-      _list = list;
-      _loading = false;
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.removeListener(_onSearchChanged);
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) _load(reset: true);
     });
   }
 
-  Future<void> _openForm({LocalSupplier? existing}) async {
-    final ids = _list.map((e) => e.id.toLowerCase()).toSet();
-    if (existing != null) ids.remove(existing.id.toLowerCase());
+  String get _activeParam => _includeInactive ? 'all' : 'true';
+
+  Future<void> _load({required bool reset}) async {
+    if (reset) {
+      setState(() {
+        _loading = true;
+        _error = null;
+        _nextCursor = null;
+      });
+    } else {
+      if (_nextCursor == null || _loadingMore) return;
+      setState(() => _loadingMore = true);
+    }
+    try {
+      final page = await widget.suppliersApi.listSuppliers(
+        widget.storeId,
+        q: _search.text.trim().isEmpty ? null : _search.text.trim(),
+        cursor: reset ? null : _nextCursor,
+        limit: 50,
+        active: _activeParam,
+      );
+      if (!mounted) return;
+      setState(() {
+        if (reset) {
+          _list = page.items;
+        } else {
+          _list = [..._list, ...page.items];
+        }
+        _nextCursor = page.nextCursor;
+        _loading = false;
+        _loadingMore = false;
+        _error = null;
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (reset) _list = [];
+        _error = e.userMessageForSupport;
+        _loading = false;
+        _loadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (reset) _list = [];
+        _error = e.toString();
+        _loading = false;
+        _loadingMore = false;
+      });
+    }
+  }
+
+  Future<void> _openForm({Supplier? existing}) async {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (ctx) => SupplierFormScreen(
-          localPrefs: widget.localPrefs,
+          storeId: widget.storeId,
+          suppliersApi: widget.suppliersApi,
           existing: existing,
-          existingIds: existing == null ? ids : null,
         ),
       ),
     );
-    if (ok == true && mounted) await _load();
+    if (ok == true && mounted) await _load(reset: true);
   }
 
   Future<void> _openPurchaseReceive() async {
@@ -86,20 +153,35 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           exchangeRatesApi: widget.exchangeRatesApi,
           productsApi: widget.productsApi,
           purchasesApi: widget.purchasesApi,
+          suppliersApi: widget.suppliersApi,
           syncApi: widget.syncApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
         ),
       ),
     );
-    if (ok == true && mounted) await _load();
+    if (ok == true && mounted) await _load(reset: true);
   }
 
-  Future<void> _confirmDelete(LocalSupplier s) async {
+  String _subtitleFor(Supplier s) {
+    final parts = <String>[];
+    if (!s.active) parts.add('Inactivo');
+    if (s.taxId != null && s.taxId!.trim().isNotEmpty) {
+      parts.add('taxId: ${s.taxId}');
+    }
+    if (s.phone != null && s.phone!.trim().isNotEmpty) {
+      parts.add(s.phone!);
+    }
+    return parts.isEmpty ? '—' : parts.join(' · ');
+  }
+
+  Future<void> _confirmDeactivate(Supplier s) async {
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Quitar proveedor'),
-        content: Text('¿Eliminar "${s.name}" de la lista local?'),
+        title: const Text('Dar de baja proveedor'),
+        content: Text(
+          '¿Desactivar "${s.name}"? No podrá usarse en nuevas compras hasta reactivarlo.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -107,15 +189,21 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Eliminar'),
+            child: const Text('Desactivar'),
           ),
         ],
       ),
     );
     if (go != true || !mounted) return;
-    final next = _list.where((e) => e.id != s.id).toList();
-    await widget.localPrefs.saveLocalSuppliers(next);
-    await _load();
+    try {
+      await widget.suppliersApi.deactivateSupplier(widget.storeId, s.id);
+      if (mounted) await _load(reset: true);
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.userMessageForSupport)),
+      );
+    }
   }
 
   @override
@@ -147,64 +235,147 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _load,
+            onPressed: _loading ? null : () => _load(reset: true),
             tooltip: 'Recargar',
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _list.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'No hay proveedores guardados en este dispositivo.\n\n'
-                      'Usá + para pegar el UUID del seed o del admin. '
-                      'En compras usaremos ese id con el API.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: PosSaleUi.textMuted,
-                          ),
-                    ),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _list.length,
-                  separatorBuilder: (context, index) => const Divider(
-                    height: 1,
-                    color: PosSaleUi.divider,
-                  ),
-                  itemBuilder: (context, i) {
-                    final s = _list[i];
-                    return ListTile(
-                      title: Text(
-                        s.name,
-                        style: const TextStyle(
-                          color: PosSaleUi.text,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: Text(
-                        s.id,
-                        style: const TextStyle(
-                          color: PosSaleUi.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                      onTap: () => _openForm(existing: s),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (v) {
-                          if (v == 'delete') _confirmDelete(s);
-                        },
-                        itemBuilder: (ctx) => const [
-                          PopupMenuItem(value: 'delete', child: Text('Quitar de la lista')),
-                        ],
-                      ),
-                    );
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: TextField(
+              controller: _search,
+              decoration: const InputDecoration(
+                hintText: 'Buscar por nombre, taxId o teléfono',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              textCapitalization: TextCapitalization.words,
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Incluir dados de baja'),
+            subtitle: const Text(
+              'Lista activos por defecto (`active=true`). Marcá esto para ver inactivos y reactivarlos al editar.',
+            ),
+            value: _includeInactive,
+            onChanged: _loading
+                ? null
+                : (v) {
+                    setState(() => _includeInactive = v);
+                    _load(reset: true);
                   },
-                ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null && _list.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton(
+                                onPressed: () => _load(reset: true),
+                                child: const Text('Reintentar'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : _list.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                'No hay proveedores para esta tienda.\n\n'
+                                'Creá uno con el botón + (POST /suppliers). '
+                                'Cada tienda tiene su propia lista.',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyLarge
+                                    ?.copyWith(color: PosSaleUi.textMuted),
+                              ),
+                            ),
+                          )
+                        : NotificationListener<ScrollNotification>(
+                            onNotification: (n) {
+                              if (n.metrics.pixels >
+                                      n.metrics.maxScrollExtent - 120 &&
+                                  !_loadingMore &&
+                                  _nextCursor != null) {
+                                _load(reset: false);
+                              }
+                              return false;
+                            },
+                            child: ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(0, 0, 0, 88),
+                              itemCount: _list.length + (_loadingMore ? 1 : 0),
+                              separatorBuilder: (context, index) =>
+                                  const Divider(
+                                height: 1,
+                                color: PosSaleUi.divider,
+                              ),
+                              itemBuilder: (context, i) {
+                                if (i >= _list.length) {
+                                  return const Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  );
+                                }
+                                final s = _list[i];
+                                return ListTile(
+                                  title: Text(
+                                    s.name,
+                                    style: const TextStyle(
+                                      color: PosSaleUi.text,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    _subtitleFor(s),
+                                    style: const TextStyle(
+                                      color: PosSaleUi.textMuted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  onTap: () => _openForm(existing: s),
+                                  trailing: PopupMenuButton<String>(
+                                    onSelected: (v) {
+                                      if (v == 'deactivate' && s.active) {
+                                        _confirmDeactivate(s);
+                                      }
+                                    },
+                                    itemBuilder: (ctx) => [
+                                      if (s.active)
+                                        const PopupMenuItem(
+                                          value: 'deactivate',
+                                          child: Text('Dar de baja'),
+                                        ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openForm(),
         icon: const Icon(Icons.add),

@@ -97,10 +97,8 @@ class _InventoryProductDetailScreenState
       });
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessage;
-      if (e.requestId != null) msg = '$msg\n(requestId: ${e.requestId})';
       setState(() {
-        _error = msg;
+        _error = e.userMessageForSupport;
         _loading = false;
       });
     } catch (e) {

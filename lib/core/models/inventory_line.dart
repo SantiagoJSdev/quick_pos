@@ -37,6 +37,30 @@ class InventoryLine {
     this.product,
   });
 
+  /// Producto activo en catálogo sin fila en `GET /inventory` (aún sin movimientos).
+  /// `id` vacío distingue de líneas servidor; el detalle B2 resuelve por `productId`.
+  factory InventoryLine.syntheticZeroStock({
+    required String productId,
+    required String sku,
+    required String name,
+    String? barcode,
+  }) {
+    return InventoryLine(
+      id: '',
+      productId: productId,
+      quantity: '0',
+      reserved: '0',
+      product: InventoryProductSummary(
+        id: productId,
+        sku: sku,
+        name: name,
+        barcode: barcode,
+      ),
+    );
+  }
+
+  bool get isSyntheticInventoryRow => id.isEmpty;
+
   final String id;
   final String productId;
   final String quantity;

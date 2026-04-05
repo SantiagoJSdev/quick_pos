@@ -141,7 +141,7 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
                 if (snap.hasError) {
                   final err = snap.error;
                   final msg = err is ApiError
-                      ? err.userMessage
+                      ? err.userMessageForSupport
                       : err.toString();
                   return Padding(
                     padding: const EdgeInsets.all(24),
@@ -530,7 +530,7 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
       if (!mounted) return;
       String msg = e.toString();
       if (e is ApiError) {
-        msg = e.userMessage;
+        msg = e.userMessageForSupport;
         if (e.statusCode == 400) {
           msg =
               '$msg\n(Rango máximo 31 días; fechas en zona de la tienda — ver documentación.)';

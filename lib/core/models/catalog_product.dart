@@ -42,32 +42,45 @@ class CatalogProduct {
     );
   }
 
+  /// `POST /products` — `docs/BACKEND_PRODUCT_SKU_BARCODE.md`: omitir `sku` vacío para que el backend asigne `SKU-000xxx`.
   Map<String, dynamic> toCreateBody() {
-    return {
-      'sku': sku,
+    final m = <String, dynamic>{
       'name': name,
       'price': price,
       'cost': cost,
       'currency': currency,
-      if (barcode != null && barcode!.trim().isNotEmpty) 'barcode': barcode!.trim(),
-      if (type != null && type!.isNotEmpty) 'type': type,
-      if (unit != null && unit!.trim().isNotEmpty) 'unit': unit!.trim(),
-      if (description != null && description!.trim().isNotEmpty)
-        'description': description!.trim(),
     };
+    final skuTrim = sku.trim();
+    if (skuTrim.isNotEmpty) {
+      m['sku'] = skuTrim;
+    }
+    final bc = barcode?.trim();
+    if (bc != null && bc.isNotEmpty) {
+      m['barcode'] = bc;
+    }
+    if (type != null && type!.isNotEmpty) m['type'] = type;
+    if (unit != null && unit!.trim().isNotEmpty) m['unit'] = unit!.trim();
+    if (description != null && description!.trim().isNotEmpty) {
+      m['description'] = description!.trim();
+    }
+    return m;
   }
 
+  /// `PATCH /products/:id` — `sku` no puede ir vacío si se envía; `barcode` null limpia el código.
   Map<String, dynamic> toPatchBody() {
+    final skuTrim = sku.trim();
     final m = <String, dynamic>{
-      'sku': sku,
+      'sku': skuTrim,
       'name': name,
       'price': price,
       'cost': cost,
       'currency': currency,
-      if (barcode != null && barcode!.trim().isNotEmpty) 'barcode': barcode!.trim(),
-      if (type != null && type!.isNotEmpty) 'type': type,
-      if (unit != null && unit!.trim().isNotEmpty) 'unit': unit!.trim(),
+      'barcode': (barcode == null || barcode!.trim().isEmpty)
+          ? null
+          : barcode!.trim(),
     };
+    if (type != null && type!.isNotEmpty) m['type'] = type;
+    if (unit != null && unit!.trim().isNotEmpty) m['unit'] = unit!.trim();
     if (description != null) {
       m['description'] =
           description!.trim().isEmpty ? null : description!.trim();

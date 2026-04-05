@@ -243,7 +243,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       if (!mounted) return;
       setState(() {
         _fxPair = null;
-        _fxLoadError = e.userMessage;
+        _fxLoadError = e.userMessageForSupport;
       });
     } catch (e) {
       if (!mounted) return;
@@ -322,7 +322,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       if (!mounted) return;
       setState(() {
         _all = [];
-        _error = e.userMessage;
+        _error = e.userMessageForSupport;
         _loading = false;
       });
       return;
@@ -351,7 +351,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       if (!mounted) return;
       setState(() {
         _settings = null;
-        _contextError = e.userMessage;
+        _contextError = e.userMessageForSupport;
         _fxPair = null;
         _selectedDocumentCurrency = null;
       });
@@ -614,7 +614,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       if (!mounted) return;
       setState(() => _checkoutBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.userMessage)),
+        SnackBar(content: Text(e.userMessageForSupport)),
       );
     } catch (e) {
       if (!mounted) return;

@@ -152,7 +152,7 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: const [],
-      apiMessage: e.userMessage,
+      apiMessage: e.userMessageForSupport,
     );
   } catch (e) {
     return SyncFlushResult(

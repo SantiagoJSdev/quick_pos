@@ -74,7 +74,7 @@ Future<PullSyncResult> pullSyncAdvanceWatermark({
   } on ApiError catch (e) {
     return PullSyncResult(
       ok: false,
-      errorMessage: e.userMessage,
+      errorMessage: e.userMessageForSupport,
     );
   } catch (e) {
     return PullSyncResult(

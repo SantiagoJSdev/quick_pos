@@ -63,7 +63,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ---
 
-## 1) Sprint 1 — Configuración tienda, tasas, inventario, productos, proveedores locales
+## 1) Sprint 1 — Configuración tienda, tasas, inventario, productos, proveedores
 
 ### 1.0 Navegación principal (`MainShell`)
 
@@ -78,9 +78,9 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - [x] Cliente HTTP central (`dio` o `http`) con:
   - [x] Header `X-Store-Id` en (casi) todas las peticiones a `/api/v1/...`.
   - [x] `Content-Type: application/json` en POST/PATCH.
-  - [x] Opcional `X-Request-Id` (UUID o string ≤128) — soportado en `ApiClient`; aún no se genera automático en pantallas.
-  - [x] Parseo de errores `{ statusCode, error, message[], requestId }` y mensaje usable en UI.
-- [ ] Montos enviados al API como **string** decimal (no `double` en JSON) *(pendiente: formularios venta/producto)*.
+  - [x] `X-Request-Id` (UUID v4) — generado **automáticamente** en cada petición en `ApiClient` si no se pasa uno explícito; override opcional por parámetro.
+  - [x] Parseo de errores `{ statusCode, error, message[], requestId }` y mensaje usable en UI (`ApiError.userMessageForSupport` incluye `requestId` del cuerpo M0 cuando existe).
+- [x] Montos enviados al API como **string** decimal (no `double` en JSON) — verificado en producto (`CatalogProduct`), POS (`PosCartLine` + `SaleCheckoutPayload`), ajustes, compras, devoluciones y colas sync.
 - [x] Tema Material 3 con primary **#FF6D00** y secundarios según guía (§6 implementación Flutter).
 
 ### 1.2 Módulo configuración (empresa / tienda)
@@ -97,20 +97,20 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - [x] **B2** Detalle stock: `GET /api/v1/inventory/{productId}` (404 → sin ficha aún; se muestra línea de la lista); `GET /api/v1/inventory/movements?productId=&limit=` — pantalla al tocar un ítem en **Stock** (`InventoryProductDetailScreen`).
 - [x] **B3** Ajuste stock: `POST /api/v1/inventory/adjustments` — `InventoryAdjustmentScreen` desde detalle B2 (`IN_ADJUST` / `OUT_ADJUST`, `quantity` string, `reason` obligatorio en UI, `unitCostFunctional` solo en entradas, **`opId`** vía `ClientMutationId` — reintento con mismo id; al editar el formulario tras fallo, nuevo `opId`). Payload sync alineado: `InventoryAdjustPayloadBuilder` (`lib/core/sync/inventory_adjust_payload_builder.dart`). **Sin red / cola:** checklist explícita en `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` § “Punto de implementación: guardar sin red en B3”.
 - [x] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); cabecera `X-Catalog-Source` en UI debug opcional *(no implementada aún)*.
-- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku, name, price, currency, cost, type, unit, description; **barcode** con switch “Permitir sin código de barras” para excepción solo-teclado; montos como **string** en JSON).
+- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku opcional en alta → backend `SKU-000xxx` si se omite; **barcode** opcional/único; sin copiar barras→SKU salvo botón explícito; PATCH con `barcode: null` para quitar). Contrato: `docs/BACKEND_PRODUCT_SKU_BARCODE.md` + `CatalogProduct.toCreateBody` / `toPatchBody`.
 - [x] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (menú del ítem en catálogo; política `PRODUCT_SOFT_DELETE_POLICY`).
 - [x] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
 - [x] **UX inventario — contador**: texto guía del módulo muestra **N líneas** (Stock) / **N productos** (Catálogo) tras cada carga (`onLoadedCount` en tabs).
 
-### 1.4 Proveedores (sin API)
+### 1.4 Proveedores (REST por tienda)
 
-- [x] **C1** Lista proveedores **solo local** (`LocalPrefs` JSON `local_suppliers_v1`): nombre + UUID — `SuppliersListScreen`.
-- [x] **C2** Añadir/editar proveedor local: `SupplierFormScreen` (UUID formato estándar, pegar desde seed/Postman); ayuda de compras futuras; quitar de lista desde menú.
+- [x] **C1** Lista `GET /suppliers` con búsqueda `q`, paginación `nextCursor`, filtro activos / incluir dados de baja — `SuppliersListScreen` + `SuppliersApi`.
+- [x] **C2** Alta `POST /suppliers` y edición `PATCH` (campos opcionales, `taxId`, reactivar con `active: true`); baja `DELETE` (soft) — `SupplierFormScreen`.
 
 ### 1.5 Criterios de cierre Sprint 1
 
 - [ ] Ningún endpoint inventado; todo alineado a `FRONTEND_INTEGRATION_CONTEXT.md`.
-- [ ] Errores API muestran `message` y se puede copiar o ver `requestId` para soporte.
+- [x] Errores API: `ApiError.userMessage` + `requestId` en pie vía `userMessageForSupport`; cabecera `X-Request-Id` en cada request para correlación en logs.
 - [ ] Documentos de contrato actualizados en repo si el backend cambia (copiar de nuevo a `docs/backend/` si usas esa carpeta).
 
 ---
@@ -152,7 +152,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 - [x] `POST /api/v1/purchases` con `supplierId`, `documentCurrencyCode`, `lines[]`, `fxSnapshot` — `PurchasesApi` + `PurchaseReceiveScreen` (Proveedores → recepción); sin red → cola `PURCHASE_RECEIVE` + `sync/push`.
 - [x] `GET /api/v1/purchases/{id}` — `PurchasesApi.getPurchase` *(pantalla de detalle dedicada pendiente si se desea)*.
-- [x] Proveedor: UUID válido (seed o lista local `local_suppliers_v1`); no asumir `GET /suppliers` hasta que exista.
+- [x] Proveedor: `supplierId` de `GET/POST /suppliers` de la misma tienda y activo; 400 si inactivo en `POST /purchases` — mensaje en UI. Ver `docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`.
 
 ### 3.2 Devoluciones de venta
 
@@ -171,7 +171,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 3.4 Lectura catálogo / Mongo (referencia)
 
-- [ ] Entender eventual consistency `products_read` vs Postgres (`MONGO_PRODUCTS_READ.md`); no reinterpretar ventas cerradas con tasa del día.
+- [x] Criterio app: **no** se recalculan ventas cerradas con la tasa del día; listados de catálogo/stock vienen de REST y pueden eventualmente diferir de Postgres si el backend usa lectura Mongo (`MONGO_PRODUCTS_READ.md` — lectura obligatoria para equipo).
 
 ---
 

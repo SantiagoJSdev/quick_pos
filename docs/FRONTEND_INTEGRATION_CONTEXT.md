@@ -42,7 +42,7 @@ Actualizado con **multi-moneda (Venezuela)** y el stack actual (Postgres, outbox
 
 - `POST /api/v1/purchases` — recepción de mercancía: `supplierId` (UUID), `lines[]` (`productId`, `quantity`, `unitCost` en moneda documento), opcional `id` (idempotencia), `documentCurrencyCode`, `fxSnapshot` (misma forma que ventas). Crea `Purchase` estado `RECEIVED`, `dateReceived` = ahora, movimientos `IN_PURCHASE` y actualiza costo medio funcional del inventario.
 - `GET /api/v1/purchases/:id` — detalle con líneas y proveedor.
-- Proveedores: el seed crea un `Supplier` por defecto si la tabla está vacía; **no hay** `GET /suppliers` ni CRUD en API. Para `POST /purchases` hace falta un `supplierId` (UUID) obtenido de seed, Prisma Studio o admin. La app Flutter puede guardar proveedores **solo en local** hasta que exista endpoint.
+- Proveedores (por tienda, `X-Store-Id`): `GET/POST/PATCH/DELETE /api/v1/suppliers` — listado con `q`, `active`, `cursor`; alta devuelve `id`; `DELETE` = baja lógica (`active: false`). `POST /purchases` exige `supplierId` de **esa** tienda y **activo** (400 si inactivo). Contrato: `docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`. La app Flutter usa REST (sin UUID manual).
 
 **Devoluciones de venta (M6):**
 

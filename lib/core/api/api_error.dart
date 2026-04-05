@@ -17,6 +17,13 @@ class ApiError implements Exception {
   String get userMessage =>
       messages.isEmpty ? error : messages.join('\n');
 
+  /// Texto para UI / soporte: incluye `requestId` del cuerpo M0 si el servidor lo devolvió.
+  String get userMessageForSupport {
+    final base = userMessage;
+    if (requestId == null || requestId!.isEmpty) return base;
+    return '$base\n(requestId: $requestId)';
+  }
+
   static ApiError? tryParse(int httpStatus, String body) {
     try {
       final map = jsonDecode(body) as Map<String, dynamic>;

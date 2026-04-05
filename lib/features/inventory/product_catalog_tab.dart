@@ -68,8 +68,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessage;
-      if (e.requestId != null) msg = '$msg\n(requestId: ${e.requestId})';
+      final msg = e.userMessageForSupport;
       setState(() {
         _all = [];
         _error = msg;
@@ -182,7 +181,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     } on ApiError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.userMessage)),
+        SnackBar(content: Text(e.userMessageForSupport)),
       );
     }
   }

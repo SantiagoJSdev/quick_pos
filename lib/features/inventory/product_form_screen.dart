@@ -69,6 +69,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
+  void _copyBarcodeToSku() {
+    final b = _barcode.text.trim();
+    if (b.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cargá o escaneá un código de barras primero.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _sku.text = b);
+  }
+
   Future<void> _scanBarcodeField() async {
     if (!BarcodeScannerScreen.isSupported) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -100,14 +113,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   Future<void> _save() async {
     setState(() => _error = null);
-    final sku = _sku.text.trim();
+    final skuInput = _sku.text.trim();
     final name = _name.text.trim();
     final barcode = _barcode.text.trim();
     final price = _price.text.trim();
     final cost = _cost.text.trim();
 
-    if (sku.isEmpty || name.isEmpty) {
-      setState(() => _error = 'SKU y nombre son obligatorios.');
+    if (name.isEmpty) {
+      setState(() => _error = 'El nombre es obligatorio.');
       return;
     }
     if (barcode.isEmpty && !_allowNoBarcode) {
@@ -123,9 +136,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       return;
     }
 
+    // Alta: SKU vacío → no se envía; backend asigna SKU-000xxx (`BACKEND_PRODUCT_SKU_BARCODE.md`).
+    // Edición: PATCH exige SKU no vacío si se envía → conservamos el actual si el campo quedó vacío.
+    final skuForModel = widget.isEdit
+        ? (skuInput.isNotEmpty ? skuInput : widget.existing!.sku)
+        : skuInput;
+    if (widget.isEdit && skuForModel.trim().isEmpty) {
+      setState(() => _error = 'El SKU no puede quedar vacío al editar.');
+      return;
+    }
+
     final product = CatalogProduct(
       id: widget.existing?.id ?? '',
-      sku: sku,
+      sku: skuForModel,
       name: name,
       barcode: barcode.isEmpty ? null : barcode,
       description: _description.text.trim().isEmpty
@@ -148,23 +171,29 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           product.toPatchBody(),
         );
       } else {
-        await widget.productsApi.createProduct(
+        final created = await widget.productsApi.createProduct(
           widget.storeId,
           product.toCreateBody(),
         );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Producto creado · SKU ${created.sku}',
+            ),
+          ),
+        );
+        Navigator.of(context).pop(true);
+        return;
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(widget.isEdit ? 'Producto actualizado' : 'Producto creado'),
-        ),
+        const SnackBar(content: Text('Producto actualizado')),
       );
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessage;
-      if (e.requestId != null) msg = '$msg\n(requestId: ${e.requestId})';
-      setState(() => _error = msg);
+      setState(() => _error = e.userMessageForSupport);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -184,9 +213,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         children: [
           TextField(
             controller: _sku,
-            decoration: const InputDecoration(
-              labelText: 'SKU',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: 'SKU (referencia interna)',
+              helperText: widget.isEdit
+                  ? 'Obligatorio al guardar. Independiente del código de barras salvo que uses el botón de abajo.'
+                  : 'Opcional al crear: vacío → el servidor asigna SKU-000001, … No se copia del barras solo; usá «Usar código de barras como SKU» si querés el mismo valor.',
+              border: const OutlineInputBorder(),
             ),
             enabled: !_loading,
           ),
@@ -204,8 +236,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           TextField(
             controller: _barcode,
             decoration: InputDecoration(
-              labelText: 'Código de barras',
-              hintText: 'Escanear en POS y en Inventario (B7)',
+              labelText: 'Código de barras (EAN / UPC)',
+              hintText: 'Lo que escaneás en caja; no es lo mismo que el SKU salvo que elijas igualarlo',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.qr_code_scanner),
@@ -215,6 +247,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             keyboardType: TextInputType.text,
             enabled: !_loading,
+          ),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: _loading ? null : _copyBarcodeToSku,
+              icon: const Icon(Icons.link, size: 20),
+              label: const Text('Usar código de barras como SKU'),
+            ),
           ),
           SwitchListTile(
             title: const Text('Permitir sin código de barras'),

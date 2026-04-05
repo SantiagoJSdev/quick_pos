@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/models/catalog_product.dart';
+import 'barcode_scanner_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 
 /// Consulta rápida de precio de lista (catálogo) sin agregar al ticket.
@@ -40,6 +41,20 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
     super.dispose();
   }
 
+  Future<void> _scanSearch() async {
+    if (!BarcodeScannerScreen.isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El escáner solo está disponible en Android e iOS.'),
+        ),
+      );
+      return;
+    }
+    final code = await BarcodeScannerScreen.open(context);
+    if (!mounted || code == null || code.isEmpty) return;
+    setState(() => _search.text = code);
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -58,7 +73,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.userMessage;
+        _error = e.userMessageForSupport;
         _loading = false;
       });
     } catch (e) {
@@ -114,6 +129,12 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                   hintStyle: const TextStyle(color: PosSaleUi.textFaint),
                   prefixIcon:
                       const Icon(Icons.search, color: PosSaleUi.textMuted),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner,
+                        color: PosSaleUi.primary),
+                    tooltip: 'Escanear código de barras o QR del producto',
+                    onPressed: _loading ? null : _scanSearch,
+                  ),
                   filled: true,
                   fillColor: PosSaleUi.surface3,
                   border: OutlineInputBorder(

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
 import 'api_error.dart';
@@ -12,13 +13,18 @@ class ApiClient {
 
   final http.Client _client;
   final String _baseUrl;
+  static const _uuid = Uuid();
+
+  /// UUID v4 por petición si no se pasa uno explícito (`FRONTEND_INTEGRATION_CONTEXT.md`).
+  String _effectiveRequestId(String? requestId) =>
+      (requestId != null && requestId.isNotEmpty) ? requestId : _uuid.v4();
 
   Map<String, String> _headers(String storeId, {String? requestId}) {
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'X-Store-Id': storeId,
-      if (requestId != null && requestId.isNotEmpty) 'X-Request-Id': requestId,
+      'X-Request-Id': _effectiveRequestId(requestId),
     };
   }
 
@@ -127,6 +133,19 @@ class ApiClient {
       _uri(path),
       headers: _headers(storeId, requestId: requestId),
       body: body == null ? null : jsonEncode(body),
+    );
+    return _decodeSuccess(res);
+  }
+
+  /// `DELETE` con cuerpo JSON (p. ej. soft delete que devuelve el recurso).
+  Future<Map<String, dynamic>> deleteJson(
+    String path,
+    String storeId, {
+    String? requestId,
+  }) async {
+    final res = await _client.delete(
+      _uri(path),
+      headers: _headers(storeId, requestId: requestId),
     );
     return _decodeSuccess(res);
   }

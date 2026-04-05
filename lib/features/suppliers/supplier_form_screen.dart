@@ -1,27 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../../core/models/local_supplier.dart';
-import '../../core/storage/local_prefs.dart';
+import '../../core/api/api_error.dart';
+import '../../core/api/suppliers_api.dart';
+import '../../core/models/supplier.dart';
 
-final _uuidPattern = RegExp(
-  r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
-);
-
-/// C2 — alta o edición de nombre (UUID fijo en edición).
+/// Alta `POST /suppliers` o edición `PATCH /suppliers/:id` (incl. reactivar con `active`).
 class SupplierFormScreen extends StatefulWidget {
   const SupplierFormScreen({
     super.key,
-    required this.localPrefs,
+    required this.storeId,
+    required this.suppliersApi,
     this.existing,
-    this.existingIds,
   });
 
-  final LocalPrefs localPrefs;
-  final LocalSupplier? existing;
-
-  /// IDs ya usados (para validar duplicado en alta).
-  final Set<String>? existingIds;
+  final String storeId;
+  final SuppliersApi suppliersApi;
+  final Supplier? existing;
 
   bool get isEdit => existing != null;
 
@@ -31,7 +25,12 @@ class SupplierFormScreen extends StatefulWidget {
 
 class _SupplierFormScreenState extends State<SupplierFormScreen> {
   late final TextEditingController _name;
-  late final TextEditingController _id;
+  late final TextEditingController _phone;
+  late final TextEditingController _email;
+  late final TextEditingController _address;
+  late final TextEditingController _taxId;
+  late final TextEditingController _notes;
+  bool _active = true;
   bool _saving = false;
   String? _error;
 
@@ -40,61 +39,84 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
     super.initState();
     final e = widget.existing;
     _name = TextEditingController(text: e?.name ?? '');
-    _id = TextEditingController(text: e?.id ?? '');
+    _phone = TextEditingController(text: e?.phone ?? '');
+    _email = TextEditingController(text: e?.email ?? '');
+    _address = TextEditingController(text: e?.address ?? '');
+    _taxId = TextEditingController(text: e?.taxId ?? '');
+    _notes = TextEditingController(text: e?.notes ?? '');
+    _active = e?.active ?? true;
   }
 
   @override
   void dispose() {
     _name.dispose();
-    _id.dispose();
+    _phone.dispose();
+    _email.dispose();
+    _address.dispose();
+    _taxId.dispose();
+    _notes.dispose();
     super.dispose();
+  }
+
+  String? _optOrNull(TextEditingController c) {
+    final t = c.text.trim();
+    return t.isEmpty ? null : t;
+  }
+
+  Map<String, dynamic> _createBody() {
+    final body = <String, dynamic>{'name': _name.text.trim()};
+    final p = _optOrNull(_phone);
+    final em = _optOrNull(_email);
+    final ad = _optOrNull(_address);
+    final tx = _optOrNull(_taxId);
+    final no = _optOrNull(_notes);
+    if (p != null) body['phone'] = p;
+    if (em != null) body['email'] = em;
+    if (ad != null) body['address'] = ad;
+    if (tx != null) body['taxId'] = tx;
+    if (no != null) body['notes'] = no;
+    return body;
+  }
+
+  Map<String, dynamic> _editBody() {
+    return <String, dynamic>{
+      'name': _name.text.trim(),
+      'phone': _optOrNull(_phone),
+      'email': _optOrNull(_email),
+      'address': _optOrNull(_address),
+      'taxId': _optOrNull(_taxId),
+      'notes': _optOrNull(_notes),
+      'active': _active,
+    };
   }
 
   Future<void> _save() async {
     setState(() => _error = null);
     final name = _name.text.trim();
-    final id = _id.text.trim();
     if (name.isEmpty) {
       setState(() => _error = 'El nombre es obligatorio.');
       return;
     }
-    if (!widget.isEdit) {
-      if (id.isEmpty) {
-        setState(() => _error = 'Pegá el UUID del proveedor (seed / Postman / admin).');
-        return;
-      }
-      if (!_uuidPattern.hasMatch(id)) {
-        setState(() => _error = 'El UUID no tiene formato válido (ej. 550e8400-e29b-41d4-a716-446655440000).');
-        return;
-      }
-      final taken = widget.existingIds?.contains(id.toLowerCase()) ?? false;
-      if (taken) {
-        setState(() => _error = 'Ya existe un proveedor con ese UUID.');
-        return;
-      }
-    }
 
     setState(() => _saving = true);
     try {
-      final list = await widget.localPrefs.getLocalSuppliers();
-      final supplier = LocalSupplier(
-        id: widget.isEdit ? widget.existing!.id : id,
-        name: name,
-      );
       if (widget.isEdit) {
-        final i = list.indexWhere((s) => s.id == widget.existing!.id);
-        if (i >= 0) {
-          list[i] = supplier;
-        } else {
-          list.add(supplier);
-        }
+        await widget.suppliersApi.patchSupplier(
+          widget.storeId,
+          widget.existing!.id,
+          _editBody(),
+        );
       } else {
-        list.add(supplier);
+        await widget.suppliersApi.createSupplier(
+          widget.storeId,
+          _createBody(),
+        );
       }
-      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      await widget.localPrefs.saveLocalSuppliers(list);
       if (!mounted) return;
       Navigator.of(context).pop(true);
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.userMessageForSupport);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -115,34 +137,75 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
           TextField(
             controller: _name,
             decoration: const InputDecoration(
-              labelText: 'Nombre',
+              labelText: 'Nombre *',
               border: OutlineInputBorder(),
             ),
             textCapitalization: TextCapitalization.words,
             enabled: !_saving,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           TextField(
-            controller: _id,
+            controller: _phone,
             decoration: const InputDecoration(
-              labelText: 'UUID del proveedor',
-              hintText: 'Pegar desde seed, Prisma Studio o Postman',
+              labelText: 'Teléfono',
               border: OutlineInputBorder(),
             ),
-            enabled: !widget.isEdit && !_saving,
-            autocorrect: false,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\-]')),
-            ],
+            keyboardType: TextInputType.phone,
+            enabled: !_saving,
           ),
-          const SizedBox(height: 16),
-          Text(
-            'No hay API de proveedores: este UUID es el que usará la app en '
-            'compras (`POST /purchases`) cuando implementemos ese módulo.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _email,
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.emailAddress,
+            enabled: !_saving,
           ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _address,
+            decoration: const InputDecoration(
+              labelText: 'Dirección',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 2,
+            enabled: !_saving,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _taxId,
+            decoration: const InputDecoration(
+              labelText: 'Identificador fiscal (taxId)',
+              border: OutlineInputBorder(),
+            ),
+            enabled: !_saving,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _notes,
+            decoration: const InputDecoration(
+              labelText: 'Notas',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 3,
+            enabled: !_saving,
+          ),
+          if (widget.isEdit) ...[
+            const SizedBox(height: 16),
+            SwitchListTile(
+              title: const Text('Activo'),
+              subtitle: const Text(
+                'Si está desactivado, no podrás usarlo en recepción de compra '
+                'hasta reactivarlo.',
+              ),
+              value: _active,
+              onChanged: _saving
+                  ? null
+                  : (v) => setState(() => _active = v),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 16),
             Text(

@@ -88,10 +88,7 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
       if (!mounted) return;
       setState(() {
         _data = null;
-        _error = e.userMessage;
-        if (e.requestId != null) {
-          _error = '${_error!}\n(requestId: ${e.requestId})';
-        }
+        _error = e.userMessageForSupport;
         _loading = false;
       });
     } catch (e) {

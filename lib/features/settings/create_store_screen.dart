@@ -188,7 +188,7 @@ class _CreateStoreScreenState extends State<CreateStoreScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  'Tienda creada, pero falló la tasa inicial: ${e.userMessage}',
+                  'Tienda creada, pero falló la tasa inicial: ${e.userMessageForSupport}',
                 ),
                 duration: const Duration(seconds: 6),
               ),
@@ -201,10 +201,7 @@ class _CreateStoreScreenState extends State<CreateStoreScreen> {
       Navigator.of(context).pop(_storeId);
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessage;
-      if (e.requestId != null) {
-        msg = '$msg\n(requestId: ${e.requestId})';
-      }
+      var msg = e.userMessageForSupport;
       if (e.statusCode == 403) {
         msg =
             '$msg\n\nOnboarding desactivado en servidor: definid '
