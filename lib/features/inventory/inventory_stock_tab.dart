@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/inventory_line.dart';
 import '../sale/barcode_scanner_screen.dart';
@@ -17,6 +20,7 @@ class InventoryStockTab extends StatefulWidget {
     required this.inventoryApi,
     required this.productsApi,
     required this.localPrefs,
+    required this.catalogInvalidationBus,
     this.onLoadedCount,
   });
 
@@ -24,6 +28,7 @@ class InventoryStockTab extends StatefulWidget {
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
   final LocalPrefs localPrefs;
+  final CatalogInvalidationBus catalogInvalidationBus;
 
   /// Total de líneas tras cada carga (para contador en el módulo).
   final ValueChanged<int>? onLoadedCount;
@@ -42,14 +47,20 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
+    widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
     _load();
   }
 
   @override
   void dispose() {
+    widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onCatalogInvalidated() {
+    if (mounted) unawaited(_load());
   }
 
   void _onSearchChanged() => setState(() {});
@@ -266,6 +277,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                   storeId: widget.storeId,
                   inventoryApi: widget.inventoryApi,
                   localPrefs: widget.localPrefs,
+                  catalogInvalidationBus: widget.catalogInvalidationBus,
                   initialLine: line,
                 ),
               ),

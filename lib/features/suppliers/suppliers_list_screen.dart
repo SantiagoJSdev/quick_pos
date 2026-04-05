@@ -1,14 +1,38 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api/exchange_rates_api.dart';
+import '../../core/api/products_api.dart';
+import '../../core/api/purchases_api.dart';
+import '../../core/api/stores_api.dart';
+import '../../core/api/sync_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/local_supplier.dart';
 import '../../core/storage/local_prefs.dart';
+import 'purchase_receive_screen.dart';
 import 'supplier_form_screen.dart';
 
 /// C1 — lista local de proveedores (nombre + UUID).
 class SuppliersListScreen extends StatefulWidget {
-  const SuppliersListScreen({super.key, required this.localPrefs});
+  const SuppliersListScreen({
+    super.key,
+    required this.storeId,
+    required this.localPrefs,
+    required this.storesApi,
+    required this.exchangeRatesApi,
+    required this.productsApi,
+    required this.purchasesApi,
+    required this.syncApi,
+    required this.catalogInvalidationBus,
+  });
 
+  final String storeId;
   final LocalPrefs localPrefs;
+  final StoresApi storesApi;
+  final ExchangeRatesApi exchangeRatesApi;
+  final ProductsApi productsApi;
+  final PurchasesApi purchasesApi;
+  final SyncApi syncApi;
+  final CatalogInvalidationBus catalogInvalidationBus;
 
   @override
   State<SuppliersListScreen> createState() => _SuppliersListScreenState();
@@ -50,6 +74,24 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
     if (ok == true && mounted) await _load();
   }
 
+  Future<void> _openPurchaseReceive() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (ctx) => PurchaseReceiveScreen(
+          storeId: widget.storeId,
+          localPrefs: widget.localPrefs,
+          storesApi: widget.storesApi,
+          exchangeRatesApi: widget.exchangeRatesApi,
+          productsApi: widget.productsApi,
+          purchasesApi: widget.purchasesApi,
+          syncApi: widget.syncApi,
+          catalogInvalidationBus: widget.catalogInvalidationBus,
+        ),
+      ),
+    );
+    if (ok == true && mounted) await _load();
+  }
+
   Future<void> _confirmDelete(LocalSupplier s) async {
     final go = await showDialog<bool>(
       context: context,
@@ -80,6 +122,11 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
       appBar: AppBar(
         title: const Text('Proveedores'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: _loading ? null : _openPurchaseReceive,
+            tooltip: 'Recepción / compra',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _load,

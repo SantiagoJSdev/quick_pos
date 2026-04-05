@@ -1,3 +1,4 @@
+import '../catalog/catalog_invalidation_bus.dart';
 import '../storage/local_prefs.dart';
 import '../api/sync_api.dart';
 import 'pending_sales_flush.dart';
@@ -8,11 +9,13 @@ class SyncCycleResult {
   const SyncCycleResult({
     this.pullError,
     this.pullOpsReceived = 0,
+    this.pullCatalogInvalidated = false,
     required this.flush,
   });
 
   final String? pullError;
   final int pullOpsReceived;
+  final bool pullCatalogInvalidated;
   final SyncFlushResult flush;
 }
 
@@ -22,21 +25,25 @@ Future<SyncCycleResult> runSyncCycle({
   required SyncApi syncApi,
   required String deviceId,
   required String appVersion,
+  CatalogInvalidationBus? catalogInvalidation,
   bool doPull = true,
   bool doFlush = true,
 }) async {
   String? pullErr;
   var pullOps = 0;
+  var catalogInv = false;
   if (doPull) {
     final pr = await pullSyncAdvanceWatermark(
       storeId: storeId,
       prefs: prefs,
       syncApi: syncApi,
+      catalogInvalidation: catalogInvalidation,
     );
     if (!pr.ok) {
       pullErr = pr.errorMessage;
     } else {
       pullOps = pr.opsReceived;
+      catalogInv = pr.catalogInvalidated;
     }
   }
 
@@ -53,6 +60,7 @@ Future<SyncCycleResult> runSyncCycle({
   return SyncCycleResult(
     pullError: pullErr,
     pullOpsReceived: pullOps,
+    pullCatalogInvalidated: catalogInv,
     flush: flush,
   );
 }

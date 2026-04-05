@@ -2,7 +2,7 @@ import '../api/api_error.dart';
 import '../api/sync_api.dart';
 import '../storage/local_prefs.dart';
 
-/// Resultado de `sync/push` sobre la cola local (ventas + ajustes).
+/// Resultado de `sync/push` sobre la cola local (ventas, ajustes, compras).
 class SyncFlushResult {
   const SyncFlushResult({
     required this.sentCount,
@@ -22,7 +22,7 @@ class SyncFlushResult {
 /// Compatibilidad con código que aún nombre el tipo anterior.
 typedef PendingSalesFlushResult = SyncFlushResult;
 
-/// Mezcla `SALE` e `INVENTORY_ADJUST` pendientes (orden por `timestamp`), hasta 200 ops.
+/// Mezcla `SALE`, `INVENTORY_ADJUST` y `PURCHASE_RECEIVE` pendientes (orden por `timestamp`), hasta 200 ops.
 Future<SyncFlushResult> flushPendingSyncOpsForStore({
   required String storeId,
   required LocalPrefs prefs,
@@ -32,14 +32,18 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
 }) async {
   final allSales = await prefs.loadPendingSales();
   final allAdjusts = await prefs.loadPendingInventoryAdjusts();
+  final allPurchases = await prefs.loadPendingPurchaseReceives();
 
   final saleQueue =
       allSales.where((e) => e.storeId == storeId).toList(growable: false);
   final adjQueue = allAdjusts
       .where((e) => e.storeId == storeId)
       .toList(growable: false);
+  final purchaseQueue = allPurchases
+      .where((e) => e.storeId == storeId)
+      .toList(growable: false);
 
-  if (saleQueue.isEmpty && adjQueue.isEmpty) {
+  if (saleQueue.isEmpty && adjQueue.isEmpty && purchaseQueue.isEmpty) {
     return const SyncFlushResult(sentCount: 0, removedOpIds: []);
   }
 
@@ -58,6 +62,14 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
       'opType': 'INVENTORY_ADJUST',
       'timestamp': e.opTimestampIso,
       'payload': e.payload,
+    });
+  }
+  for (final e in purchaseQueue) {
+    merged.add({
+      'opId': e.opId,
+      'opType': 'PURCHASE_RECEIVE',
+      'timestamp': e.opTimestampIso,
+      'payload': <String, dynamic>{'purchase': e.purchase},
     });
   }
   merged.sort(
@@ -106,8 +118,12 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     final remainingAdj = allAdjusts
         .where((e) => !remove.contains(e.opId))
         .toList(growable: false);
+    final remainingPurchases = allPurchases
+        .where((e) => !remove.contains(e.opId))
+        .toList(growable: false);
     await prefs.savePendingSales(remainingSales);
     await prefs.savePendingInventoryAdjusts(remainingAdj);
+    await prefs.savePendingPurchaseReceives(remainingPurchases);
 
     return SyncFlushResult(
       sentCount: batch.length,

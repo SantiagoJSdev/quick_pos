@@ -157,10 +157,10 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 - Cola offline / rehidratación: **solo** `sync/push` — `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (decisión de arquitectura cerrada).
 - [x] `POST /api/v1/sync/push`: batch ≤200 ops; `deviceId`; `opId` por op; `acked` / `skipped` / errores vía `SyncFlushResult` (ops `failed` siguen en cola).
-- [ ] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` en cola; pendiente `PURCHASE_RECEIVE`, `SALE_RETURN`, `NOOP` (pruebas).
+- [ ] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` en cola; pendiente `PURCHASE_RECEIVE`, `SALE_RETURN`. `NOOP` directo: `submitSyncNoop` (`lib/core/sync/sync_noop.dart`) sin cola.
 - [x] `GET /api/v1/sync/pull`: `pullSyncAdvanceWatermark` — bucle `hasMore`, guarda `toVersion` en `sync_pull_since_v1`.
 - [x] Watermark pull ≠ `acked.serverVersion` del push: solo se usa el primero en `lastServerVersion` del body de push (`LocalPrefs.getSyncPullLastVersion`).
-- [ ] Pull: aplicar `PRODUCT_CREATED` | `PRODUCT_UPDATED` | `PRODUCT_DEACTIVATED` a catálogo local / SQLite (hoy: solo avanza watermark; catálogo se refresca con REST en pantallas).
+- [x] Pull `PRODUCT_*`: `summarizePullOpsProductChanges` + `CatalogInvalidationBus` → refetch REST en **Venta**, **Stock** y **Catálogo** (invalidación agresiva; sin SQLite). Ver `lib/core/catalog/catalog_invalidation_bus.dart`.
 
 ### 3.4 Lectura catálogo / Mongo (referencia)
 

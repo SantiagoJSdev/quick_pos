@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import 'inventory_stock_tab.dart';
 import 'product_catalog_tab.dart';
@@ -14,12 +15,14 @@ class InventoryModuleScreen extends StatefulWidget {
     required this.inventoryApi,
     required this.productsApi,
     required this.localPrefs,
+    required this.catalogInvalidationBus,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
   final LocalPrefs localPrefs;
+  final CatalogInvalidationBus catalogInvalidationBus;
 
   @override
   State<InventoryModuleScreen> createState() => _InventoryModuleScreenState();
@@ -90,6 +93,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   inventoryApi: widget.inventoryApi,
                   productsApi: widget.productsApi,
                   localPrefs: widget.localPrefs,
+                  catalogInvalidationBus: widget.catalogInvalidationBus,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _stockLineCount = n);
                   },
@@ -97,6 +101,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                 ProductCatalogTab(
                   storeId: widget.storeId,
                   productsApi: widget.productsApi,
+                  catalogInvalidationBus: widget.catalogInvalidationBus,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _catalogProductCount = n);
                   },

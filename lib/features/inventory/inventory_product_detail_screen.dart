@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/models/inventory_line.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
 import 'inventory_adjustment_screen.dart';
@@ -14,12 +17,14 @@ class InventoryProductDetailScreen extends StatefulWidget {
     required this.storeId,
     required this.inventoryApi,
     required this.localPrefs,
+    required this.catalogInvalidationBus,
     required this.initialLine,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
   final LocalPrefs localPrefs;
+  final CatalogInvalidationBus catalogInvalidationBus;
   final InventoryLine initialLine;
 
   String get _productId {
@@ -44,7 +49,18 @@ class _InventoryProductDetailScreenState
   void initState() {
     super.initState();
     _line = widget.initialLine;
+    widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
     _load();
+  }
+
+  void _onCatalogInvalidated() {
+    if (mounted) unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
+    super.dispose();
   }
 
   Future<void> _load() async {

@@ -8,6 +8,7 @@ import '../../core/api/products_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
@@ -42,6 +43,7 @@ class PosSaleScreen extends StatefulWidget {
     required this.exchangeRatesApi,
     required this.salesApi,
     required this.syncApi,
+    required this.catalogInvalidationBus,
     required this.localPrefs,
   });
 
@@ -51,6 +53,7 @@ class PosSaleScreen extends StatefulWidget {
   final ExchangeRatesApi exchangeRatesApi;
   final SalesApi salesApi;
   final SyncApi syncApi;
+  final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
 
   @override
@@ -85,7 +88,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (mounted) setState(() => _terminal = t);
     });
+    widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
     _refreshPendingCount();
+  }
+
+  void _onCatalogInvalidated() {
+    if (!mounted) return;
+    unawaited(_load());
   }
 
   Future<void> _refreshPendingCount() async {
@@ -114,6 +123,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       syncApi: widget.syncApi,
       deviceId: _terminal!.deviceId,
       appVersion: _terminal!.appVersion,
+      catalogInvalidation: widget.catalogInvalidationBus,
       doPull: doPull,
       doFlush: true,
     );
@@ -150,6 +160,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   @override
   void dispose() {
+    widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _search.dispose();
     super.dispose();
   }

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/catalog_product.dart';
 import '../sale/barcode_scanner_screen.dart';
 import 'product_form_screen.dart';
@@ -12,11 +15,13 @@ class ProductCatalogTab extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.productsApi,
+    required this.catalogInvalidationBus,
     this.onLoadedCount,
   });
 
   final String storeId;
   final ProductsApi productsApi;
+  final CatalogInvalidationBus catalogInvalidationBus;
   final ValueChanged<int>? onLoadedCount;
 
   @override
@@ -33,13 +38,19 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
+    widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
     _load();
   }
 
   @override
   void dispose() {
+    widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onCatalogInvalidated() {
+    if (mounted) unawaited(_load());
   }
 
   Future<void> _load() async {
