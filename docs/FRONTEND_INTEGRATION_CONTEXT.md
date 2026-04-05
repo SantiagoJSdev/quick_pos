@@ -30,7 +30,7 @@ Actualizado con **multi-moneda (Venezuela)** y el stack actual (Postgres, outbox
 
 - `GET /api/v1/inventory` — líneas `InventoryItem` de la tienda del header + datos básicos del `product`.
 - `GET /api/v1/inventory/:productId` — una línea; `404` si aún no existe (se crea al primer ajuste).
-- `GET /api/v1/inventory/movements?productId=&limit=` — últimos `StockMovement` (default 100, max 500).
+- `GET /api/v1/inventory/movements?productId=<opcional>&limit=<1-500>` — últimos `StockMovement` de la tienda (`X-Store-Id`); `productId` filtra por producto. **Respuesta:** array JSON **en la raíz** `[ ... ]` sin envelope (Nest); detalle §13.8.1.
 - `POST /api/v1/inventory/adjustments` — cuerpo: `productId`, `type` `IN_ADJUST`|`OUT_ADJUST`, `quantity` (string > 0), opcional `reason`, `unitCostFunctional` (entrada; si falta usa costo medio actual o `Product.cost`), `opId` (idempotencia). Respuesta `{ status: applied|skipped, movementId? }`.
 
 **Ventas (M4):**
@@ -413,6 +413,8 @@ Idempotencia con el mismo `opId` (opcional en body):
 
 Segunda vez: `{ "status": "skipped" }`.
 
+**Cliente Flutter (Quick POS):** en ajustes de inventario la app envía siempre un `opId` (UUID v4) tras pasar validación local: el **mismo** `opId` en reintentos si falla la red; si el usuario **cambia** el formulario tras un fallo, se genera uno **nuevo**. Ver `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md`.
+
 ### 13.8 Lista inventario → `GET /inventory`
 
 Ejemplo de **una línea** (estructura según servicio; incluye producto embebido o join):
@@ -433,6 +435,65 @@ Ejemplo de **una línea** (estructura según servicio; incluye producto embebido
   }
 }
 ```
+
+### 13.8.1 Movimientos → `GET /inventory/movements`
+
+**Ruta:** `GET /api/v1/inventory/movements?productId=<uuid opcional>&limit=<1-500>`  
+**Cabecera:** `X-Store-Id` (igual que el resto de inventario).
+
+**Respuesta 200:** **sin envelope** — el cuerpo es un **array JSON** en la raíz, `[ ... ]` (`List<StockMovement>` en Nest). Los `Decimal` de Prisma serializan como **string**; las fechas como **ISO 8601**.
+
+**Implementación backend (Quick Market API, referencia):**
+
+```ts
+listMovements(storeId: string, productId?: string, limit = 100) {
+  const take = Math.min(500, Math.max(1, limit));
+  return this.prisma.stockMovement.findMany({
+    where: { storeId, ...(productId ? { productId } : {}) },
+    orderBy: { createdAt: 'desc' },
+    take,
+    include: {
+      product: { select: { id: true, sku: true, name: true } },
+    },
+  });
+}
+```
+
+**`type`:** uno de  
+`IN_PURCHASE` | `IN_RETURN` | `IN_ADJUST` | `IN_TRANSFER` | `OUT_SALE` | `OUT_LOSS` | `OUT_ADJUST` | `OUT_TRANSFER`.
+
+**Nulables:** `opId`, `referenceId`, `reason`, `costAtMoment`, `priceAtMoment`, `unitCostFunctional`, `totalCostFunctional` pueden ser `null`.
+
+**`product`:** en este listado **siempre** viene — objeto `{ id, sku, name }`.
+
+Ejemplo **ilustrativo** (un elemento del array):
+
+```json
+[
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "opId": "sync-op-uuid:prod-uuid",
+    "productId": "20000000-0000-4000-8000-000000000002",
+    "storeId": "550e8400-e29b-41d4-a716-446655440001",
+    "type": "OUT_SALE",
+    "quantity": "2",
+    "costAtMoment": null,
+    "priceAtMoment": "91.25",
+    "unitCostFunctional": "2.5",
+    "totalCostFunctional": "5",
+    "referenceId": "venta-uuid-si-aplica",
+    "reason": null,
+    "createdAt": "2026-04-04T18:30:00.000Z",
+    "product": {
+      "id": "20000000-0000-4000-8000-000000000002",
+      "sku": "SKU-001",
+      "name": "Arroz 1kg"
+    }
+  }
+]
+```
+
+**Cliente Flutter:** tras `jsonDecode`, la raíz debe ser `List<dynamic>`; `ApiClient.getJsonList` ya soporta array en raíz. Mapear **camelCase** en `StockMovement.fromJson` (cantidades e importes como `String`). Si un proxy u otro cliente envolviera la respuesta, adaptar solo la capa que llama a `getJsonList` (p. ej. `envelope['data']`); **el backend Nest actual no envuelve**.
 
 ### 13.9 POS / Sprint 2 → `POST /sales`
 

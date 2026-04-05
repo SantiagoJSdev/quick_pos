@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/api/exchange_rates_api.dart';
+import '../../core/api/inventory_api.dart';
+import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
+import '../inventory/inventory_module_screen.dart';
 import '../settings/store_dashboard_screen.dart';
 import 'placeholder_module_screen.dart';
 
-/// Navegación principal: **Inicio** (tienda + tasas) e ítems placeholder hasta B1 / POS / C1.
+/// Navegación principal: **Inicio**, **Inventario** (Stock B1 + Catálogo B4–B6), placeholders POS / proveedores.
 ///
 /// Usa [IndexedStack] para conservar el estado de cada pestaña al cambiar.
 class MainShell extends StatefulWidget {
@@ -14,12 +17,16 @@ class MainShell extends StatefulWidget {
     required this.storeId,
     required this.storesApi,
     required this.exchangeRatesApi,
+    required this.inventoryApi,
+    required this.productsApi,
     required this.onChangeStore,
   });
 
   final String storeId;
   final StoresApi storesApi;
   final ExchangeRatesApi exchangeRatesApi;
+  final InventoryApi inventoryApi;
+  final ProductsApi productsApi;
   final VoidCallback onChangeStore;
 
   @override
@@ -41,12 +48,10 @@ class _MainShellState extends State<MainShell> {
             exchangeRatesApi: widget.exchangeRatesApi,
             onChangeStore: widget.onChangeStore,
           ),
-          const PlaceholderModuleScreen(
-            title: 'Inventario',
-            message:
-                'Aquí irá la lista de stock (B1), detalle y ajustes. '
-                'Desde el menú inferior podés volver a Inicio.',
-            icon: Icons.inventory_2_outlined,
+          InventoryModuleScreen(
+            storeId: widget.storeId,
+            inventoryApi: widget.inventoryApi,
+            productsApi: widget.productsApi,
           ),
           const PlaceholderModuleScreen(
             title: 'Punto de venta',

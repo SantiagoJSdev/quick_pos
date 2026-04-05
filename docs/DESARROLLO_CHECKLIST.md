@@ -67,7 +67,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 1.0 Navegación principal (`MainShell`)
 
-- [x] Menú inferior **NavigationBar**: **Inicio** (tienda + tasas), **Inventario**, **Venta** (POS), **Proveedores** — `IndexedStack` para no perder estado al cambiar de pestaña; módulos B1 / POS / C1 sustituyen los placeholders en `lib/features/shell/`.
+- [x] Menú inferior **NavigationBar**: **Inicio** (tienda + tasas), **Inventario** (`InventoryModuleScreen`: **Stock** B1 + **Catálogo** B4–B6 con `SegmentedButton`), **Venta** (POS), **Proveedores** — `IndexedStack`; POS y proveedores siguen como placeholders en `lib/features/shell/`. UX inventario: `docs/UX_INVENTARIO_PRODUCTOS.md`.
 
 ### 1.1 Fundaciones de app
 
@@ -93,12 +93,14 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 1.3 Módulo inventario y productos
 
-- [ ] **B1** Lista inventario: `GET /api/v1/inventory`; pull-to-refresh; búsqueda local por nombre/SKU sobre datos cargados.
-- [ ] **B2** Detalle stock: `GET /api/v1/inventory/{productId}`; `GET /api/v1/inventory/movements?productId=&limit=`.
-- [ ] **B3** Ajuste stock: `POST /api/v1/inventory/adjustments` (`IN_ADJUST` / `OUT_ADJUST`, `quantity` string, `reason`, `unitCostFunctional` si aplica, `opId` opcional para idempotencia).
-- [ ] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); leer cabecera `X-Catalog-Source` si se muestra en debug.
-- [ ] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` alineados al DTO (sku, name, price, currency, cost, **barcode obligatorio/recomendado en flujo real**, type, etc.). **Importante:** sin `barcode` (o SKU escaneable) el POS no podrá resolver el producto por cámara en **P1**; validar en formulario y documentar excepciones (solo teclado).
-- [ ] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (soft delete; política `PRODUCT_SOFT_DELETE_POLICY`).
+- [x] **B1** Lista inventario: `GET /api/v1/inventory`; pull-to-refresh; búsqueda local por nombre/SKU/**barcode** (`InventoryStockTab` dentro de `InventoryModuleScreen`).
+- [x] **B2** Detalle stock: `GET /api/v1/inventory/{productId}` (404 → sin ficha aún; se muestra línea de la lista); `GET /api/v1/inventory/movements?productId=&limit=` — pantalla al tocar un ítem en **Stock** (`InventoryProductDetailScreen`).
+- [x] **B3** Ajuste stock: `POST /api/v1/inventory/adjustments` — `InventoryAdjustmentScreen` desde detalle B2 (`IN_ADJUST` / `OUT_ADJUST`, `quantity` string, `reason` obligatorio en UI, `unitCostFunctional` solo en entradas, **`opId`** vía `ClientMutationId` — reintento con mismo id; al editar el formulario tras fallo, nuevo `opId`). Payload sync alineado: `InventoryAdjustPayloadBuilder` (`lib/core/sync/inventory_adjust_payload_builder.dart`). **Sin red / cola:** checklist explícita en `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` § “Punto de implementación: guardar sin red en B3”.
+- [x] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); cabecera `X-Catalog-Source` en UI debug opcional *(no implementada aún)*.
+- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku, name, price, currency, cost, type, unit, description; **barcode** con switch “Permitir sin código de barras” para excepción solo-teclado; montos como **string** en JSON).
+- [x] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (menú del ítem en catálogo; política `PRODUCT_SOFT_DELETE_POLICY`).
+- [ ] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
+- [ ] **UX inventario — contador** (opcional): bajo el título o en `AppBar`, mostrar **N líneas** en Stock / **N productos** en Catálogo para contexto rápido.
 
 ### 1.4 Proveedores (sin API)
 
@@ -117,7 +119,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 2.1 Catálogo y carrito
 
-- [ ] **P1** Catálogo venta: grid/lista; búsqueda nombre/SKU; escaneo QR/código (paquete tipo `mobile_scanner` o ML Kit) **matcheando `product.barcode`** (u otro campo acordado) del catálogo cargado — depende de **B5** con código de barras cargado.
+- [ ] **P1** Catálogo venta: grid/lista; búsqueda nombre/SKU; escaneo QR/código (paquete tipo `mobile_scanner` o ML Kit) **matcheando `product.barcode`** (u otro campo acordado) del catálogo cargado — depende de **B5** con código de barras cargado. **Reutilizar** el mismo módulo de escaneo en **B7** (Inventario: buscar + formulario producto).
 - [ ] **P2** Línea carrito: precio en **moneda documento**; referencia VES/funcional con tasa de `GET .../exchange-rates/latest` (solo UI hasta confirmar).
 - [ ] **P3** Ticket: subtotales/totales en moneda documento; línea referencia en VES (o según settings); al confirmar `POST /api/v1/sales` con `documentCurrencyCode`, `lines[]`, `fxSnapshot`, `deviceId`.
 - [ ] **P4** Selector moneda documento coherente con `defaultSaleDocCurrency` y pares existentes en backend (sin asumir cruces no soportados — ver tabla FX en contexto §14).
@@ -129,6 +131,9 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 2.3 Offline (opcional en Sprint 2 o inicio Sprint 3)
 
+- **Orden de implementación** y continuidad “reintento en pantalla ↔ cola offline”: `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (fases 0–7 y checklist de huecos a evitar).
+- **Decisión cerrada:** operaciones **desde cola persistente** = **solo** `POST /sync/push` (no drenar cola con REST). Online inmediato puede seguir en REST (B3, P3) hasta optar por cola+flush unificado.
+- Patrón **`opId` / reintentos** en cliente: **fase 0** — B3 hecho; **fase 1** — ventas (P3); cola + worker — fases 2–5.
 - [ ] Cola local de ventas pendientes con misma forma FX que REST.
 - [ ] `POST /api/v1/sync/push` con `opType: SALE` y `payload.sale` según `SYNC_CONTRACTS.md`.
 - [ ] Reintentos: mismo `opId` → `skipped` sin duplicar stock; misma `sale.id` ya persistida → idempotente.
@@ -150,6 +155,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 3.3 Sync offline completo
 
+- Cola offline / rehidratación: **solo** `sync/push` — `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (decisión de arquitectura cerrada).
 - [ ] `POST /api/v1/sync/push`: batch ≤200 ops; `deviceId` obligatorio; `opId` UUID v4 por op; manejar `acked` / `skipped` / `failed`.
 - [ ] Ops: `INVENTORY_ADJUST`, `PURCHASE_RECEIVE`, `SALE`, `SALE_RETURN`, `NOOP` (pruebas).
 - [ ] `GET /api/v1/sync/pull?since=&limit=`: aplicar ops en orden; guardar `toVersion` como siguiente `since`; `hasMore` en bucle.
@@ -175,6 +181,8 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 | Tema | Archivo |
 |------|---------|
+| UX Stock vs catálogo + `getJsonList` + cámara/contador (B7) | `docs/UX_INVENTARIO_PRODUCTOS.md` |
+| Idempotencia cliente (`opId`) y offline futuro | `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (§ checklist B3 sin red + `InventoryAdjustPayloadBuilder`) |
 | API + JSON por pantalla + FX | `FRONTEND_INTEGRATION_CONTEXT.md` |
 | Sprints, pantallas, paquetes, UI | `IMPLEMENTACION_FLUTTER_ANDROID_GEMINI.md` |
 | Índice docs → Flutter | `DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md` |
