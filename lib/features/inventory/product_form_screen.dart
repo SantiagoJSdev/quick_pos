@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/models/catalog_product.dart';
+import '../sale/barcode_scanner_screen.dart';
 
 const _currencies = ['USD', 'VES', 'EUR'];
 final _decimal = RegExp(r'^\d+(\.\d+)?$');
@@ -14,11 +15,15 @@ class ProductFormScreen extends StatefulWidget {
     required this.storeId,
     required this.productsApi,
     this.existing,
+    this.initialBarcode,
   });
 
   final String storeId;
   final ProductsApi productsApi;
   final CatalogProduct? existing;
+
+  /// Solo alta: precarga el campo código de barras (p. ej. escaneo desde Stock/Catálogo).
+  final String? initialBarcode;
 
   bool get isEdit => existing != null;
 
@@ -55,7 +60,30 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (p.unit != null) _unit.text = p.unit!;
       if (p.description != null) _description.text = p.description!;
       _allowNoBarcode = p.barcode == null || p.barcode!.isEmpty;
+    } else {
+      final b = widget.initialBarcode?.trim();
+      if (b != null && b.isNotEmpty) {
+        _barcode.text = b;
+        _allowNoBarcode = false;
+      }
     }
+  }
+
+  Future<void> _scanBarcodeField() async {
+    if (!BarcodeScannerScreen.isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El escáner solo está disponible en Android e iOS.'),
+        ),
+      );
+      return;
+    }
+    final code = await BarcodeScannerScreen.open(context);
+    if (!mounted || code == null || code.isEmpty) return;
+    setState(() {
+      _barcode.text = code;
+      _allowNoBarcode = false;
+    });
   }
 
   @override
@@ -175,10 +203,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _barcode,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Código de barras',
-              hintText: 'Para escanear en el POS (Sprint 2)',
-              border: OutlineInputBorder(),
+              hintText: 'Escanear en POS y en Inventario (B7)',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Escanear',
+                onPressed: _loading ? null : _scanBarcodeField,
+              ),
             ),
             keyboardType: TextInputType.text,
             enabled: !_loading,

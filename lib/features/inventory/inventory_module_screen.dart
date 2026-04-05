@@ -85,6 +85,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                 InventoryStockTab(
                   storeId: widget.storeId,
                   inventoryApi: widget.inventoryApi,
+                  productsApi: widget.productsApi,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _stockLineCount = n);
                   },

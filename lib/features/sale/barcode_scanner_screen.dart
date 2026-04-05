@@ -1,9 +1,16 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-/// Escaneo de código de barras / QR → texto. Reutilizable en **P1** y futuro **B7**.
+/// Escaneo de código de barras / QR → texto. **P1** (Venta) y **B7** (Inventario).
 class BarcodeScannerScreen extends StatefulWidget {
   const BarcodeScannerScreen({super.key});
+
+  /// Cámara solo en Android/iOS (no web ni desktop).
+  static bool get isSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   static Future<String?> open(BuildContext context) {
     return Navigator.of(context).push<String>(

@@ -4,7 +4,9 @@ import 'core/api/api_client.dart';
 import 'core/api/exchange_rates_api.dart';
 import 'core/api/inventory_api.dart';
 import 'core/api/products_api.dart';
+import 'core/api/sales_api.dart';
 import 'core/api/stores_api.dart';
+import 'core/api/sync_api.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
 import 'features/settings/link_store_screen.dart';
@@ -25,6 +27,8 @@ class _QuickPosAppState extends State<QuickPosApp> {
   late final ExchangeRatesApi _exchangeRatesApi;
   late final InventoryApi _inventoryApi;
   late final ProductsApi _productsApi;
+  late final SalesApi _salesApi;
+  late final SyncApi _syncApi;
   String? _storeId;
   bool _booting = true;
 
@@ -36,6 +40,8 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _exchangeRatesApi = ExchangeRatesApi(_apiClient);
     _inventoryApi = InventoryApi(_apiClient);
     _productsApi = ProductsApi(_apiClient);
+    _salesApi = SalesApi(_apiClient);
+    _syncApi = SyncApi(_apiClient);
     _bootstrap();
   }
 
@@ -89,6 +95,8 @@ class _QuickPosAppState extends State<QuickPosApp> {
                   exchangeRatesApi: _exchangeRatesApi,
                   inventoryApi: _inventoryApi,
                   productsApi: _productsApi,
+                  salesApi: _salesApi,
+                  syncApi: _syncApi,
                   onChangeStore: _onChangeStore,
                   localPrefs: widget.localPrefs,
                 ),

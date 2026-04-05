@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/models/catalog_product.dart';
+import '../sale/barcode_scanner_screen.dart';
 import 'product_form_screen.dart';
 
 /// B4 + acciones B5/B6 — catálogo de productos activos.
@@ -85,17 +86,60 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     }).toList();
   }
 
-  Future<void> _openForm({CatalogProduct? existing}) async {
+  Future<void> _openForm({
+    CatalogProduct? existing,
+    String? prefilledBarcode,
+  }) async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,
           productsApi: widget.productsApi,
           existing: existing,
+          initialBarcode:
+              existing == null ? prefilledBarcode : null,
         ),
       ),
     );
     if (changed == true && mounted) await _load();
+  }
+
+  bool _anyProductExactBarcode(String raw) {
+    final c = raw.trim().toLowerCase();
+    if (c.isEmpty) return false;
+    for (final p in _all) {
+      final b = p.barcode?.trim().toLowerCase();
+      if (b != null && b.isNotEmpty && b == c) return true;
+    }
+    return false;
+  }
+
+  Future<void> _onScanPressed() async {
+    if (_loading) return;
+    if (!BarcodeScannerScreen.isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El escáner solo está disponible en Android e iOS.'),
+        ),
+      );
+      return;
+    }
+    final code = await BarcodeScannerScreen.open(context);
+    if (!mounted || code == null || code.isEmpty) return;
+    setState(() => _searchController.text = code);
+    if (!_anyProductExactBarcode(code)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'No hay producto activo con este código de barras.',
+          ),
+          action: SnackBarAction(
+            label: 'Crear producto',
+            onPressed: () => _openForm(prefilledBarcode: code),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _confirmDeactivate(CatalogProduct p) async {
@@ -142,11 +186,16 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: TextField(
                 controller: _searchController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: 'Buscar producto, SKU o código de barras',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.search),
+                  border: const OutlineInputBorder(),
                   isDense: true,
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    tooltip: 'Escanear',
+                    onPressed: _loading ? null : _onScanPressed,
+                  ),
                 ),
                 autocorrect: false,
               ),

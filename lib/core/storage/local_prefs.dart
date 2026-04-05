@@ -4,10 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/local_supplier.dart';
+import '../sync/pending_sale_entry.dart';
 
 const _kStoreId = 'store_id';
 const _kDeviceId = 'device_id';
 const _kLocalSuppliers = 'local_suppliers_v1';
+const _kPendingSalesV1 = 'pending_sales_v1';
+const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -53,5 +56,52 @@ class LocalPrefs {
   Future<void> saveLocalSuppliers(List<LocalSupplier> suppliers) async {
     final encoded = jsonEncode(suppliers.map((e) => e.toJson()).toList());
     await _prefs.setString(_kLocalSuppliers, encoded);
+  }
+
+  /// Watermark para `lastServerVersion` en `sync/push` (pull global — § SYNC_CONTRACTS).
+  Future<int> getSyncPullLastVersion() async {
+    final s = _prefs.getString(_kSyncPullSinceV1);
+    if (s == null || s.isEmpty) return 0;
+    return int.tryParse(s) ?? 0;
+  }
+
+  Future<void> setSyncPullLastVersion(int v) async {
+    await _prefs.setString(_kSyncPullSinceV1, '$v');
+  }
+
+  Future<List<PendingSaleEntry>> loadPendingSales() async {
+    final raw = _prefs.getString(_kPendingSalesV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <PendingSaleEntry>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final entry = PendingSaleEntry.tryFromJson(
+          Map<String, dynamic>.from(e),
+        );
+        if (entry != null) out.add(entry);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> savePendingSales(List<PendingSaleEntry> items) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kPendingSalesV1, encoded);
+  }
+
+  Future<void> appendPendingSale(PendingSaleEntry entry) async {
+    final list = await loadPendingSales();
+    list.add(entry);
+    await savePendingSales(list);
+  }
+
+  Future<int> countPendingSalesForStore(String storeId) async {
+    final list = await loadPendingSales();
+    return list.where((e) => e.storeId == storeId).length;
   }
 }

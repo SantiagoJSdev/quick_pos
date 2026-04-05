@@ -99,7 +99,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - [x] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); cabecera `X-Catalog-Source` en UI debug opcional *(no implementada aún)*.
 - [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku, name, price, currency, cost, type, unit, description; **barcode** con switch “Permitir sin código de barras” para excepción solo-teclado; montos como **string** en JSON).
 - [x] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (menú del ítem en catálogo; política `PRODUCT_SOFT_DELETE_POLICY`).
-- [ ] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
+- [x] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
 - [x] **UX inventario — contador**: texto guía del módulo muestra **N líneas** (Stock) / **N productos** (Catálogo) tras cada carga (`onLoadedCount` en tabs).
 
 ### 1.4 Proveedores (sin API)
@@ -120,23 +120,23 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 ### 2.1 Catálogo y carrito
 
 - [x] **P1** Catálogo venta: lista + pull; búsqueda nombre/SKU/barcode; **`mobile_scanner`** — `BarcodeScannerScreen` + `PosSaleScreen` matchea `product.barcode`; carrito mínimo y “Cobrar” stub (P3). Android/iOS: permiso cámara. **Reutilizar** `BarcodeScannerScreen` en **B7**.
-- [ ] **P2** Línea carrito: precio en **moneda documento**; referencia VES/funcional con tasa de `GET .../exchange-rates/latest` (solo UI hasta confirmar).
-- [ ] **P3** Ticket: subtotales/totales en moneda documento; línea referencia en VES (o según settings); al confirmar `POST /api/v1/sales` con `documentCurrencyCode`, `lines[]`, `fxSnapshot`, `deviceId`.
-- [ ] **P4** Selector moneda documento coherente con `defaultSaleDocCurrency` y pares existentes en backend (sin asumir cruces no soportados — ver tabla FX en contexto §14).
+- [x] **P2** Línea carrito: precio en **moneda documento**; referencia funcional→documento con tasa de `GET .../exchange-rates/latest` (directa o inversa); UI en `PosSaleScreen` + `PosCartLine` (`documentUnitPrice`).
+- [x] **P3** Ticket: total en moneda documento; al confirmar `POST /api/v1/sales` con `documentCurrencyCode`, `lines[]` (`price`/`quantity` string), `fxSnapshot` canónico (funcional→documento), `deviceId`, `appVersion`, `id` cliente para idempotencia (`ClientMutationId`, mismo valor al reintentar hasta éxito).
+- [x] **P4** Selector moneda documento entre `defaultSaleDocCurrency` y moneda funcional cuando difieren (`DropdownButton` en venta); conversión solo catálogo en moneda documento o funcional (sin cruces arbitrarios).
 
 ### 2.2 Multi-moneda en POS
 
-- [ ] `fxSnapshot`: `baseCurrencyCode`, `quoteCurrencyCode`, `rateQuotePerBase`, `effectiveDate` (`YYYY-MM-DD`), `fxSource` opcional (`POS_OFFLINE` solo cuando aplique offline).
-- [ ] No recalcular ticket ya cerrado con tasa nueva; no usar `double` para dinero.
+- [x] `fxSnapshot` en `POST /sales`: `baseCurrencyCode`, `quoteCurrencyCode`, `rateQuotePerBase`, `effectiveDate` (`YYYY-MM-DD`) vía `SaleCheckoutPayload`; `fxSource` opcional reservado (`POS_OFFLINE` cuando haya flujo offline).
+- [x] Ticket abierto: tasa al cargar / al cambiar moneda documento; no se reescribe venta cerrada. JSON sin `double` en montos (`MoneyStringMath` → string).
 
 ### 2.3 Offline (opcional en Sprint 2 o inicio Sprint 3)
 
 - **Orden de implementación** y continuidad “reintento en pantalla ↔ cola offline”: `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (fases 0–7 y checklist de huecos a evitar).
 - **Decisión cerrada:** operaciones **desde cola persistente** = **solo** `POST /sync/push` (no drenar cola con REST). Online inmediato puede seguir en REST (B3, P3) hasta optar por cola+flush unificado.
 - Patrón **`opId` / reintentos** en cliente: **fase 0** — B3 hecho; **fase 1** — ventas (P3); cola + worker — fases 2–5.
-- [ ] Cola local de ventas pendientes con misma forma FX que REST.
-- [ ] `POST /api/v1/sync/push` con `opType: SALE` y `payload.sale` según `SYNC_CONTRACTS.md`.
-- [ ] Reintentos: mismo `opId` → `skipped` sin duplicar stock; misma `sale.id` ya persistida → idempotente.
+- [x] Cola local de ventas pendientes (`LocalPrefs` JSON `pending_sales_v1`) misma forma FX que REST + `fxSource: POS_OFFLINE` al encolar.
+- [x] `POST /api/v1/sync/push` vía `SyncApi` + `flushPendingSalesForStore`: `opType: SALE`, `payload.sale`, `deviceId`/`appVersion`/`lastServerVersion`/`clientTime` (`SYNC_CONTRACTS.md`).
+- [x] Respuesta: quitar de cola ops en `acked` y `skipped` (idempotencia `opId` / venta ya aplicada); fallos de red o `ApiError` mantienen la cola; reintento manual **Sincronizar** en Venta.
 
 ---
 

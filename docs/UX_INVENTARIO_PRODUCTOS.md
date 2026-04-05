@@ -34,7 +34,7 @@ Tras cada carga de API, el texto bajo **Stock | Catálogo** añade **· N línea
 
 ---
 
-## Cámara / QR en Inventario (pendiente — diseño acordado)
+## Cámara / QR en Inventario (implementado — B7)
 
 Tiene sentido **sí**: escanear acelera mucho el trabajo en depósito y en alta de productos. No reemplaza al 100 % el teclado (nombre, precio, etc. siguen editables), pero evita errores al tipear códigos largos.
 
@@ -54,7 +54,7 @@ Tiene sentido **sí**: escanear acelera mucho el trabajo en depósito y en alta 
 
 - **Un solo componente/servicio de escaneo** reutilizable: Inventario (buscar + formulario) y POS (añadir al carrito) comparten lectura y normalización del string leído.
 
-Implementación: ver checklist **B7** en `docs/DESARROLLO_CHECKLIST.md`. Escáner compartido: `lib/features/sale/barcode_scanner_screen.dart` (ya usado en **Venta** P1).
+Implementación: checklist **B7** [x]. Escáner compartido: `lib/features/sale/barcode_scanner_screen.dart` (`isSupported`, usado en **Venta** P1 e **Inventario**).
 
 ## `ApiClient.getJsonList` y formas de respuesta
 

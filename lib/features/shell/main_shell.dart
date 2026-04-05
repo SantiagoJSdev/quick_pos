@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
+import '../../core/api/sync_api.dart';
 import '../../core/storage/local_prefs.dart';
 import '../inventory/inventory_module_screen.dart';
 import '../settings/store_dashboard_screen.dart';
 import '../sale/pos_sale_screen.dart';
 import '../suppliers/suppliers_list_screen.dart';
 
-/// Navegación principal: **Inicio**, **Inventario**, **Venta** (P1 catálogo + escáner + ticket mínimo), **Proveedores** (C1/C2).
+/// Navegación principal: **Inicio**, **Inventario**, **Venta** (POS + cola `sync/push`), **Proveedores** (C1/C2).
 ///
 /// Usa [IndexedStack] para conservar el estado de cada pestaña al cambiar.
 class MainShell extends StatefulWidget {
@@ -21,6 +23,8 @@ class MainShell extends StatefulWidget {
     required this.exchangeRatesApi,
     required this.inventoryApi,
     required this.productsApi,
+    required this.salesApi,
+    required this.syncApi,
     required this.onChangeStore,
     required this.localPrefs,
   });
@@ -30,6 +34,8 @@ class MainShell extends StatefulWidget {
   final ExchangeRatesApi exchangeRatesApi;
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
+  final SalesApi salesApi;
+  final SyncApi syncApi;
   final VoidCallback onChangeStore;
   final LocalPrefs localPrefs;
 
@@ -60,6 +66,11 @@ class _MainShellState extends State<MainShell> {
           PosSaleScreen(
             storeId: widget.storeId,
             productsApi: widget.productsApi,
+            storesApi: widget.storesApi,
+            exchangeRatesApi: widget.exchangeRatesApi,
+            salesApi: widget.salesApi,
+            syncApi: widget.syncApi,
+            localPrefs: widget.localPrefs,
           ),
           SuppliersListScreen(localPrefs: widget.localPrefs),
         ],
