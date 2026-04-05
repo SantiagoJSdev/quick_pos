@@ -1,6 +1,8 @@
 import '../pos/money_string_math.dart';
 
 /// Línea del ticket: precio catálogo + precio en moneda documento (P2/P3).
+///
+/// [quantity] es string decimal (ej. `1`, `2.5`) para peso u otros ítems.
 class PosCartLine {
   PosCartLine({
     required this.productId,
@@ -10,7 +12,7 @@ class PosCartLine {
     required this.catalogCurrency,
     required this.documentUnitPrice,
     required this.documentCurrencyCode,
-    this.quantity = 1,
+    this.quantity = '1',
   });
 
   final String productId;
@@ -20,10 +22,10 @@ class PosCartLine {
   final String catalogCurrency;
   final String documentUnitPrice;
   final String documentCurrencyCode;
-  int quantity;
+  String quantity;
 
   String get lineTotalDocument => MoneyStringMath.multiply(
         documentUnitPrice,
-        quantity.toString(),
+        quantity,
       );
 }

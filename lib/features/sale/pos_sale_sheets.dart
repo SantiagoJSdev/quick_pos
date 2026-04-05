@@ -1,0 +1,413 @@
+import 'package:flutter/material.dart';
+
+import 'pos_sale_ui_tokens.dart';
+
+/// Bottom sheet: numpad para cantidad decimal (peso, etc.).
+Future<String?> showPosQuantityNumpadSheet(
+  BuildContext context, {
+  required String productName,
+  required String initialQuantity,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => _QuantityNumpadSheet(
+      productName: productName,
+      initialQuantity: initialQuantity,
+    ),
+  );
+}
+
+class _QuantityNumpadSheet extends StatefulWidget {
+  const _QuantityNumpadSheet({
+    required this.productName,
+    required this.initialQuantity,
+  });
+
+  final String productName;
+  final String initialQuantity;
+
+  @override
+  State<_QuantityNumpadSheet> createState() => _QuantityNumpadSheetState();
+}
+
+class _QuantityNumpadSheetState extends State<_QuantityNumpadSheet> {
+  late String _buffer;
+
+  @override
+  void initState() {
+    super.initState();
+    _buffer = widget.initialQuantity.trim().replaceAll(',', '.');
+    if (_buffer.isEmpty) _buffer = '1';
+  }
+
+  void _tap(String key) {
+    setState(() {
+      if (key == 'del') {
+        _buffer = _buffer.isNotEmpty ? _buffer.substring(0, _buffer.length - 1) : '';
+        if (_buffer.isEmpty || _buffer == '-') _buffer = '0';
+        return;
+      }
+      if (key == '.') {
+        if (!_buffer.contains('.')) _buffer = _buffer.isEmpty ? '0.' : '$_buffer.';
+        return;
+      }
+      if (_buffer == '0' && key != '.') {
+        _buffer = key;
+        return;
+      }
+      if (_buffer.length >= 8) return;
+      _buffer += key;
+    });
+  }
+
+  void _confirm() {
+    final v = double.tryParse(_buffer.replaceAll(',', '.'));
+    if (v == null || v <= 0) {
+      Navigator.pop(context);
+      return;
+    }
+    Navigator.pop(context, _buffer.replaceAll(',', '.'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: PosSaleUi.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.fromBorderSide(BorderSide(color: PosSaleUi.border)),
+      ),
+      padding: EdgeInsets.fromLTRB(24, 12, 24, 24 + bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: PosSaleUi.border,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Ajustar cantidad',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: PosSaleUi.text,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            widget.productName,
+            style: const TextStyle(fontSize: 12, color: PosSaleUi.textMuted),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 16),
+          Container(
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color: PosSaleUi.surface3,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: PosSaleUi.border),
+            ),
+            child: Text(
+              _buffer.isEmpty ? '0' : _buffer,
+              style: const TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w700,
+                color: PosSaleUi.text,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 1.7,
+            children: [
+              for (final k in ['7', '8', '9', '4', '5', '6', '1', '2', '3'])
+                _NumKey(label: k, onTap: () => _tap(k)),
+              _NumKey(label: '.', muted: true, onTap: () => _tap('.')),
+              _NumKey(label: '0', onTap: () => _tap('0')),
+              _NumKey(label: '⌫', muted: true, onTap: () => _tap('del')),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: PosSaleUi.textMuted,
+                    side: const BorderSide(color: PosSaleUi.border),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Cancelar'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton(
+                  onPressed: _confirm,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: PosSaleUi.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Confirmar'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NumKey extends StatelessWidget {
+  const _NumKey({
+    required this.label,
+    required this.onTap,
+    this.muted = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: PosSaleUi.surface3,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+              color: muted ? PosSaleUi.textMuted : PosSaleUi.text,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Overlay oscuro con línea animada, cámara y simulación (demo).
+Future<void> showPosScanSheet(
+  BuildContext context, {
+  required VoidCallback onOpenCamera,
+  required VoidCallback onSimulate,
+}) {
+  return showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: const Color(0xF20A0A09),
+    transitionDuration: const Duration(milliseconds: 220),
+    pageBuilder: (ctx, animation, secondaryAnimation) => _ScanSheetBody(
+      onOpenCamera: onOpenCamera,
+      onSimulate: onSimulate,
+    ),
+  );
+}
+
+class _ScanSheetBody extends StatefulWidget {
+  const _ScanSheetBody({
+    required this.onOpenCamera,
+    required this.onSimulate,
+  });
+
+  final VoidCallback onOpenCamera;
+  final VoidCallback onSimulate;
+
+  @override
+  State<_ScanSheetBody> createState() => _ScanSheetBodyState();
+}
+
+class _ScanSheetBodyState extends State<_ScanSheetBody>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: SizedBox.expand(
+        child: SafeArea(
+          child: Column(
+            children: [
+            const SizedBox(height: 24),
+            SizedBox(
+              width: 220,
+              height: 220,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: Colors.white.withValues(alpha: 0.03),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                    ),
+                  ),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    width: 26,
+                    height: 26,
+                    child: _cornerBorder(top: true, left: true),
+                  ),
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    width: 26,
+                    height: 26,
+                    child: _cornerBorder(top: true, left: false),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    width: 26,
+                    height: 26,
+                    child: _cornerBorder(top: false, left: true),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    width: 26,
+                    height: 26,
+                    child: _cornerBorder(top: false, left: false),
+                  ),
+                  AnimatedBuilder(
+                    animation: _ctrl,
+                    builder: (context, child) {
+                      final t = _ctrl.value;
+                      final top = 0.15 + t * 0.65;
+                      return Positioned(
+                        top: 220 * top,
+                        left: 12,
+                        right: 12,
+                        child: Container(
+                          height: 2,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                PosSaleUi.primary.withValues(alpha: 0.9),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 28),
+            const Text(
+              'Apuntá la cámara al código QR',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: PosSaleUi.textMuted, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'o al código de barras del producto',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: PosSaleUi.textFaint, fontSize: 12),
+            ),
+            const Spacer(),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context);
+                widget.onOpenCamera();
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: PosSaleUi.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(200, 48),
+              ),
+              child: const Text('Usar cámara'),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context);
+                widget.onSimulate();
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: PosSaleUi.surface3,
+                foregroundColor: PosSaleUi.text,
+                side: const BorderSide(color: PosSaleUi.border),
+                minimumSize: const Size(200, 48),
+              ),
+              child: const Text('Simular escaneo ✦'),
+            ),
+            const SizedBox(height: 16),
+            IconButton.filledTonal(
+              onPressed: () => Navigator.pop(context),
+              style: IconButton.styleFrom(
+                backgroundColor: PosSaleUi.surface3,
+                foregroundColor: PosSaleUi.textMuted,
+              ),
+              icon: const Icon(Icons.close),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cornerBorder({required bool top, required bool left}) {
+    const side = BorderSide(color: PosSaleUi.primary, width: 3);
+    final border = Border(
+      top: top ? side : BorderSide.none,
+      bottom: !top ? side : BorderSide.none,
+      left: left ? side : BorderSide.none,
+      right: !left ? side : BorderSide.none,
+    );
+    return DecoratedBox(decoration: BoxDecoration(border: border));
+  }
+}

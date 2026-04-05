@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -22,6 +23,10 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_sale_entry.dart';
 import '../../core/sync/sync_cycle.dart';
 import 'barcode_scanner_screen.dart';
+import 'pos_cart_quantity.dart';
+import 'pos_sale_sheets.dart';
+import 'pos_sale_ui_tokens.dart';
+import 'pos_sale_widgets.dart';
 
 CatalogProduct? _findByBarcode(List<CatalogProduct> products, String raw) {
   final c = raw.trim().toLowerCase();
@@ -62,6 +67,7 @@ class PosSaleScreen extends StatefulWidget {
 
 class _PosSaleScreenState extends State<PosSaleScreen> {
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
   List<CatalogProduct> _all = [];
   final List<PosCartLine> _cart = [];
   bool _loading = true;
@@ -84,6 +90,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
+    _searchFocus.addListener(() => setState(() {}));
     _load();
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (mounted) setState(() => _terminal = t);
@@ -162,6 +169,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   void dispose() {
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -299,7 +307,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _error = null;
     });
     try {
-      final list = await widget.productsApi.listProducts(widget.storeId);
+      final list = await widget.productsApi.listProducts(
+        widget.storeId,
+        includeInactive: false,
+      );
       if (!mounted) return;
       setState(() => _all = list);
     } on ApiError catch (e) {
@@ -354,16 +365,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     await _refreshPendingCount();
   }
 
-  List<CatalogProduct> get _filtered {
-    final q = _search.text.trim().toLowerCase();
-    if (q.isEmpty) return _all;
-    return _all.where((p) {
-      return p.name.toLowerCase().contains(q) ||
-          p.sku.toLowerCase().contains(q) ||
-          (p.barcode?.toLowerCase().contains(q) ?? false);
-    }).toList();
-  }
-
   String? _documentPriceLabel(CatalogProduct p) {
     final s = _settings;
     final doc = _selectedDocumentCurrency;
@@ -379,7 +380,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return '$unit $doc';
   }
 
-  void _addProductToCart(CatalogProduct p, {int qty = 1}) {
+  void _addProductToCart(CatalogProduct p, {String addQty = '1'}) {
     _invalidateCheckoutIdempotency();
     final s = _settings;
     final doc = _selectedDocumentCurrency;
@@ -424,10 +425,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       return;
     }
 
+    final add = PosCartQuantity.normalize(addQty);
     final i = _cart.indexWhere((l) => l.productId == p.id);
     setState(() {
       if (i >= 0) {
-        _cart[i].quantity += qty;
+        _cart[i].quantity = PosCartQuantity.add(_cart[i].quantity, add);
       } else {
         _cart.add(
           PosCartLine(
@@ -438,13 +440,15 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             catalogCurrency: p.currency,
             documentUnitPrice: docPrice,
             documentCurrencyCode: doc,
-            quantity: qty,
+            quantity: add,
           ),
         );
       }
     });
+    _search.clear();
+    _searchFocus.unfocus();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${p.name} × $qty en el ticket')),
+      SnackBar(content: Text('${p.name} × $add en el ticket')),
     );
   }
 
@@ -504,7 +508,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                     FilledButton(
                       onPressed: () {
                         Navigator.pop(ctx);
-                        _addProductToCart(p, qty: q);
+                        _addProductToCart(p, addQty: '$q');
                       },
                       child: const Text('Agregar al ticket'),
                     ),
@@ -631,354 +635,504 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     }
   }
 
-  String _fxReferenceLine() {
-    final doc = _selectedDocumentCurrency;
-    final func = _functionalCode;
-    if (doc == null || func.isEmpty) return '';
-    if (func.toUpperCase() == doc.toUpperCase()) {
-      return 'Moneda documento = funcional ($func). Sin conversión.';
+  String _cartQtySummary() {
+    var t = 0.0;
+    for (final l in _cart) {
+      t += PosCartQuantity.parse(l.quantity);
     }
-    final rate = SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
-      functionalCode: func,
-      documentCode: doc,
-      pair: _fxPair,
-    );
-    final date = _fxPair?.rate.effectiveDate ?? '';
-    final d = date.length >= 10 ? date.substring(0, 10) : date;
-    return 'Ref.: 1 $func = $rate $doc${d.isNotEmpty ? ' · $d' : ''}';
+    if (t == t.roundToDouble()) return '${t.round()}';
+    return PosCartQuantity.stringify(t);
   }
-
-  int get _cartUnits =>
-      _cart.fold<int>(0, (sum, l) => sum + l.quantity);
 
   String? get _cartTotalDocument {
     if (_cart.isEmpty || _selectedDocumentCurrency == null) return null;
     return MoneyStringMath.sum(_cart.map((l) => l.lineTotalDocument));
   }
 
+  String? get _cartTotalFunctional {
+    final td = _cartTotalDocument;
+    if (td == null) return null;
+    return _functionalFromDocument(td);
+  }
+
+  String _functionalFromDocument(String documentAmount) {
+    final func = _functionalCode;
+    final doc = _selectedDocumentCurrency ?? '';
+    if (func.isEmpty || doc.isEmpty) return documentAmount;
+    if (func.toUpperCase() == doc.toUpperCase()) return documentAmount;
+    final r = SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
+      functionalCode: func,
+      documentCode: doc,
+      pair: _fxPair,
+    );
+    return MoneyStringMath.divide(documentAmount, r, fractionDigits: 2);
+  }
+
+  String _rateBadgeHeadline() {
+    final doc = _selectedDocumentCurrency;
+    final func = _functionalCode;
+    if (doc == null || func.isEmpty) return 'Sin tasa';
+    if (func.toUpperCase() == doc.toUpperCase()) {
+      return '$func (sin conversión)';
+    }
+    if (_fxPair == null) return 'Sin tasa $func → $doc';
+    final r = SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
+      functionalCode: func,
+      documentCode: doc,
+      pair: _fxPair,
+    );
+    return '1 $func = $r $doc';
+  }
+
+  String _rateBadgeSub() {
+    final r = _fxPair?.rate;
+    if (r == null) {
+      if (_functionalCode.isNotEmpty &&
+          _selectedDocumentCurrency != null &&
+          _functionalCode.toUpperCase() ==
+              _selectedDocumentCurrency!.toUpperCase()) {
+        return 'Misma moneda funcional y documento';
+      }
+      return 'Definí la tasa en Inicio';
+    }
+    final c = r.convention?.trim();
+    if (c != null && c.isNotEmpty) return c;
+    final s = r.source?.trim();
+    if (s != null && s.isNotEmpty) return s;
+    final d = r.effectiveDate.trim();
+    if (d.length >= 10) return d.substring(0, 10);
+    return 'Tasa tienda';
+  }
+
+  String _posCurrencyLabel(String code) {
+    switch (code.toUpperCase()) {
+      case 'USD':
+        return '🇺🇸 $code';
+      case 'VES':
+        return '🇻🇪 $code';
+      default:
+        return code;
+    }
+  }
+
+  List<CatalogProduct> get _searchPreview {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    final found = _all.where((p) {
+      return p.name.toLowerCase().contains(q) ||
+          p.sku.toLowerCase().contains(q) ||
+          (p.barcode?.toLowerCase().contains(q) ?? false);
+    }).toList();
+    found.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return found.take(6).toList();
+  }
+
+  void _bumpLine(int index, double delta) {
+    _invalidateCheckoutIdempotency();
+    final cur = PosCartQuantity.parse(_cart[index].quantity);
+    final next = cur + delta;
+    if (next <= 0) {
+      setState(() => _cart.removeAt(index));
+      return;
+    }
+    setState(() {
+      _cart[index].quantity = PosCartQuantity.stringify(next);
+    });
+  }
+
+  Future<void> _onLineQtyTap(int index) async {
+    final line = _cart[index];
+    final res = await showPosQuantityNumpadSheet(
+      context,
+      productName: line.name,
+      initialQuantity: line.quantity,
+    );
+    if (!mounted || res == null) return;
+    final n = PosCartQuantity.normalize(res);
+    setState(() {
+      _invalidateCheckoutIdempotency();
+      _cart[index].quantity = n;
+    });
+  }
+
+  void _removeLineByProductId(String productId) {
+    setState(() {
+      _invalidateCheckoutIdempotency();
+      _cart.removeWhere((l) => l.productId == productId);
+    });
+  }
+
+  void _clearCart() {
+    if (_cart.isEmpty) return;
+    setState(() {
+      _invalidateCheckoutIdempotency();
+      _cart.clear();
+    });
+  }
+
+  void _openScanChoices() {
+    showPosScanSheet(
+      context,
+      onOpenCamera: _openScanner,
+      onSimulate: _simulateRandomScan,
+    );
+  }
+
+  void _simulateRandomScan() {
+    final active = _all.where((p) => p.active).toList();
+    if (active.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay productos en catálogo.')),
+      );
+      return;
+    }
+    final p = active[Random().nextInt(active.length)];
+    _addProductToCart(p, addQty: '1');
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Venta'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            tooltip: 'Escanear código',
-            onPressed: _loading ? null : _openScanner,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _load,
-          ),
-        ],
+    final doc = _selectedDocumentCurrency;
+    final func = _functionalCode;
+    final td = _cartTotalDocument ?? '0.00';
+    final tf = _cartTotalFunctional ?? '0.00';
+    final cartEmpty = _cart.isEmpty;
+
+    return Theme(
+      data: Theme.of(context).copyWith(
+        scaffoldBackgroundColor: PosSaleUi.bg,
+        brightness: Brightness.dark,
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_contextError != null)
-            Material(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(
-                  'Tienda: $_contextError',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
-                ),
-              ),
-            ),
-          if (_pendingSyncCount > 0)
-            Material(
-              color: Theme.of(context).colorScheme.secondaryContainer,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.cloud_upload_outlined,
-                      color: Theme.of(context).colorScheme.onSecondaryContainer,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '$_pendingSyncCount operación(es) en cola (ventas o ajustes; sync/push).',
-                        style: TextStyle(
-                          color:
-                              Theme.of(context).colorScheme.onSecondaryContainer,
-                        ),
-                      ),
-                    ),
-                    if (_flushBusy)
-                      const SizedBox(
-                        width: 28,
-                        height: 28,
-                        child: Padding(
-                          padding: EdgeInsets.all(4),
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else
-                      TextButton(
-                        onPressed: () =>
-                            _runSyncCycle(silent: false, doPull: true),
-                        child: const Text('Sincronizar'),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          if (_settings != null && _selectedDocumentCurrency != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Ticket',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(width: 12),
-                      if (_documentCurrencyOptions.length > 1)
-                        DropdownButton<String>(
-                          value: () {
-                            final sel = _selectedDocumentCurrency!;
-                            for (final c in _documentCurrencyOptions) {
-                              if (c.toUpperCase() == sel.toUpperCase()) {
-                                return c;
-                              }
-                            }
-                            return _documentCurrencyOptions.first;
-                          }(),
-                          items: _documentCurrencyOptions
-                              .map(
-                                (c) => DropdownMenuItem(
-                                  value: c,
-                                  child: Text(c),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: _onDocumentCurrencyChanged,
-                        )
-                      else
-                        Text(
-                          _selectedDocumentCurrency!,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                    ],
-                  ),
-                  Text(
-                    _fxReferenceLine(),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                  if (_fxLoadError != null &&
-                      _functionalCode.toUpperCase() !=
-                          _selectedDocumentCurrency!.toUpperCase())
-                    Text(
-                      _fxLoadError!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                    ),
-                ],
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: TextField(
-              controller: _search,
-              decoration: const InputDecoration(
-                hintText: 'Buscar por nombre, SKU o código de barras',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              autocorrect: false,
-            ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(_error!, textAlign: TextAlign.center),
-                              const SizedBox(height: 16),
-                              FilledButton(
-                                onPressed: _load,
-                                child: const Text('Reintentar'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _load,
-                        child: _filtered.isEmpty
-                            ? ListView(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                children: [
-                                  SizedBox(
-                                    height:
-                                        MediaQuery.of(context).size.height * 0.2,
-                                  ),
-                                  Text(
-                                    _all.isEmpty
-                                        ? 'No hay productos activos. Cargalos en Inventario → Catálogo.'
-                                        : 'Sin resultados.',
-                                    textAlign: TextAlign.center,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyLarge
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant,
-                                        ),
-                                  ),
-                                ],
-                              )
-                            : ListView.separated(
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                                itemCount: _filtered.length,
-                                separatorBuilder: (context, index) =>
-                                    const Divider(height: 1),
-                                itemBuilder: (context, i) {
-                                  final p = _filtered[i];
-                                  final docLbl = _documentPriceLabel(p);
-                                  return ListTile(
-                                    title: Text(p.name),
-                                    subtitle: Text(
-                                      'SKU ${p.sku}'
-                                      '${p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : ''}'
-                                      '${docLbl != null ? '\nTicket: $docLbl' : ''}',
-                                    ),
-                                    isThreeLine: docLbl != null,
-                                    trailing: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        if (docLbl != null)
-                                          Text(
-                                            docLbl,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleSmall,
-                                          ),
-                                        Text(
-                                          '${p.price} ${p.currency}',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .onSurfaceVariant,
-                                              ),
-                                        ),
-                                      ],
-                                    ),
-                                    onTap: () => _addProductToCart(p, qty: 1),
-                                  );
-                                },
-                              ),
-                      ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: _cart.isEmpty
-          ? null
-          : Material(
-              elevation: 8,
-              child: SafeArea(
+      child: Scaffold(
+        backgroundColor: PosSaleUi.bg,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+            if (_contextError != null)
+              Material(
+                color: PosSaleUi.error.withValues(alpha: 0.2),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Tienda: $_contextError',
+                    style: const TextStyle(color: PosSaleUi.text),
+                  ),
+                ),
+              ),
+            if (_pendingSyncCount > 0)
+              Material(
+                color: PosSaleUi.primaryDim,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
                   child: Row(
                     children: [
+                      const Icon(Icons.cloud_upload_outlined,
+                          color: PosSaleUi.primary, size: 20),
+                      const SizedBox(width: 12),
                       Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${_cart.length} líneas · $_cartUnits u.',
-                              style: Theme.of(context).textTheme.titleSmall,
-                            ),
-                            if (_cartTotalDocument != null &&
-                                _selectedDocumentCurrency != null)
-                              Text(
-                                'Total ${_cartTotalDocument!} ${_selectedDocumentCurrency!}',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                          ],
+                        child: Text(
+                          '$_pendingSyncCount en cola (sync/push).',
+                          style: const TextStyle(
+                            color: PosSaleUi.text,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
-                      TextButton(
-                        onPressed: _checkoutBusy
-                            ? null
-                            : () {
-                                showModalBottomSheet<void>(
-                                  context: context,
-                                  showDragHandle: true,
-                                  builder: (ctx) => ListView(
-                                    padding: const EdgeInsets.all(16),
-                                    children: [
-                                      Text(
-                                        'Ticket',
-                                        style:
-                                            Theme.of(ctx).textTheme.titleMedium,
-                                      ),
-                                      Text(
-                                        _fxReferenceLine(),
-                                        style: Theme.of(ctx)
-                                            .textTheme
-                                            .bodySmall,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      ..._cart.map(
-                                        (l) => ListTile(
-                                          title: Text(l.name),
-                                          subtitle: Text(
-                                            '${l.documentUnitPrice} ${l.documentCurrencyCode} × ${l.quantity} '
-                                            '= ${l.lineTotalDocument} ${l.documentCurrencyCode}\n'
-                                            'Cat.: ${l.catalogUnitPrice} ${l.catalogCurrency}',
-                                          ),
-                                          isThreeLine: true,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                        child: const Text('Ver ticket'),
-                      ),
-                      FilledButton(
-                        onPressed: _checkoutBusy ? null : _onCheckout,
-                        child: _checkoutBusy
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Cobrar'),
-                      ),
+                      if (_flushBusy)
+                        const SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: Padding(
+                            padding: EdgeInsets.all(4),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: PosSaleUi.primary,
+                            ),
+                          ),
+                        )
+                      else
+                        TextButton(
+                          onPressed: () =>
+                              _runSyncCycle(silent: false, doPull: true),
+                          child: const Text('Sincronizar'),
+                        ),
                     ],
                   ),
                 ),
               ),
+            PosSaleTopBar(
+              rateHeadline: _rateBadgeHeadline(),
+              rateSub: _rateBadgeSub(),
+              onRefresh: _load,
+              onSync: () => _runSyncCycle(silent: false, doPull: true),
+              syncBusy: _flushBusy,
+              showSyncDot: _pendingSyncCount > 0,
             ),
+            PosSaleSearchBlock(
+              controller: _search,
+              focusNode: _searchFocus,
+              onScanTap: _openScanChoices,
+              onClear: () {
+                _search.clear();
+                setState(() {});
+              },
+            ),
+            if (_fxLoadError != null &&
+                doc != null &&
+                func.isNotEmpty &&
+                func.toUpperCase() != doc.toUpperCase())
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Text(
+                  _fxLoadError!,
+                  style: const TextStyle(color: PosSaleUi.error, fontSize: 12),
+                ),
+              ),
+            if (_search.text.trim().isNotEmpty && !_loading && _error == null)
+              Material(
+                color: PosSaleUi.surface2,
+                elevation: 3,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: _searchPreview.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Sin coincidencias',
+                            style: TextStyle(color: PosSaleUi.textMuted),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _searchPreview.length,
+                          separatorBuilder: (context, i) => const Divider(
+                            height: 1,
+                            color: PosSaleUi.divider,
+                          ),
+                          itemBuilder: (context, i) {
+                            final p = _searchPreview[i];
+                            final docLbl = _documentPriceLabel(p);
+                            final bc = p.barcode?.trim();
+                            return PosSaleSearchResultTile(
+                              product: p,
+                              primaryLine:
+                                  docLbl ?? '${p.price} ${p.currency}',
+                              secondaryLine: [
+                                'SKU ${p.sku}',
+                                if (bc != null && bc.isNotEmpty) bc,
+                              ].join(' · '),
+                              onTap: () => _addProductToCart(p),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: PosSaleUi.primary,
+                      ),
+                    )
+                  : _error != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _error!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: PosSaleUi.text),
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton(
+                                  onPressed: _load,
+                                  child: const Text('Reintentar'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'TICKET ACTUAL',
+                                    style: PosSaleUi.titleCart(context),
+                                  ),
+                                  const Spacer(),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: PosSaleUi.primary,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      _cartQtySummary(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: cartEmpty
+                                  ? Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(32),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.shopping_cart_outlined,
+                                              size: 56,
+                                              color: PosSaleUi.textFaint,
+                                            ),
+                                            const SizedBox(height: 16),
+                                            const Text(
+                                              'El ticket está vacío',
+                                              style: TextStyle(
+                                                color: PosSaleUi.textMuted,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              'Buscá un producto o escaneá el código.',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: PosSaleUi.textFaint,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    )
+                                  : RefreshIndicator(
+                                      color: PosSaleUi.primary,
+                                      onRefresh: _load,
+                                      child: ListView.separated(
+                                        itemCount: _cart.length,
+                                        separatorBuilder: (context, i) =>
+                                            const Divider(
+                                          height: 1,
+                                          color: PosSaleUi.divider,
+                                        ),
+                                        itemBuilder: (context, i) {
+                                          final l = _cart[i];
+                                          final uf = _functionalFromDocument(
+                                            l.documentUnitPrice,
+                                          );
+                                          final lf = _functionalFromDocument(
+                                            l.lineTotalDocument,
+                                          );
+                                          return PosSaleCartLineTile(
+                                            line: l,
+                                            unitFunctional: uf,
+                                            lineTotalFunctional: lf,
+                                            functionalCode: func,
+                                            documentCode:
+                                                doc ?? l.documentCurrencyCode,
+                                            onMinus: () => _bumpLine(i, -1),
+                                            onPlus: () => _bumpLine(i, 1),
+                                            onQtyTap: () => _onLineQtyTap(i),
+                                            onDismissed: () =>
+                                                _removeLineByProductId(
+                                                    l.productId),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+            ),
+            if (!_loading && _error == null && doc != null)
+              PosSaleCheckoutPanel(
+                functionalCode: func,
+                documentCode: doc,
+                functionalTotalLabel: _posCurrencyLabel(func),
+                documentTotalLabel: _posCurrencyLabel(doc),
+                totalFunctional: tf,
+                totalDocument: td,
+                subtotalLabel: '$td $doc',
+                itemsSummary:
+                    '${_cart.length} líneas · ${_cartQtySummary()} u.',
+                cartNotEmpty: !cartEmpty,
+                chargeInlineHint: cartEmpty ? '' : '$tf $func',
+                onClear: _clearCart,
+                onCharge: _onCheckout,
+                chargeBusy: _checkoutBusy,
+                onDiscount: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Descuentos: próximamente.'),
+                    ),
+                  );
+                },
+                currencySelector: _documentCurrencyOptions.length > 1
+                    ? Row(
+                        children: [
+                          const Text(
+                            'Moneda del ticket',
+                            style: TextStyle(
+                              color: PosSaleUi.textMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const Spacer(),
+                          DropdownButton<String>(
+                            value: () {
+                              final sel = _selectedDocumentCurrency!;
+                              for (final c in _documentCurrencyOptions) {
+                                if (c.toUpperCase() == sel.toUpperCase()) {
+                                  return c;
+                                }
+                              }
+                              return _documentCurrencyOptions.first;
+                            }(),
+                            dropdownColor: PosSaleUi.surface3,
+                            underline: const SizedBox.shrink(),
+                            style: const TextStyle(
+                              color: PosSaleUi.text,
+                              fontSize: 13,
+                            ),
+                            items: _documentCurrencyOptions
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(c),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _onDocumentCurrencyChanged,
+                          ),
+                        ],
+                      )
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -117,9 +117,13 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ## 2) Sprint 2 — POS (venta en tienda)
 
+### 2.0 UX móvil (referencia diseño)
+
+- [x] Layout tipo **`docs/quickmarket-pos.html`** (bosquejo HTML): tema oscuro en pestaña Venta, barra **QuickMarket** + badge de tasa (`convention` / `source` API + par funcional→documento), buscador fijo con resultados desplegables (nombre/SKU/barcode), carrito como lista principal con precio dual (funcional + documento), **Dismissible** para quitar línea, **numpad** bottom sheet para cantidad decimal, overlay escaneo con línea animada + **Simular escaneo** + **Usar cámara** (`BarcodeScannerScreen`), panel totales dual (documento en **dorado** `#E8C34A`), **Cobrar** con monto inline, limpiar ticket y placeholder descuentos. Implementación: `pos_sale_ui_tokens.dart`, `pos_sale_widgets.dart`, `pos_sale_sheets.dart`, `PosCartLine.quantity` como `String` decimal (`pos_cart_quantity.dart`). Imagen de referencia: añadir `docs/pos_imagen.*` cuando exista el asset.
+
 ### 2.1 Catálogo y carrito
 
-- [x] **P1** Catálogo venta: lista + pull; búsqueda nombre/SKU/barcode; **`mobile_scanner`** — `BarcodeScannerScreen` + `PosSaleScreen` matchea `product.barcode`; carrito mínimo y “Cobrar” stub (P3). Android/iOS: permiso cámara. **Reutilizar** `BarcodeScannerScreen` en **B7**.
+- [x] **P1** Catálogo venta: lista + pull; búsqueda nombre/SKU/barcode; **`mobile_scanner`** — `BarcodeScannerScreen` + `PosSaleScreen` matchea `product.barcode`; carrito mínimo y “Cobrar” stub (P3). Android/iOS: permiso cámara. **Reutilizar** `BarcodeScannerScreen` en **B7**. *(Flujo principal: búsqueda en barra superior + resultados compactos, no lista full-screen de catálogo.)*
 - [x] **P2** Línea carrito: precio en **moneda documento**; referencia funcional→documento con tasa de `GET .../exchange-rates/latest` (directa o inversa); UI en `PosSaleScreen` + `PosCartLine` (`documentUnitPrice`).
 - [x] **P3** Ticket: total en moneda documento; al confirmar `POST /api/v1/sales` con `documentCurrencyCode`, `lines[]` (`price`/`quantity` string), `fxSnapshot` canónico (funcional→documento), `deviceId`, `appVersion`, `id` cliente para idempotencia (`ClientMutationId`, mismo valor al reintentar hasta éxito).
 - [x] **P4** Selector moneda documento entre `defaultSaleDocCurrency` y moneda funcional cuando difieren (`DropdownButton` en venta); conversión solo catálogo en moneda documento o funcional (sin cruces arbitrarios).
