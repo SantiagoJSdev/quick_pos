@@ -4,6 +4,8 @@ import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/widgets/quickmarket_branding.dart';
+import '../sale/pos_sale_ui_tokens.dart';
 import 'inventory_stock_tab.dart';
 import 'product_catalog_tab.dart';
 
@@ -47,7 +49,25 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Inventario')),
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 12, right: 10),
+              child: QuickMarketLogoMark(size: 32, borderRadius: 10),
+            ),
+            Text(
+              'Inventario',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ],
+        ),
+      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -80,7 +100,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                       : 'Ficha de producto (nombre, SKU, precio, código de barras). Acá creás y editás productos.') +
                   _countSuffix(),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: PosSaleUi.textMuted,
                   ),
             ),
           ),

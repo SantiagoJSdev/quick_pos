@@ -120,7 +120,8 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 ### 2.0 UX móvil (referencia diseño)
 
 - [x] Layout tipo **`docs/quickmarket-pos.html`** (bosquejo HTML): tema oscuro en pestaña Venta, barra **QuickMarket** + badge de tasa (`convention` / `source` API + par funcional→documento), buscador fijo con resultados desplegables (nombre/SKU/barcode), carrito como lista principal con precio dual (funcional + documento), **Dismissible** para quitar línea, **numpad** bottom sheet para cantidad decimal, overlay escaneo con línea animada + **Simular escaneo** + **Usar cámara** (`BarcodeScannerScreen`), panel totales dual (documento en **dorado** `#E8C34A`), **Cobrar** con monto inline, limpiar ticket y placeholder descuentos. Implementación: `pos_sale_ui_tokens.dart`, `pos_sale_widgets.dart`, `pos_sale_sheets.dart`, `PosCartLine.quantity` como `String` decimal (`pos_cart_quantity.dart`). **Referencia visual:** `docs/pos_imagen.png` (mock alta fidelidad; alinear detalles de copy/UI con este archivo y con `docs/quickmarket-pos.html`).
-- [x] **Menú Ventas** (`SalesModuleScreen` en `MainShell`): al tocar pestaña **Venta** se abre hub (POS / historial / buscar precio); **POS** = `PosSaleScreen` con **atrás** al menú. Historial local `recent_sales_v1` + detalle `GET /sales/:id`; ventas offline en cola entran como “pendiente”. Consulta precios: `ProductPriceLookupScreen`.
+- [x] **Menú Ventas** (`SalesModuleScreen` en `MainShell`): al tocar pestaña **Venta** se abre hub (POS / historial / buscar precio); **POS** = `PosSaleScreen` con **atrás** al menú. **Historial** = `TicketHistoryScreen`: pestaña **Este dispositivo** (`recent_sales_v1`, solo día actual local) + **General** (`SalesApi.listSales` → `GET /sales` con `dateFrom`/`dateTo`/opcional `deviceId`, `limit`, `cursor`, respuesta `items`/`nextCursor`/`meta` según `docs/BACKEND_SALES_HISTORY_API.md`); detalle `GET /sales/:id`. Ventas offline en cola como “pendiente”. Consulta precios: `ProductPriceLookupScreen`.
+- [x] **Backend listado `GET /sales`:** implementado; app integrada (`SalesListPage`, paginación “Cargar más” con `nextCursor`).
 
 ### 2.1 Catálogo y carrito
 
@@ -149,8 +150,9 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 3.1 Compras / recepción
 
-- [ ] `POST /api/v1/purchases` con `supplierId`, `documentCurrencyCode`, `lines[]`, `fxSnapshot`; `GET /api/v1/purchases/{id}`.
-- [ ] Proveedor: UUID válido (seed o lista local); no asumir `GET /suppliers` hasta que exista.
+- [x] `POST /api/v1/purchases` con `supplierId`, `documentCurrencyCode`, `lines[]`, `fxSnapshot` — `PurchasesApi` + `PurchaseReceiveScreen` (Proveedores → recepción); sin red → cola `PURCHASE_RECEIVE` + `sync/push`.
+- [ ] `GET /api/v1/purchases/{id}` — detalle en app *(no implementado aún; opcional para comprobante / auditoría)*.
+- [x] Proveedor: UUID válido (seed o lista local `local_suppliers_v1`); no asumir `GET /suppliers` hasta que exista.
 
 ### 3.2 Devoluciones de venta
 
@@ -162,7 +164,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 - Cola offline / rehidratación: **solo** `sync/push` — `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (decisión de arquitectura cerrada).
 - [x] `POST /api/v1/sync/push`: batch ≤200 ops; `deviceId`; `opId` por op; `acked` / `skipped` / errores vía `SyncFlushResult` (ops `failed` siguen en cola).
-- [ ] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` en cola; pendiente `PURCHASE_RECEIVE`, `SALE_RETURN`. `NOOP` directo: `submitSyncNoop` (`lib/core/sync/sync_noop.dart`) sin cola.
+- [x] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` + **`PURCHASE_RECEIVE`** en cola (`flushPendingSyncOpsForStore`); pendiente `SALE_RETURN`. `NOOP` directo: `submitSyncNoop` (`lib/core/sync/sync_noop.dart`) sin cola.
 - [x] `GET /api/v1/sync/pull`: `pullSyncAdvanceWatermark` — bucle `hasMore`, guarda `toVersion` en `sync_pull_since_v1`.
 - [x] Watermark pull ≠ `acked.serverVersion` del push: solo se usa el primero en `lastServerVersion` del body de push (`LocalPrefs.getSyncPullLastVersion`).
 - [x] Pull `PRODUCT_*`: `summarizePullOpsProductChanges` + `CatalogInvalidationBus` → refetch REST en **Venta**, **Stock** y **Catálogo** (invalidación agresiva; sin SQLite). Ver `lib/core/catalog/catalog_invalidation_bus.dart`.

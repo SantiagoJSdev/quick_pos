@@ -7,6 +7,7 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/widgets/quickmarket_branding.dart';
 import 'pos_sale_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 import 'product_price_lookup_screen.dart';
@@ -37,12 +38,7 @@ class SalesModuleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Theme(
-      data: Theme.of(context).copyWith(
-        scaffoldBackgroundColor: PosSaleUi.bg,
-        brightness: Brightness.dark,
-      ),
-      child: Navigator(
+    return Navigator(
         initialRoute: '/',
         onGenerateRoute: (RouteSettings settings) {
           if (settings.name == '/') {
@@ -92,7 +88,6 @@ class SalesModuleScreen extends StatelessWidget {
           }
           return null;
         },
-      ),
     );
   }
 }
@@ -116,54 +111,9 @@ class _VentasMenuPage extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: PosSaleUi.primary,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.point_of_sale,
-                      color: Colors.white, size: 22),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text.rich(
-                        TextSpan(
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: PosSaleUi.text,
-                          ),
-                          children: [
-                            TextSpan(text: 'Ventas'),
-                            TextSpan(
-                              text: ' QuickMarket',
-                              style: TextStyle(
-                                color: PosSaleUi.primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Elegí una opción',
-                        style: TextStyle(
-                          color: PosSaleUi.textMuted,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            const QuickMarketModuleHeader(
+              moduleLabel: 'Ventas',
+              subtitle: 'Elegí una opción',
             ),
             const SizedBox(height: 28),
             _VentasTile(
@@ -176,7 +126,8 @@ class _VentasMenuPage extends StatelessWidget {
             _VentasTile(
               icon: Icons.history,
               title: 'Historial de tickets',
-              subtitle: 'Ventas de este dispositivo; tocá uno para ver detalle',
+              subtitle:
+                  'Hoy en este dispositivo o consulta general por fechas en el servidor',
               onTap: onOpenHistorial,
             ),
             const SizedBox(height: 12),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/catalog_product.dart';
 import '../../core/models/pos_cart_line.dart';
+import '../../core/widgets/quickmarket_branding.dart';
 import 'pos_sale_ui_tokens.dart';
 
 String _posLeadingInitial(String name) {
@@ -56,38 +57,7 @@ class PosSaleTopBar extends StatelessWidget {
             ),
             const SizedBox(width: 4),
           ],
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: PosSaleUi.primary,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.shopping_cart_outlined,
-                    size: 16, color: Colors.white),
-              ),
-              const SizedBox(width: 8),
-              const Text.rich(
-                TextSpan(
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: PosSaleUi.text,
-                    letterSpacing: -0.2,
-                  ),
-                  children: [
-                    TextSpan(text: 'Quick'),
-                    TextSpan(
-                      text: 'Market',
-                      style: TextStyle(color: PosSaleUi.primary),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          const QuickMarketWordmark(),
           const Spacer(),
           Expanded(
             flex: 2,

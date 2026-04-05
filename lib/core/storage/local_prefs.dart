@@ -198,7 +198,8 @@ class LocalPrefs {
     return a + b + c;
   }
 
-  /// Historial local de tickets (máx. 50 por dispositivo; filtrar por tienda al mostrar).
+  /// Historial local de tickets: **solo día calendario actual** (local device); al cargar se purgan días anteriores.
+  /// Máx. ~80 filas del día para no inflar preferencias. Filtrar por tienda en UI.
   Future<List<RecentSaleTicket>> loadRecentSaleTickets() async {
     final raw = _prefs.getString(_kRecentSalesV1);
     if (raw == null || raw.isEmpty) return [];
@@ -211,7 +212,11 @@ class LocalPrefs {
         final t = RecentSaleTicket.tryFromJson(Map<String, dynamic>.from(e));
         if (t != null) out.add(t);
       }
-      return out;
+      final todayOnly = out.where((t) => t.isRecordedOnLocalCalendarToday).toList();
+      if (todayOnly.length != out.length) {
+        await saveRecentSaleTickets(todayOnly);
+      }
+      return todayOnly;
     } catch (_) {
       return [];
     }
@@ -222,14 +227,21 @@ class LocalPrefs {
     await _prefs.setString(_kRecentSalesV1, encoded);
   }
 
-  /// Inserta al frente; evita duplicar mismo [saleId]; recorta a 50.
+  static const _kMaxRecentSalesSameDay = 80;
+
+  /// Inserta al frente; solo entradas del **día actual** local; evita duplicar [saleId].
   Future<void> prependRecentSaleTicket(RecentSaleTicket entry) async {
     final list = await loadRecentSaleTickets();
-    final next = <RecentSaleTicket>[entry];
+    final next = <RecentSaleTicket>[];
+    if (entry.isRecordedOnLocalCalendarToday) {
+      next.add(entry);
+    }
     for (final e in list) {
       if (e.saleId == entry.saleId) continue;
+      if (!e.isRecordedOnLocalCalendarToday) continue;
       next.add(e);
+      if (next.length >= _kMaxRecentSalesSameDay) break;
     }
-    await saveRecentSaleTickets(next.take(50).toList(growable: false));
+    await saveRecentSaleTickets(next);
   }
 }

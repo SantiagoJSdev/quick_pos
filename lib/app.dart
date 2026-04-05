@@ -11,6 +11,7 @@ import 'core/api/sync_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/quickmarket_shell_theme.dart';
 import 'features/settings/link_store_screen.dart';
 import 'features/shell/main_shell.dart';
 
@@ -85,7 +86,9 @@ class _QuickPosAppState extends State<QuickPosApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Quick POS',
-      theme: AppTheme.light(),
+      theme: _storeId == null
+          ? AppTheme.light()
+          : QuickMarketShellTheme.theme(),
       home: _booting
           ? const Scaffold(
               body: Center(child: CircularProgressIndicator()),

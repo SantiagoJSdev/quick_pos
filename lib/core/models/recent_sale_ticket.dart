@@ -56,4 +56,16 @@ class RecentSaleTicket {
       status: st,
     );
   }
+
+  /// Política app: historial **local** solo conserva ventas del **día calendario actual**
+  /// en la zona horaria local del dispositivo (`recordedAtIso` en ISO-8601).
+  bool get isRecordedOnLocalCalendarToday {
+    final dt = DateTime.tryParse(recordedAtIso);
+    if (dt == null) return false;
+    final local = dt.toLocal();
+    final now = DateTime.now();
+    return local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day;
+  }
 }

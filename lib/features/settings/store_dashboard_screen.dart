@@ -5,6 +5,8 @@ import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/models/business_settings.dart';
+import '../../core/widgets/quickmarket_branding.dart';
+import '../sale/pos_sale_ui_tokens.dart';
 import 'exchange_rate_today_screen.dart';
 import 'register_exchange_rate_screen.dart';
 
@@ -73,11 +75,58 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     SystemNavigator.pop();
   }
 
+  Widget _functionalCurrencyCard(
+    BuildContext context,
+    BusinessSettings s,
+  ) {
+    final code = s.functionalCurrency.code;
+    final name = s.functionalCurrency.name;
+    final value = code.isEmpty
+        ? '—'
+        : ((name != null && name.isNotEmpty) ? '$code — $name' : code);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Moneda funcional',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Moneda de referencia para inventario y costos (p. ej. USD). '
+              'La moneda del ticket en caja la define el servidor al facturar.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tienda'),
+        automaticallyImplyLeading: false,
+        title: const QuickMarketWordmark(logoSize: 32, fontSize: 17, gap: 10),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -122,7 +171,11 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                     const SizedBox(height: 16),
-                    Text(msg, textAlign: TextAlign.center),
+                    Text(
+                      msg,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: PosSaleUi.textMuted),
+                    ),
                     const SizedBox(height: 24),
                     FilledButton(
                       onPressed: _refresh,
@@ -137,42 +190,28 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
           final doc = s.defaultSaleDocCurrency;
           return RefreshIndicator(
             onRefresh: _refresh,
+            color: PosSaleUi.primary,
             child: ListView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
               children: [
                 Text(
                   s.storeName,
-                  style: Theme.of(context).textTheme.headlineSmall,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: PosSaleUi.text,
+                        fontWeight: FontWeight.w700,
+                      ),
                 ),
-                if (s.storeType != null)
+                if (s.storeType != null) ...[
+                  const SizedBox(height: 4),
                   Text(
                     s.storeType!,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: PosSaleUi.textMuted,
                         ),
                   ),
-                const SizedBox(height: 24),
-                _currencyCard(
-                  context,
-                  title: 'Moneda funcional',
-                  code: s.functionalCurrency.code,
-                  name: s.functionalCurrency.name,
-                  help:
-                      'Es la moneda en la que contabilizás inventario y costos '
-                      '(valor del stock, márgenes internos). Suele ser estable, '
-                      'por ejemplo USD.',
-                ),
-                _currencyCard(
-                  context,
-                  title: 'Moneda del documento (venta)',
-                  code: doc?.code,
-                  name: doc?.name,
-                  help:
-                      'Es la moneda por defecto del ticket en caja: precios y '
-                      'totales que ve el cliente al cobrar (por ejemplo VES). '
-                      'Puede ser distinta de la funcional: el backend guarda '
-                      'ambas y la tasa del momento al confirmar la venta.',
-                ),
+                ],
+                const SizedBox(height: 20),
+                _functionalCurrencyCard(context, s),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
                   onPressed: () {
@@ -191,6 +230,8 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   label: const Text('Tasa del día'),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
+                    backgroundColor: PosSaleUi.surface3,
+                    foregroundColor: PosSaleUi.text,
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -213,21 +254,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                     minimumSize: const Size.fromHeight(44),
                   ),
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  'ID tienda',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                SelectableText(
-                  widget.storeId,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.outline,
-                      ),
-                ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
                 OutlinedButton.icon(
                   onPressed: _confirmDesvincular,
                   icon: const Icon(Icons.link_off_outlined),
@@ -243,51 +270,13 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   label: const Text('Cerrar aplicación'),
                   style: TextButton.styleFrom(
                     minimumSize: const Size.fromHeight(44),
+                    foregroundColor: PosSaleUi.textMuted,
                   ),
                 ),
               ],
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _currencyCard(
-    BuildContext context, {
-    required String title,
-    required String? code,
-    required String? name,
-    required String help,
-  }) {
-    final value = code == null || code.isEmpty
-        ? '—'
-        : (name != null && name.isNotEmpty ? '$code — $name' : code);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              help,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
       ),
     );
   }

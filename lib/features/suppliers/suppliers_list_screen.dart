@@ -8,6 +8,8 @@ import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/local_supplier.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/widgets/quickmarket_branding.dart';
+import '../sale/pos_sale_ui_tokens.dart';
 import 'purchase_receive_screen.dart';
 import 'supplier_form_screen.dart';
 
@@ -120,7 +122,23 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Proveedores'),
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 12, right: 10),
+              child: QuickMarketLogoMark(size: 32, borderRadius: 10),
+            ),
+            Text(
+              'Proveedores',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long_outlined),
@@ -146,7 +164,7 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
                       'En compras usaremos ese id con el API.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color: PosSaleUi.textMuted,
                           ),
                     ),
                   ),
@@ -154,14 +172,26 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
               : ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: _list.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
+                  separatorBuilder: (context, index) => const Divider(
+                    height: 1,
+                    color: PosSaleUi.divider,
+                  ),
                   itemBuilder: (context, i) {
                     final s = _list[i];
                     return ListTile(
-                      title: Text(s.name),
+                      title: Text(
+                        s.name,
+                        style: const TextStyle(
+                          color: PosSaleUi.text,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       subtitle: Text(
                         s.id,
-                        style: Theme.of(context).textTheme.bodySmall,
+                        style: const TextStyle(
+                          color: PosSaleUi.textMuted,
+                          fontSize: 12,
+                        ),
                       ),
                       onTap: () => _openForm(existing: s),
                       trailing: PopupMenuButton<String>(
