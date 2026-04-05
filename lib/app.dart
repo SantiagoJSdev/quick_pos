@@ -6,7 +6,7 @@ import 'core/api/stores_api.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
 import 'features/settings/link_store_screen.dart';
-import 'features/settings/store_dashboard_screen.dart';
+import 'features/shell/main_shell.dart';
 
 class QuickPosApp extends StatefulWidget {
   const QuickPosApp({super.key, required this.localPrefs});
@@ -77,9 +77,10 @@ class _QuickPosAppState extends State<QuickPosApp> {
                   exchangeRatesApi: _exchangeRatesApi,
                   onLinked: _onLinked,
                 )
-              : StoreDashboardScreen(
+              : MainShell(
                   storeId: _storeId!,
                   storesApi: _storesApi,
+                  exchangeRatesApi: _exchangeRatesApi,
                   onChangeStore: _onChangeStore,
                 ),
     );

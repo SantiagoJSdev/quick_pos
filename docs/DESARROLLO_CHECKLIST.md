@@ -65,9 +65,14 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ## 1) Sprint 1 — Configuración tienda, tasas, inventario, productos, proveedores locales
 
+### 1.0 Navegación principal (`MainShell`)
+
+- [x] Menú inferior **NavigationBar**: **Inicio** (tienda + tasas), **Inventario**, **Venta** (POS), **Proveedores** — `IndexedStack` para no perder estado al cambiar de pestaña; módulos B1 / POS / C1 sustituyen los placeholders en `lib/features/shell/`.
+
 ### 1.1 Fundaciones de app
 
 - [x] `deviceId`: UUID generado una vez y persistido (`shared_preferences` u otro).
+- [x] `appVersion` + `deviceId` para ventas/sync: `PosTerminalInfo.load(LocalPrefs)` (`package_info_plus` + mismo UUID); contrato backend `FRONTEND_INTEGRATION_CONTEXT.md` (§2, §8, §13.9, §13.12) — usar al implementar `POST /sales` y `sync/push`.
 - [x] `storeId` configurable (campo / pegar UUID) y guardado en preferencias.
 - [x] Constante o `--dart-define` para `API_BASE_URL` (sin barra final duplicada en paths).
 - [x] Cliente HTTP central (`dio` o `http`) con:
@@ -83,8 +88,8 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - [x] **A1** Pantalla enlazar tienda: campo UUID + guardar + flujo hacia validación.
 - [x] **A1b** Crear tienda desde el dispositivo: UUID, nombre, tipo sucursal, monedas, confirmación y tasa inicial opcional; backend con **`STORE_ONBOARDING_ENABLED=1`**, contrato **`docs/BACKEND_STORE_ONBOARDING.md`** + **§13.0** en `FRONTEND_INTEGRATION_CONTEXT.md`, Swagger `/api/docs`.
 - [x] **A2** Resumen tienda: `GET /api/v1/stores/{storeId}/business-settings` con `X-Store-Id` = `storeId`; mostrar nombre tienda, moneda funcional, moneda documento por defecto; manejar **404** (sin BusinessSettings / seed).
-- [ ] **A3** Tasa del día: `GET /api/v1/exchange-rates/latest?baseCurrencyCode=...&quoteCurrencyCode=...` (+ `effectiveOn` opcional); mostrar `rateQuotePerBase`, `effectiveDate`, `convention`; refrescar.
-- [ ] **A4** (Opcional) Registrar tasa: `POST /api/v1/exchange-rates` para admin en campo.
+- [x] **A3** Tasa del día: `GET /api/v1/exchange-rates/latest?baseCurrencyCode=...&quoteCurrencyCode=...` (+ `effectiveOn` opcional); mostrar `rateQuotePerBase`, `effectiveDate`, `convention`; refrescar (`ExchangeRateTodayScreen`).
+- [x] **A4** Registrar tasa: `POST /api/v1/exchange-rates` — pantalla `RegisterExchangeRateScreen` (desde Inicio o icono en Tasa del día).
 
 ### 1.3 Módulo inventario y productos
 
@@ -92,7 +97,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - [ ] **B2** Detalle stock: `GET /api/v1/inventory/{productId}`; `GET /api/v1/inventory/movements?productId=&limit=`.
 - [ ] **B3** Ajuste stock: `POST /api/v1/inventory/adjustments` (`IN_ADJUST` / `OUT_ADJUST`, `quantity` string, `reason`, `unitCostFunctional` si aplica, `opId` opcional para idempotencia).
 - [ ] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); leer cabecera `X-Catalog-Source` si se muestra en debug.
-- [ ] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` alineados al DTO (sku, name, price, currency, cost, barcode, type, etc.).
+- [ ] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` alineados al DTO (sku, name, price, currency, cost, **barcode obligatorio/recomendado en flujo real**, type, etc.). **Importante:** sin `barcode` (o SKU escaneable) el POS no podrá resolver el producto por cámara en **P1**; validar en formulario y documentar excepciones (solo teclado).
 - [ ] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (soft delete; política `PRODUCT_SOFT_DELETE_POLICY`).
 
 ### 1.4 Proveedores (sin API)
@@ -112,7 +117,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 2.1 Catálogo y carrito
 
-- [ ] **P1** Catálogo venta: grid/lista; búsqueda nombre/SKU; escaneo QR/código (paquete tipo `mobile_scanner` o ML Kit) resolviendo `productId` vía catálogo en memoria/cache.
+- [ ] **P1** Catálogo venta: grid/lista; búsqueda nombre/SKU; escaneo QR/código (paquete tipo `mobile_scanner` o ML Kit) **matcheando `product.barcode`** (u otro campo acordado) del catálogo cargado — depende de **B5** con código de barras cargado.
 - [ ] **P2** Línea carrito: precio en **moneda documento**; referencia VES/funcional con tasa de `GET .../exchange-rates/latest` (solo UI hasta confirmar).
 - [ ] **P3** Ticket: subtotales/totales en moneda documento; línea referencia en VES (o según settings); al confirmar `POST /api/v1/sales` con `documentCurrencyCode`, `lines[]`, `fxSnapshot`, `deviceId`.
 - [ ] **P4** Selector moneda documento coherente con `defaultSaleDocCurrency` y pares existentes en backend (sin asumir cruces no soportados — ver tabla FX en contexto §14).
