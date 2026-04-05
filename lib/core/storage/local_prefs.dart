@@ -8,6 +8,7 @@ import '../models/recent_sale_ticket.dart';
 import '../sync/pending_inventory_adjust_entry.dart';
 import '../sync/pending_purchase_receive_entry.dart';
 import '../sync/pending_sale_entry.dart';
+import '../sync/pending_sale_return_entry.dart';
 
 const _kStoreId = 'store_id';
 const _kDeviceId = 'device_id';
@@ -15,6 +16,7 @@ const _kLocalSuppliers = 'local_suppliers_v1';
 const _kPendingSalesV1 = 'pending_sales_v1';
 const _kPendingInvAdjustV1 = 'pending_inventory_adjusts_v1';
 const _kPendingPurchaseReceiveV1 = 'pending_purchase_receive_v1';
+const _kPendingSaleReturnV1 = 'pending_sale_return_v1';
 const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 const _kRecentSalesV1 = 'recent_sales_v1';
 
@@ -191,11 +193,48 @@ class LocalPrefs {
     return list.where((e) => e.storeId == storeId).length;
   }
 
+  Future<List<PendingSaleReturnEntry>> loadPendingSaleReturns() async {
+    final raw = _prefs.getString(_kPendingSaleReturnV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <PendingSaleReturnEntry>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final entry = PendingSaleReturnEntry.tryFromJson(
+          Map<String, dynamic>.from(e),
+        );
+        if (entry != null) out.add(entry);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> savePendingSaleReturns(List<PendingSaleReturnEntry> items) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kPendingSaleReturnV1, encoded);
+  }
+
+  Future<void> appendPendingSaleReturn(PendingSaleReturnEntry entry) async {
+    final list = await loadPendingSaleReturns();
+    list.add(entry);
+    await savePendingSaleReturns(list);
+  }
+
+  Future<int> countPendingSaleReturnsForStore(String storeId) async {
+    final list = await loadPendingSaleReturns();
+    return list.where((e) => e.storeId == storeId).length;
+  }
+
   Future<int> countPendingSyncOpsForStore(String storeId) async {
     final a = await countPendingSalesForStore(storeId);
     final b = await countPendingInventoryAdjustsForStore(storeId);
     final c = await countPendingPurchaseReceivesForStore(storeId);
-    return a + b + c;
+    final d = await countPendingSaleReturnsForStore(storeId);
+    return a + b + c + d;
   }
 
   /// Historial local de tickets: **solo día calendario actual** (local device); al cargar se purgan días anteriores.

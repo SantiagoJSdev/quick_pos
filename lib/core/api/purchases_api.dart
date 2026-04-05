@@ -12,4 +12,10 @@ class PurchasesApi {
   ) {
     return _client.postJson('/purchases', storeId, body);
   }
+
+  /// `GET /api/v1/purchases/:id` — detalle recepción (auditoría / comprobante).
+  Future<Map<String, dynamic>> getPurchase(String storeId, String purchaseId) {
+    return _client.getJson('/purchases/$purchaseId', storeId);
+  }
 }
+

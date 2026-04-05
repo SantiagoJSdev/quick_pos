@@ -2,7 +2,7 @@ import '../api/api_error.dart';
 import '../api/sync_api.dart';
 import '../storage/local_prefs.dart';
 
-/// Resultado de `sync/push` sobre la cola local (ventas, ajustes, compras).
+/// Resultado de `sync/push` sobre la cola local (ventas, ajustes, compras, devoluciones).
 class SyncFlushResult {
   const SyncFlushResult({
     required this.sentCount,
@@ -22,7 +22,7 @@ class SyncFlushResult {
 /// Compatibilidad con código que aún nombre el tipo anterior.
 typedef PendingSalesFlushResult = SyncFlushResult;
 
-/// Mezcla `SALE`, `INVENTORY_ADJUST` y `PURCHASE_RECEIVE` pendientes (orden por `timestamp`), hasta 200 ops.
+/// Mezcla `SALE`, `INVENTORY_ADJUST`, `PURCHASE_RECEIVE` y `SALE_RETURN` pendientes (orden por `timestamp`), hasta 200 ops.
 Future<SyncFlushResult> flushPendingSyncOpsForStore({
   required String storeId,
   required LocalPrefs prefs,
@@ -33,6 +33,7 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
   final allSales = await prefs.loadPendingSales();
   final allAdjusts = await prefs.loadPendingInventoryAdjusts();
   final allPurchases = await prefs.loadPendingPurchaseReceives();
+  final allReturns = await prefs.loadPendingSaleReturns();
 
   final saleQueue =
       allSales.where((e) => e.storeId == storeId).toList(growable: false);
@@ -42,8 +43,14 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
   final purchaseQueue = allPurchases
       .where((e) => e.storeId == storeId)
       .toList(growable: false);
+  final returnQueue = allReturns
+      .where((e) => e.storeId == storeId)
+      .toList(growable: false);
 
-  if (saleQueue.isEmpty && adjQueue.isEmpty && purchaseQueue.isEmpty) {
+  if (saleQueue.isEmpty &&
+      adjQueue.isEmpty &&
+      purchaseQueue.isEmpty &&
+      returnQueue.isEmpty) {
     return const SyncFlushResult(sentCount: 0, removedOpIds: []);
   }
 
@@ -70,6 +77,14 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
       'opType': 'PURCHASE_RECEIVE',
       'timestamp': e.opTimestampIso,
       'payload': <String, dynamic>{'purchase': e.purchase},
+    });
+  }
+  for (final e in returnQueue) {
+    merged.add({
+      'opId': e.opId,
+      'opType': 'SALE_RETURN',
+      'timestamp': e.opTimestampIso,
+      'payload': <String, dynamic>{'saleReturn': e.saleReturn},
     });
   }
   merged.sort(
@@ -121,9 +136,13 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     final remainingPurchases = allPurchases
         .where((e) => !remove.contains(e.opId))
         .toList(growable: false);
+    final remainingReturns = allReturns
+        .where((e) => !remove.contains(e.opId))
+        .toList(growable: false);
     await prefs.savePendingSales(remainingSales);
     await prefs.savePendingInventoryAdjusts(remainingAdj);
     await prefs.savePendingPurchaseReceives(remainingPurchases);
+    await prefs.savePendingSaleReturns(remainingReturns);
 
     return SyncFlushResult(
       sentCount: batch.length,

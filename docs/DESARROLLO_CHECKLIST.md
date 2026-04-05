@@ -151,20 +151,20 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 ### 3.1 Compras / recepción
 
 - [x] `POST /api/v1/purchases` con `supplierId`, `documentCurrencyCode`, `lines[]`, `fxSnapshot` — `PurchasesApi` + `PurchaseReceiveScreen` (Proveedores → recepción); sin red → cola `PURCHASE_RECEIVE` + `sync/push`.
-- [ ] `GET /api/v1/purchases/{id}` — detalle en app *(no implementado aún; opcional para comprobante / auditoría)*.
+- [x] `GET /api/v1/purchases/{id}` — `PurchasesApi.getPurchase` *(pantalla de detalle dedicada pendiente si se desea)*.
 - [x] Proveedor: UUID válido (seed o lista local `local_suppliers_v1`); no asumir `GET /suppliers` hasta que exista.
 
 ### 3.2 Devoluciones de venta
 
-- [ ] `POST /api/v1/sale-returns` con `originalSaleId`, `lines[]` (`saleLineId`, `quantity` string), opcional `fxPolicy` (`INHERIT_ORIGINAL_SALE` | `SPOT_ON_RETURN`), `fxSnapshot` si `SPOT_ON_RETURN`.
-- [ ] `GET /api/v1/sale-returns/{id}`.
-- [ ] Sync: `SALE_RETURN` en `sync/push` según `RETURNS_POLICY.md` y `SYNC_CONTRACTS.md`.
+- [x] `POST /api/v1/sale-returns` con `originalSaleId`, `lines[]` (`saleLineId`, `quantity` string), opcional `fxPolicy` (`INHERIT_ORIGINAL_SALE` | `SPOT_ON_RETURN`), `fxSnapshot` si `SPOT_ON_RETURN` — `SaleReturnsApi` + `SaleReturnScreen` (Ventas → devolución); carga `GET /sales/:id` para líneas; sin red → cola `pending_sale_return_v1` + `sync/push`.
+- [x] `GET /api/v1/sale-returns/{id}` — `SaleReturnsApi.getSaleReturn` *(UI detalle opcional)*.
+- [x] Sync: `SALE_RETURN` en `flushPendingSyncOpsForStore` (`payload.saleReturn`) según `RETURNS_POLICY.md` / `SYNC_CONTRACTS.md`.
 
 ### 3.3 Sync offline completo
 
 - Cola offline / rehidratación: **solo** `sync/push` — `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (decisión de arquitectura cerrada).
 - [x] `POST /api/v1/sync/push`: batch ≤200 ops; `deviceId`; `opId` por op; `acked` / `skipped` / errores vía `SyncFlushResult` (ops `failed` siguen en cola).
-- [x] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` + **`PURCHASE_RECEIVE`** en cola (`flushPendingSyncOpsForStore`); pendiente `SALE_RETURN`. `NOOP` directo: `submitSyncNoop` (`lib/core/sync/sync_noop.dart`) sin cola.
+- [x] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` + **`PURCHASE_RECEIVE`** + **`SALE_RETURN`** en cola (`flushPendingSyncOpsForStore`). `NOOP` directo: `submitSyncNoop` (`lib/core/sync/sync_noop.dart`) sin cola.
 - [x] `GET /api/v1/sync/pull`: `pullSyncAdvanceWatermark` — bucle `hasMore`, guarda `toVersion` en `sync_pull_since_v1`.
 - [x] Watermark pull ≠ `acked.serverVersion` del push: solo se usa el primero en `lastServerVersion` del body de push (`LocalPrefs.getSyncPullLastVersion`).
 - [x] Pull `PRODUCT_*`: `summarizePullOpsProductChanges` + `CatalogInvalidationBus` → refetch REST en **Venta**, **Stock** y **Catálogo** (invalidación agresiva; sin SQLite). Ver `lib/core/catalog/catalog_invalidation_bus.dart`.

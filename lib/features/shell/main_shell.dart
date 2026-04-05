@@ -7,6 +7,7 @@ import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/purchases_api.dart';
+import '../../core/api/sale_returns_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
@@ -33,6 +34,7 @@ class MainShell extends StatefulWidget {
     required this.productsApi,
     required this.salesApi,
     required this.purchasesApi,
+    required this.saleReturnsApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
     required this.onChangeStore,
@@ -46,6 +48,7 @@ class MainShell extends StatefulWidget {
   final ProductsApi productsApi;
   final SalesApi salesApi;
   final PurchasesApi purchasesApi;
+  final SaleReturnsApi saleReturnsApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final VoidCallback onChangeStore;
@@ -165,6 +168,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             storesApi: widget.storesApi,
             exchangeRatesApi: widget.exchangeRatesApi,
             salesApi: widget.salesApi,
+            saleReturnsApi: widget.saleReturnsApi,
             syncApi: widget.syncApi,
             catalogInvalidationBus: widget.catalogInvalidationBus,
             localPrefs: widget.localPrefs,

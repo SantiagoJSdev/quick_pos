@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/sale_returns_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
@@ -11,6 +12,7 @@ import '../../core/widgets/quickmarket_branding.dart';
 import 'pos_sale_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 import 'product_price_lookup_screen.dart';
+import 'sale_return_screen.dart';
 import 'ticket_history_screen.dart';
 
 /// Pestaña **Venta**: menú → POS / historial / consulta de precios (misma estética oscura del POS).
@@ -22,6 +24,7 @@ class SalesModuleScreen extends StatelessWidget {
     required this.storesApi,
     required this.exchangeRatesApi,
     required this.salesApi,
+    required this.saleReturnsApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
     required this.localPrefs,
@@ -32,6 +35,7 @@ class SalesModuleScreen extends StatelessWidget {
   final StoresApi storesApi;
   final ExchangeRatesApi exchangeRatesApi;
   final SalesApi salesApi;
+  final SaleReturnsApi saleReturnsApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
@@ -83,6 +87,22 @@ class SalesModuleScreen extends StatelessWidget {
                     ),
                   );
                 },
+                onOpenDevolucion: () {
+                  Navigator.of(navCtx).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (c) => SaleReturnScreen(
+                        storeId: storeId,
+                        salesApi: salesApi,
+                        saleReturnsApi: saleReturnsApi,
+                        storesApi: storesApi,
+                        exchangeRatesApi: exchangeRatesApi,
+                        localPrefs: localPrefs,
+                        syncApi: syncApi,
+                        catalogInvalidationBus: catalogInvalidationBus,
+                      ),
+                    ),
+                  );
+                },
               ),
             );
           }
@@ -97,11 +117,13 @@ class _VentasMenuPage extends StatelessWidget {
     required this.onOpenPos,
     required this.onOpenHistorial,
     required this.onOpenPrecios,
+    required this.onOpenDevolucion,
   });
 
   final VoidCallback onOpenPos;
   final VoidCallback onOpenHistorial;
   final VoidCallback onOpenPrecios;
+  final VoidCallback onOpenDevolucion;
 
   @override
   Widget build(BuildContext context) {
@@ -129,6 +151,14 @@ class _VentasMenuPage extends StatelessWidget {
               subtitle:
                   'Hoy en este dispositivo o consulta general por fechas en el servidor',
               onTap: onOpenHistorial,
+            ),
+            const SizedBox(height: 12),
+            _VentasTile(
+              icon: Icons.undo_outlined,
+              title: 'Devolución de venta',
+              subtitle:
+                  'UUID de venta, cantidades por línea; sin red va a la cola sync',
+              onTap: onOpenDevolucion,
             ),
             const SizedBox(height: 12),
             _VentasTile(
