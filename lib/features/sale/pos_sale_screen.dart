@@ -19,7 +19,7 @@ import '../../core/pos/pos_terminal_info.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_sale_entry.dart';
-import '../../core/sync/pending_sales_flush.dart';
+import '../../core/sync/sync_cycle.dart';
 import 'barcode_scanner_screen.dart';
 
 CatalogProduct? _findByBarcode(List<CatalogProduct> products, String raw) {
@@ -32,7 +32,7 @@ CatalogProduct? _findByBarcode(List<CatalogProduct> products, String raw) {
   return null;
 }
 
-/// Catálogo de venta (P1–P3), cola offline `sync/push` `SALE` (§2.3).
+/// Catálogo de venta (P1–P3), cola `sync/push` (ventas + ajustes) y sync manual.
 class PosSaleScreen extends StatefulWidget {
   const PosSaleScreen({
     super.key,
@@ -74,7 +74,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   String? _pendingSaleId;
   bool _checkoutBusy = false;
 
-  int _pendingSalesCount = 0;
+  int _pendingSyncCount = 0;
   bool _flushBusy = false;
 
   @override
@@ -86,47 +86,57 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       if (mounted) setState(() => _terminal = t);
     });
     _refreshPendingCount();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tryFlushPendingSales(silent: true);
-    });
   }
 
   Future<void> _refreshPendingCount() async {
     final n =
-        await widget.localPrefs.countPendingSalesForStore(widget.storeId);
-    if (mounted) setState(() => _pendingSalesCount = n);
+        await widget.localPrefs.countPendingSyncOpsForStore(widget.storeId);
+    if (mounted) setState(() => _pendingSyncCount = n);
   }
 
-  Future<void> _tryFlushPendingSales({bool silent = false}) async {
+  /// [doPull]: actualiza watermark con `GET /sync/pull`; [doFlush]: envía cola mixta.
+  Future<void> _runSyncCycle({
+    bool silent = false,
+    bool doPull = true,
+  }) async {
     if (_flushBusy) return;
     final pendingN =
-        await widget.localPrefs.countPendingSalesForStore(widget.storeId);
-    if (pendingN == 0) return;
+        await widget.localPrefs.countPendingSyncOpsForStore(widget.storeId);
+    if (pendingN == 0 && !doPull) return;
 
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
     if (!mounted) return;
 
     setState(() => _flushBusy = true);
-    final r = await flushPendingSalesForStore(
+    final cycle = await runSyncCycle(
       storeId: widget.storeId,
       prefs: widget.localPrefs,
       syncApi: widget.syncApi,
       deviceId: _terminal!.deviceId,
       appVersion: _terminal!.appVersion,
+      doPull: doPull,
+      doFlush: true,
     );
     if (!mounted) return;
     setState(() => _flushBusy = false);
     await _refreshPendingCount();
     if (!mounted) return;
 
+    if (!silent && cycle.pullError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync pull: ${cycle.pullError}')),
+      );
+    }
+
+    final r = cycle.flush;
     if (r.removedCount > 0) {
       if (!silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               r.removedCount == 1
-                  ? '1 venta de la cola sincronizada.'
-                  : '${r.removedCount} ventas de la cola sincronizadas.',
+                  ? '1 operación de la cola sincronizada.'
+                  : '${r.removedCount} operaciones de la cola sincronizadas.',
             ),
           ),
         );
@@ -330,6 +340,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
     if (!mounted) return;
     setState(() => _loading = false);
+    await _refreshPendingCount();
   }
 
   List<CatalogProduct> get _filtered {
@@ -560,7 +571,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Venta registrada.')),
       );
-      unawaited(_tryFlushPendingSales(silent: true));
+      unawaited(_runSyncCycle(silent: true, doPull: false));
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() => _checkoutBusy = false);
@@ -667,7 +678,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 ),
               ),
             ),
-          if (_pendingSalesCount > 0)
+          if (_pendingSyncCount > 0)
             Material(
               color: Theme.of(context).colorScheme.secondaryContainer,
               child: Padding(
@@ -681,7 +692,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        '$_pendingSalesCount venta(s) en cola offline (sync/push).',
+                        '$_pendingSyncCount operación(es) en cola (ventas o ajustes; sync/push).',
                         style: TextStyle(
                           color:
                               Theme.of(context).colorScheme.onSecondaryContainer,
@@ -700,7 +711,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                     else
                       TextButton(
                         onPressed: () =>
-                            _tryFlushPendingSales(silent: false),
+                            _runSyncCycle(silent: false, doPull: true),
                         child: const Text('Sincronizar'),
                       ),
                   ],

@@ -2,9 +2,9 @@ import '../api/api_error.dart';
 import '../api/sync_api.dart';
 import '../storage/local_prefs.dart';
 
-/// Resultado de intentar vaciar la cola hacia el servidor.
-class PendingSalesFlushResult {
-  const PendingSalesFlushResult({
+/// Resultado de `sync/push` sobre la cola local (ventas + ajustes).
+class SyncFlushResult {
+  const SyncFlushResult({
     required this.sentCount,
     required this.removedOpIds,
     this.hadTransportFailure = false,
@@ -19,30 +19,61 @@ class PendingSalesFlushResult {
   int get removedCount => removedOpIds.length;
 }
 
-/// Envía hasta 200 ops `SALE` pendientes vía `sync/push`; quita de cola las `acked` y `skipped`.
-Future<PendingSalesFlushResult> flushPendingSalesForStore({
+/// Compatibilidad con código que aún nombre el tipo anterior.
+typedef PendingSalesFlushResult = SyncFlushResult;
+
+/// Mezcla `SALE` e `INVENTORY_ADJUST` pendientes (orden por `timestamp`), hasta 200 ops.
+Future<SyncFlushResult> flushPendingSyncOpsForStore({
   required String storeId,
   required LocalPrefs prefs,
   required SyncApi syncApi,
   required String deviceId,
   required String appVersion,
 }) async {
-  final all = await prefs.loadPendingSales();
-  final pending = all.where((e) => e.storeId == storeId).toList();
-  if (pending.isEmpty) {
-    return const PendingSalesFlushResult(sentCount: 0, removedOpIds: []);
+  final allSales = await prefs.loadPendingSales();
+  final allAdjusts = await prefs.loadPendingInventoryAdjusts();
+
+  final saleQueue =
+      allSales.where((e) => e.storeId == storeId).toList(growable: false);
+  final adjQueue = allAdjusts
+      .where((e) => e.storeId == storeId)
+      .toList(growable: false);
+
+  if (saleQueue.isEmpty && adjQueue.isEmpty) {
+    return const SyncFlushResult(sentCount: 0, removedOpIds: []);
   }
 
-  final batch = pending.take(200).toList();
-  final lastPull = await prefs.getSyncPullLastVersion();
-
-  final ops = <Map<String, dynamic>>[];
-  for (final e in batch) {
-    ops.add({
+  final merged = <Map<String, Object?>>[];
+  for (final e in saleQueue) {
+    merged.add({
       'opId': e.opId,
       'opType': 'SALE',
       'timestamp': e.opTimestampIso,
       'payload': <String, dynamic>{'sale': e.sale},
+    });
+  }
+  for (final e in adjQueue) {
+    merged.add({
+      'opId': e.opId,
+      'opType': 'INVENTORY_ADJUST',
+      'timestamp': e.opTimestampIso,
+      'payload': e.payload,
+    });
+  }
+  merged.sort(
+    (a, b) => (a['timestamp']! as String).compareTo(b['timestamp']! as String),
+  );
+
+  final batch = merged.take(200).toList();
+  final lastPull = await prefs.getSyncPullLastVersion();
+
+  final ops = <Map<String, dynamic>>[];
+  for (final m in batch) {
+    ops.add({
+      'opId': m['opId'],
+      'opType': m['opType'],
+      'timestamp': m['timestamp'],
+      'payload': m['payload'],
     });
   }
 
@@ -70,26 +101,47 @@ Future<PendingSalesFlushResult> flushPendingSalesForStore({
     collectOpIds('acked');
     collectOpIds('skipped');
 
-    final remaining =
-        all.where((e) => !remove.contains(e.opId)).toList(growable: false);
-    await prefs.savePendingSales(remaining);
+    final remainingSales =
+        allSales.where((e) => !remove.contains(e.opId)).toList(growable: false);
+    final remainingAdj = allAdjusts
+        .where((e) => !remove.contains(e.opId))
+        .toList(growable: false);
+    await prefs.savePendingSales(remainingSales);
+    await prefs.savePendingInventoryAdjusts(remainingAdj);
 
-    return PendingSalesFlushResult(
+    return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: remove.toList(),
     );
   } on ApiError catch (e) {
-    return PendingSalesFlushResult(
+    return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: const [],
       apiMessage: e.userMessage,
     );
   } catch (e) {
-    return PendingSalesFlushResult(
+    return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: const [],
       hadTransportFailure: true,
       apiMessage: e.toString(),
     );
   }
+}
+
+@Deprecated('Use flushPendingSyncOpsForStore')
+Future<SyncFlushResult> flushPendingSalesForStore({
+  required String storeId,
+  required LocalPrefs prefs,
+  required SyncApi syncApi,
+  required String deviceId,
+  required String appVersion,
+}) {
+  return flushPendingSyncOpsForStore(
+    storeId: storeId,
+    prefs: prefs,
+    syncApi: syncApi,
+    deviceId: deviceId,
+    appVersion: appVersion,
+  );
 }

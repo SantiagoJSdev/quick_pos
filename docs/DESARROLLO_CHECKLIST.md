@@ -134,9 +134,9 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - **Orden de implementación** y continuidad “reintento en pantalla ↔ cola offline”: `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (fases 0–7 y checklist de huecos a evitar).
 - **Decisión cerrada:** operaciones **desde cola persistente** = **solo** `POST /sync/push` (no drenar cola con REST). Online inmediato puede seguir en REST (B3, P3) hasta optar por cola+flush unificado.
 - Patrón **`opId` / reintentos** en cliente: **fase 0** — B3 hecho; **fase 1** — ventas (P3); cola + worker — fases 2–5.
-- [x] Cola local de ventas pendientes (`LocalPrefs` JSON `pending_sales_v1`) misma forma FX que REST + `fxSource: POS_OFFLINE` al encolar.
-- [x] `POST /api/v1/sync/push` vía `SyncApi` + `flushPendingSalesForStore`: `opType: SALE`, `payload.sale`, `deviceId`/`appVersion`/`lastServerVersion`/`clientTime` (`SYNC_CONTRACTS.md`).
-- [x] Respuesta: quitar de cola ops en `acked` y `skipped` (idempotencia `opId` / venta ya aplicada); fallos de red o `ApiError` mantienen la cola; reintento manual **Sincronizar** en Venta.
+- [x] Cola local: ventas (`pending_sales_v1`) + ajustes stock (`pending_inventory_adjusts_v1`); mismo `opId` que REST en ajustes; ventas con `fxSource: POS_OFFLINE` al encolar.
+- [x] `POST /api/v1/sync/push` vía `SyncApi` + `flushPendingSyncOpsForStore` (≤200 ops, orden por timestamp): `SALE` + `INVENTORY_ADJUST`; `lastServerVersion` = watermark real post-`pull` (`sync_pull_since_v1`).
+- [x] `acked`/`skipped` sacan de ambas colas; `MainShell` al iniciar: `runSyncCycle` (pull + flush). Venta: **Sincronizar** = pull+flush. B3 sin red → cola + `sync/push` (no REST desde cola).
 
 ---
 
@@ -156,11 +156,11 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 ### 3.3 Sync offline completo
 
 - Cola offline / rehidratación: **solo** `sync/push` — `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (decisión de arquitectura cerrada).
-- [ ] `POST /api/v1/sync/push`: batch ≤200 ops; `deviceId` obligatorio; `opId` UUID v4 por op; manejar `acked` / `skipped` / `failed`.
-- [ ] Ops: `INVENTORY_ADJUST`, `PURCHASE_RECEIVE`, `SALE`, `SALE_RETURN`, `NOOP` (pruebas).
-- [ ] `GET /api/v1/sync/pull?since=&limit=`: aplicar ops en orden; guardar `toVersion` como siguiente `since`; `hasMore` en bucle.
-- [ ] **Importante:** `serverVersion` del **pull** (log global) es distinto del `serverVersion` en `acked` del **push** (por tienda) — llevar watermarks separados si hace falta.
-- [ ] Pull: `PRODUCT_CREATED` | `PRODUCT_UPDATED` | `PRODUCT_DEACTIVATED` → actualizar catálogo local; productos desactivados no vendibles (`PRODUCT_SOFT_DELETE_POLICY`).
+- [x] `POST /api/v1/sync/push`: batch ≤200 ops; `deviceId`; `opId` por op; `acked` / `skipped` / errores vía `SyncFlushResult` (ops `failed` siguen en cola).
+- [ ] Ops desde app: hecho `SALE` + `INVENTORY_ADJUST` en cola; pendiente `PURCHASE_RECEIVE`, `SALE_RETURN`, `NOOP` (pruebas).
+- [x] `GET /api/v1/sync/pull`: `pullSyncAdvanceWatermark` — bucle `hasMore`, guarda `toVersion` en `sync_pull_since_v1`.
+- [x] Watermark pull ≠ `acked.serverVersion` del push: solo se usa el primero en `lastServerVersion` del body de push (`LocalPrefs.getSyncPullLastVersion`).
+- [ ] Pull: aplicar `PRODUCT_CREATED` | `PRODUCT_UPDATED` | `PRODUCT_DEACTIVATED` a catálogo local / SQLite (hoy: solo avanza watermark; catálogo se refresca con REST en pantallas).
 
 ### 3.4 Lectura catálogo / Mongo (referencia)
 

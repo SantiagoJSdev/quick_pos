@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/idempotency/client_mutation_id.dart';
+import '../../core/network/network_errors.dart';
+import '../../core/storage/local_prefs.dart';
 import '../../core/sync/inventory_adjust_payload_builder.dart';
+import '../../core/sync/pending_inventory_adjust_entry.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
 
@@ -13,12 +16,14 @@ class InventoryAdjustmentScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.inventoryApi,
+    required this.localPrefs,
     required this.productId,
     required this.productLabel,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
+  final LocalPrefs localPrefs;
   final String productId;
   final String productLabel;
 
@@ -126,6 +131,27 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      if (isLikelyNetworkFailure(e)) {
+        await widget.localPrefs.appendPendingInventoryAdjust(
+          PendingInventoryAdjustEntry(
+            opId: _opId!,
+            storeId: widget.storeId,
+            payload: payload.toSyncPayload(),
+            opTimestampIso: DateTime.now().toUtc().toIso8601String(),
+          ),
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sin conexión: ajuste guardado en cola. Se enviará con sync/push '
+              '(desde Venta → Sincronizar o al abrir la app).',
+            ),
+          ),
+        );
+        Navigator.of(context).pop(true);
+        return;
+      }
       setState(() {
         _error = e.toString();
         _failedAwaitingRetry = true;

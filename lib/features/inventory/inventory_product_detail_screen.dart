@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/models/inventory_line.dart';
+import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
 import 'inventory_adjustment_screen.dart';
 
@@ -12,11 +13,13 @@ class InventoryProductDetailScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.inventoryApi,
+    required this.localPrefs,
     required this.initialLine,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
+  final LocalPrefs localPrefs;
   final InventoryLine initialLine;
 
   String get _productId {
@@ -99,6 +102,7 @@ class _InventoryProductDetailScreenState
         builder: (ctx) => InventoryAdjustmentScreen(
           storeId: widget.storeId,
           inventoryApi: widget.inventoryApi,
+          localPrefs: widget.localPrefs,
           productId: productId,
           productLabel: label,
         ),

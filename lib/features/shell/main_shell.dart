@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/exchange_rates_api.dart';
@@ -6,7 +8,9 @@ import '../../core/api/products_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
+import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/sync/sync_cycle.dart';
 import '../inventory/inventory_module_screen.dart';
 import '../settings/store_dashboard_screen.dart';
 import '../sale/pos_sale_screen.dart';
@@ -47,6 +51,26 @@ class _MainShellState extends State<MainShell> {
   int _index = 0;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final t = await PosTerminalInfo.load(widget.localPrefs);
+      if (!mounted) return;
+      unawaited(
+        runSyncCycle(
+          storeId: widget.storeId,
+          prefs: widget.localPrefs,
+          syncApi: widget.syncApi,
+          deviceId: t.deviceId,
+          appVersion: t.appVersion,
+          doPull: true,
+          doFlush: true,
+        ),
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
@@ -62,6 +86,7 @@ class _MainShellState extends State<MainShell> {
             storeId: widget.storeId,
             inventoryApi: widget.inventoryApi,
             productsApi: widget.productsApi,
+            localPrefs: widget.localPrefs,
           ),
           PosSaleScreen(
             storeId: widget.storeId,

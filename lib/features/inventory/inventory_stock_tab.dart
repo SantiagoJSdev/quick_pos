@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/storage/local_prefs.dart';
 import '../../core/models/inventory_line.dart';
 import '../sale/barcode_scanner_screen.dart';
 import 'inventory_product_detail_screen.dart';
@@ -15,12 +16,14 @@ class InventoryStockTab extends StatefulWidget {
     required this.storeId,
     required this.inventoryApi,
     required this.productsApi,
+    required this.localPrefs,
     this.onLoadedCount,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
+  final LocalPrefs localPrefs;
 
   /// Total de líneas tras cada carga (para contador en el módulo).
   final ValueChanged<int>? onLoadedCount;
@@ -262,6 +265,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                 builder: (ctx) => InventoryProductDetailScreen(
                   storeId: widget.storeId,
                   inventoryApi: widget.inventoryApi,
+                  localPrefs: widget.localPrefs,
                   initialLine: line,
                 ),
               ),
