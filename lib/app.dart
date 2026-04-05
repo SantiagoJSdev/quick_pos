@@ -90,6 +90,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
                   inventoryApi: _inventoryApi,
                   productsApi: _productsApi,
                   onChangeStore: _onChangeStore,
+                  localPrefs: widget.localPrefs,
                 ),
     );
   }

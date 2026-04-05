@@ -11,10 +11,12 @@ class ProductCatalogTab extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.productsApi,
+    this.onLoadedCount,
   });
 
   final String storeId;
   final ProductsApi productsApi;
+  final ValueChanged<int>? onLoadedCount;
 
   @override
   State<ProductCatalogTab> createState() => _ProductCatalogTabState();
@@ -51,6 +53,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         _all = list;
         _loading = false;
       });
+      widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
       if (!mounted) return;
       var msg = e.userMessage;
@@ -60,6 +63,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         _error = msg;
         _loading = false;
       });
+      widget.onLoadedCount?.call(0);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -67,6 +71,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         _error = e.toString();
         _loading = false;
       });
+      widget.onLoadedCount?.call(0);
     }
   }
 

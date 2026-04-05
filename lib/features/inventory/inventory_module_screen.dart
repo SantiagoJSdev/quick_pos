@@ -24,6 +24,19 @@ class InventoryModuleScreen extends StatefulWidget {
 
 class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
   int _tab = 0;
+  int? _stockLineCount;
+  int? _catalogProductCount;
+
+  String _countSuffix() {
+    if (_tab == 0) {
+      final n = _stockLineCount;
+      if (n == null) return '';
+      return ' · $n ${n == 1 ? 'línea' : 'líneas'}';
+    }
+    final n = _catalogProductCount;
+    if (n == null) return '';
+    return ' · $n ${n == 1 ? 'producto' : 'productos'}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,9 +69,10 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Text(
-              _tab == 0
-                  ? 'Cantidades en tienda. Tocá un producto para ver movimientos y ajustar stock.'
-                  : 'Ficha de producto (nombre, SKU, precio, código de barras). Acá creás y editás productos.',
+              (_tab == 0
+                      ? 'Cantidades en tienda. Tocá un producto para ver movimientos y ajustar stock.'
+                      : 'Ficha de producto (nombre, SKU, precio, código de barras). Acá creás y editás productos.') +
+                  _countSuffix(),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -71,10 +85,16 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                 InventoryStockTab(
                   storeId: widget.storeId,
                   inventoryApi: widget.inventoryApi,
+                  onLoadedCount: (n) {
+                    if (mounted) setState(() => _stockLineCount = n);
+                  },
                 ),
                 ProductCatalogTab(
                   storeId: widget.storeId,
                   productsApi: widget.productsApi,
+                  onLoadedCount: (n) {
+                    if (mounted) setState(() => _catalogProductCount = n);
+                  },
                 ),
               ],
             ),

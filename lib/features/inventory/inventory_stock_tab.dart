@@ -11,10 +11,14 @@ class InventoryStockTab extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.inventoryApi,
+    this.onLoadedCount,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
+
+  /// Total de líneas tras cada carga (para contador en el módulo).
+  final ValueChanged<int>? onLoadedCount;
 
   @override
   State<InventoryStockTab> createState() => _InventoryStockTabState();
@@ -54,6 +58,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         _all = list;
         _loading = false;
       });
+      widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
       if (!mounted) return;
       var msg = e.userMessage;
@@ -63,6 +68,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         _error = msg;
         _loading = false;
       });
+      widget.onLoadedCount?.call(0);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -70,6 +76,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         _error = e.toString();
         _loading = false;
       });
+      widget.onLoadedCount?.call(0);
     }
   }
 

@@ -100,12 +100,12 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 - [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku, name, price, currency, cost, type, unit, description; **barcode** con switch “Permitir sin código de barras” para excepción solo-teclado; montos como **string** en JSON).
 - [x] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (menú del ítem en catálogo; política `PRODUCT_SOFT_DELETE_POLICY`).
 - [ ] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
-- [ ] **UX inventario — contador** (opcional): bajo el título o en `AppBar`, mostrar **N líneas** en Stock / **N productos** en Catálogo para contexto rápido.
+- [x] **UX inventario — contador**: texto guía del módulo muestra **N líneas** (Stock) / **N productos** (Catálogo) tras cada carga (`onLoadedCount` en tabs).
 
 ### 1.4 Proveedores (sin API)
 
-- [ ] **C1** Lista proveedores **solo local** (SharedPreferences JSON o SQLite): nombre + UUID.
-- [ ] **C2** Añadir/editar proveedor local: pegar UUID (seed / Postman / admin); texto de ayuda de que compras usarán ese UUID en sprint posterior.
+- [x] **C1** Lista proveedores **solo local** (`LocalPrefs` JSON `local_suppliers_v1`): nombre + UUID — `SuppliersListScreen`.
+- [x] **C2** Añadir/editar proveedor local: `SupplierFormScreen` (UUID formato estándar, pegar desde seed/Postman); ayuda de compras futuras; quitar de lista desde menú.
 
 ### 1.5 Criterios de cierre Sprint 1
 
@@ -119,7 +119,7 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 2.1 Catálogo y carrito
 
-- [ ] **P1** Catálogo venta: grid/lista; búsqueda nombre/SKU; escaneo QR/código (paquete tipo `mobile_scanner` o ML Kit) **matcheando `product.barcode`** (u otro campo acordado) del catálogo cargado — depende de **B5** con código de barras cargado. **Reutilizar** el mismo módulo de escaneo en **B7** (Inventario: buscar + formulario producto).
+- [x] **P1** Catálogo venta: lista + pull; búsqueda nombre/SKU/barcode; **`mobile_scanner`** — `BarcodeScannerScreen` + `PosSaleScreen` matchea `product.barcode`; carrito mínimo y “Cobrar” stub (P3). Android/iOS: permiso cámara. **Reutilizar** `BarcodeScannerScreen` en **B7**.
 - [ ] **P2** Línea carrito: precio en **moneda documento**; referencia VES/funcional con tasa de `GET .../exchange-rates/latest` (solo UI hasta confirmar).
 - [ ] **P3** Ticket: subtotales/totales en moneda documento; línea referencia en VES (o según settings); al confirmar `POST /api/v1/sales` con `documentCurrencyCode`, `lines[]`, `fxSnapshot`, `deviceId`.
 - [ ] **P4** Selector moneda documento coherente con `defaultSaleDocCurrency` y pares existentes en backend (sin asumir cruces no soportados — ver tabla FX en contexto §14).

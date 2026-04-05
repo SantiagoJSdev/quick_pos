@@ -28,14 +28,9 @@ Para venta con cámara en Sprint 2 conviene barcode cargado. El formulario exige
 
 ---
 
-## “Contador” (qué es y para qué)
+## Contador (líneas / productos)
 
-No es un contador de negocio del backend, sino un **dato visual opcional** en la cabecera del módulo, por ejemplo:
-
-- En pestaña **Stock:** texto tipo *“18 productos con stock”* o *“18 líneas”* (según lo que muestre la lista).
-- En pestaña **Catálogo:** *“N productos activos”*.
-
-Sirve para que el usuario **entienda de un vistazo** si la lista está vacía por “no hay datos” o por un filtro, y da sensación de “panel” sin añadir pantallas nuevas. **Aún no implementado**; ver checklist `DESARROLLO_CHECKLIST.md` (UX inventario).
+Tras cada carga de API, el texto bajo **Stock | Catálogo** añade **· N líneas** o **· N productos** (total de la lista, no del filtro de búsqueda). Implementado vía `onLoadedCount` en `InventoryStockTab` y `ProductCatalogTab`.
 
 ---
 
@@ -59,7 +54,7 @@ Tiene sentido **sí**: escanear acelera mucho el trabajo en depósito y en alta 
 
 - **Un solo componente/servicio de escaneo** reutilizable: Inventario (buscar + formulario) y POS (añadir al carrito) comparten lectura y normalización del string leído.
 
-Implementación: ver checklist **B7** en `docs/DESARROLLO_CHECKLIST.md`.
+Implementación: ver checklist **B7** en `docs/DESARROLLO_CHECKLIST.md`. Escáner compartido: `lib/features/sale/barcode_scanner_screen.dart` (ya usado en **Venta** P1).
 
 ## `ApiClient.getJsonList` y formas de respuesta
 
