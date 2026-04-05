@@ -17,10 +17,10 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/sync/sync_cycle.dart';
 import '../inventory/inventory_module_screen.dart';
 import '../settings/store_dashboard_screen.dart';
-import '../sale/pos_sale_screen.dart';
+import '../sale/sales_module_screen.dart';
 import '../suppliers/suppliers_list_screen.dart';
 
-/// Navegación principal: **Inicio**, **Inventario**, **Venta** (POS + cola `sync/push`), **Proveedores** (C1/C2).
+/// Navegación principal: **Inicio**, **Inventario**, **Venta** (menú → POS / historial / precios), **Proveedores** (C1/C2).
 ///
 /// Usa [IndexedStack] para conservar el estado de cada pestaña al cambiar.
 class MainShell extends StatefulWidget {
@@ -159,7 +159,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             localPrefs: widget.localPrefs,
             catalogInvalidationBus: widget.catalogInvalidationBus,
           ),
-          PosSaleScreen(
+          SalesModuleScreen(
             storeId: widget.storeId,
             productsApi: widget.productsApi,
             storesApi: widget.storesApi,

@@ -14,6 +14,7 @@ import '../../core/network/network_errors.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/pos_cart_line.dart';
 import '../../core/pos/money_string_math.dart';
 import '../../core/pos/pos_sale_pricing.dart';
@@ -50,6 +51,7 @@ class PosSaleScreen extends StatefulWidget {
     required this.syncApi,
     required this.catalogInvalidationBus,
     required this.localPrefs,
+    this.onRequestExit,
   });
 
   final String storeId;
@@ -60,6 +62,9 @@ class PosSaleScreen extends StatefulWidget {
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
+
+  /// Si no es null (p. ej. módulo Ventas), muestra atrás en la barra superior.
+  final VoidCallback? onRequestExit;
 
   @override
   State<PosSaleScreen> createState() => _PosSaleScreenState();
@@ -576,8 +581,26 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       clientSaleId: _pendingSaleId,
     );
     try {
-      await widget.salesApi.createSale(widget.storeId, restBody);
+      final res = await widget.salesApi.createSale(widget.storeId, restBody);
       if (!mounted) return;
+      final totalDoc = _cartTotalDocument;
+      var sid = res['id']?.toString().trim();
+      if (sid == null || sid.isEmpty) {
+        sid = _pendingSaleId ?? '';
+      }
+      if (sid.isNotEmpty && totalDoc != null) {
+        await widget.localPrefs.prependRecentSaleTicket(
+          RecentSaleTicket(
+            storeId: widget.storeId,
+            saleId: sid,
+            totalDocument: totalDoc,
+            documentCurrencyCode: doc,
+            recordedAtIso: DateTime.now().toUtc().toIso8601String(),
+            status: RecentSaleTicket.statusSynced,
+          ),
+        );
+        if (!mounted) return;
+      }
       setState(() {
         _cart.clear();
         _pendingSaleId = null;
@@ -610,6 +633,23 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             opTimestampIso: DateTime.now().toUtc().toIso8601String(),
           ),
         );
+        final totalDoc = _cartTotalDocument;
+        final clientSid = _pendingSaleId;
+        if (clientSid != null &&
+            clientSid.isNotEmpty &&
+            totalDoc != null) {
+          await widget.localPrefs.prependRecentSaleTicket(
+            RecentSaleTicket(
+              storeId: widget.storeId,
+              saleId: clientSid,
+              totalDocument: totalDoc,
+              documentCurrencyCode: doc,
+              recordedAtIso: DateTime.now().toUtc().toIso8601String(),
+              status: RecentSaleTicket.statusQueued,
+            ),
+          );
+          if (!mounted) return;
+        }
         if (!mounted) return;
         setState(() {
           _cart.clear();
@@ -871,6 +911,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
               onSync: () => _runSyncCycle(silent: false, doPull: true),
               syncBusy: _flushBusy,
               showSyncDot: _pendingSyncCount > 0,
+              onBack: widget.onRequestExit,
             ),
             PosSaleSearchBlock(
               controller: _search,

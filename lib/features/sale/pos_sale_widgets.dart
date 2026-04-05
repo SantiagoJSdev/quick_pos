@@ -20,6 +20,7 @@ class PosSaleTopBar extends StatelessWidget {
     required this.onSync,
     this.syncBusy = false,
     this.showSyncDot = false,
+    this.onBack,
   });
 
   final String rateHeadline;
@@ -28,6 +29,7 @@ class PosSaleTopBar extends StatelessWidget {
   final VoidCallback onSync;
   final bool syncBusy;
   final bool showSyncDot;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +42,20 @@ class PosSaleTopBar extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (onBack != null) ...[
+            IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: onBack,
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                size: 18,
+                color: PosSaleUi.text,
+              ),
+              tooltip: 'Volver',
+            ),
+            const SizedBox(width: 4),
+          ],
           Row(
             children: [
               Container(
@@ -585,6 +601,9 @@ class _MiniIcon extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
+  /// Mínimo ~40 logical px para que en emulador/dedo sea fácil acertar (Material ~48).
+  static const double _tap = 40;
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -593,9 +612,9 @@ class _MiniIcon extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: SizedBox(
-          width: 28,
-          height: 28,
-          child: Icon(icon, size: 18, color: PosSaleUi.textMuted),
+          width: _tap,
+          height: _tap,
+          child: Icon(icon, size: 22, color: PosSaleUi.textMuted),
         ),
       ),
     );

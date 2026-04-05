@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/local_supplier.dart';
+import '../models/recent_sale_ticket.dart';
 import '../sync/pending_inventory_adjust_entry.dart';
 import '../sync/pending_purchase_receive_entry.dart';
 import '../sync/pending_sale_entry.dart';
@@ -15,6 +16,7 @@ const _kPendingSalesV1 = 'pending_sales_v1';
 const _kPendingInvAdjustV1 = 'pending_inventory_adjusts_v1';
 const _kPendingPurchaseReceiveV1 = 'pending_purchase_receive_v1';
 const _kSyncPullSinceV1 = 'sync_pull_since_v1';
+const _kRecentSalesV1 = 'recent_sales_v1';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -194,5 +196,40 @@ class LocalPrefs {
     final b = await countPendingInventoryAdjustsForStore(storeId);
     final c = await countPendingPurchaseReceivesForStore(storeId);
     return a + b + c;
+  }
+
+  /// Historial local de tickets (máx. 50 por dispositivo; filtrar por tienda al mostrar).
+  Future<List<RecentSaleTicket>> loadRecentSaleTickets() async {
+    final raw = _prefs.getString(_kRecentSalesV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <RecentSaleTicket>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final t = RecentSaleTicket.tryFromJson(Map<String, dynamic>.from(e));
+        if (t != null) out.add(t);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveRecentSaleTickets(List<RecentSaleTicket> items) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kRecentSalesV1, encoded);
+  }
+
+  /// Inserta al frente; evita duplicar mismo [saleId]; recorta a 50.
+  Future<void> prependRecentSaleTicket(RecentSaleTicket entry) async {
+    final list = await loadRecentSaleTickets();
+    final next = <RecentSaleTicket>[entry];
+    for (final e in list) {
+      if (e.saleId == entry.saleId) continue;
+      next.add(e);
+    }
+    await saveRecentSaleTickets(next.take(50).toList(growable: false));
   }
 }

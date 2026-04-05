@@ -12,4 +12,9 @@ class SalesApi {
   ) {
     return _client.postJson('/sales', storeId, body);
   }
+
+  /// `GET /api/v1/sales/:id` — detalle con líneas (misma tienda).
+  Future<Map<String, dynamic>> getSale(String storeId, String saleId) {
+    return _client.getJson('/sales/$saleId', storeId);
+  }
 }
