@@ -162,6 +162,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             storeId: widget.storeId,
             inventoryApi: widget.inventoryApi,
             productsApi: widget.productsApi,
+            suppliersApi: widget.suppliersApi,
             localPrefs: widget.localPrefs,
             catalogInvalidationBus: widget.catalogInvalidationBus,
           ),

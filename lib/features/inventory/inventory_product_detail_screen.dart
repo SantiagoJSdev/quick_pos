@@ -202,6 +202,9 @@ class _InventoryProductDetailScreenState
                             children: [
                               _kv('Disponible', line.quantity),
                               _kv('Reservado', line.reserved),
+                              if (line.minStock != null &&
+                                  line.minStock!.trim().isNotEmpty)
+                                _kv('Stock mínimo', line.minStock!),
                               if (line.averageUnitCostFunctional != null &&
                                   line.averageUnitCostFunctional!.isNotEmpty)
                                 _kv(

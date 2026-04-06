@@ -4,6 +4,55 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ---
 
+## Mapa de documentos de contrato (índice)
+
+Según **`docs/DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md`**, el backend puede aportar copias en `docs/backend/`; en este repo también están en **`docs/`** (raíz) para trabajo diario.
+
+| Documento | Rol |
+|-----------|-----|
+| **`docs/FRONTEND_INTEGRATION_CONTEXT.md`** | Contexto general API, JSON por pantalla, FX, cabeceras. |
+| **`docs/FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md`** | Inventario UX + proveedores + márgenes; **qué ya existe** vs **fase M7** (endpoint compuesto, márgenes). |
+| **`docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`** | Contrato `GET/POST/PATCH/DELETE /suppliers`, `taxId`, compras con proveedor activo. |
+| **`docs/BACKEND_PRODUCT_SKU_BARCODE.md`** | SKU opcional / autogenerado, barcode, PATCH `barcode: null`. |
+| **`docs/BACKEND_SALES_HISTORY_API.md`** | Listado histórico ventas (pestaña General en historial). |
+
+Variable de build: **`API_BASE_URL`** (`--dart-define`, sin barra final duplicada). Default en código: `lib/core/config/app_config.dart` (emulador `10.0.2.2` + puerto del backend).
+
+---
+
+## Estado actual de la app (snapshot)
+
+**Listo en código** (alineado a los docs anteriores, salvo donde se indica gap):
+
+- **Tienda / FX / cliente HTTP:** enlace tienda, business settings, tasas, `ApiClient`, montos string, `deviceId` / `appVersion`.
+- **Inventario:** `GET /inventory`, detalle, movimientos, ajustes + cola sync; **Stock** mezcla líneas API + productos de catálogo sin movimientos (0 disp.); búsqueda nombre/SKU/barcode; **`minStock`** + filtros sin stock / bajo mínimo; escáner B7.
+- **Catálogo:** listado, alta/edición/baja producto con contrato **SKU/barcode**; tras alta, opción **cargar stock inicial** (B3).
+- **Proveedores:** REST por tienda (`SuppliersApi`, lista con `q` + cursor, alta/edición/baja lógica, `taxId`); recepción compra con proveedor activo y mensaje si **400** por inactivo.
+- **Venta:** POS, historial local + `GET /sales`, checkout `POST /sales`, offline + `sync/push`.
+- **Compras / devoluciones / sync:** `POST /purchases`, cola; devoluciones; pull + invalidación catálogo.
+
+**Huecos respecto a `FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2–3 (integrables ya o UX):**
+
+- [x] **`supplierId` en producto:** `CatalogProduct` + `toCreateBody` / `toPatchBody` + selector de proveedor activo en `ProductFormScreen` (carga `GET /suppliers` paginado).
+- [x] **`minStock` y filtros:** `InventoryLine.minStock` + getters `isOutOfStock` / `isBelowMinimumStock`; chips **Todos / Sin stock / Bajo mínimo** en `InventoryStockTab`; detalle B2 muestra stock mínimo si viene del API.
+- [x] **Alta “producto + stock inicial”:** tras **crear** producto, diálogo opcional → **B3** `IN_ADJUST` con motivo sugerido «Inventario inicial» (`ProductFormScreen` + `InventoryAdjustmentScreen.suggestedReason`). Sigue vigente **`POST /products-with-stock` (M7)** para una sola llamada cuando exista.
+
+**Bloqueado por backend M7** (ver §4 del mismo doc + tracker backend): `defaultMarginPercent`, `pricingMode`, `marginPercentOverride`, `effectiveMarginPercent` / precio sugerido, `POST /products-with-stock`, política post-compra sobre precio. La app puede añadir **calculadora local** de margen sin persistir hasta que exista API.
+
+---
+
+## Plan paso a paso sugerido (siguiente trabajo Flutter)
+
+Orden recomendado; marcar en las secciones inferiores del checklist al cerrar cada ítem.
+
+1. **Mantener docs** al día: al cambiar el backend, recopiar según `DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md` (o `docs/backend/` solo lectura).
+2. ~~**`supplierId` en catálogo**~~ — hecho.
+3. ~~**Inventario `minStock` + filtros**~~ — hecho.
+4. ~~**Flujo post-crear → stock inicial**~~ — hecho (diálogo + B3).
+5. **Cuando M7 exista en API:** `products-with-stock`, settings de margen, campos de pricing en producto — integrar y actualizar este checklist + `FRONTEND_INTEGRATION_CONTEXT`.
+
+---
+
 ## 0) Entorno y emulador (antes de codificar features)
 
 ### 0.1 Emulador Android (teléfono virtual)
@@ -43,7 +92,8 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 **Red hacia el backend en emulador**
 
-- `localhost` del PC = `http://10.0.2.2:<puerto>` desde el emulador (ej. backend en `3000` → `http://10.0.2.2:3000`).
+- `localhost` del PC = `http://10.0.2.2:<puerto>` desde el emulador (puerto = el del Nest; en proyecto el default en `app_config.dart` suele coincidir, ej. `3002` → `http://10.0.2.2:3002/api/v1`).
+
 - Solo **debug**: en `AndroidManifest.xml`, `android:usesCleartextTraffic="true"` en `<application>` si usas HTTP. En producción, HTTPS.
 
 **Checklist emulador**
@@ -93,11 +143,11 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ### 1.3 Módulo inventario y productos
 
-- [x] **B1** Lista inventario: `GET /api/v1/inventory`; pull-to-refresh; búsqueda local por nombre/SKU/**barcode** (`InventoryStockTab` dentro de `InventoryModuleScreen`).
+- [x] **B1** Lista inventario: `GET /api/v1/inventory`; pull-to-refresh; búsqueda local por nombre/SKU/**barcode**; campo **`minStock`** en modelo + filtros **Todos / Sin stock / Bajo mínimo** (`InventoryStockTab`). `FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2.
 - [x] **B2** Detalle stock: `GET /api/v1/inventory/{productId}` (404 → sin ficha aún; se muestra línea de la lista); `GET /api/v1/inventory/movements?productId=&limit=` — pantalla al tocar un ítem en **Stock** (`InventoryProductDetailScreen`).
 - [x] **B3** Ajuste stock: `POST /api/v1/inventory/adjustments` — `InventoryAdjustmentScreen` desde detalle B2 (`IN_ADJUST` / `OUT_ADJUST`, `quantity` string, `reason` obligatorio en UI, `unitCostFunctional` solo en entradas, **`opId`** vía `ClientMutationId` — reintento con mismo id; al editar el formulario tras fallo, nuevo `opId`). Payload sync alineado: `InventoryAdjustPayloadBuilder` (`lib/core/sync/inventory_adjust_payload_builder.dart`). **Sin red / cola:** checklist explícita en `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` § “Punto de implementación: guardar sin red en B3”.
 - [x] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); cabecera `X-Catalog-Source` en UI debug opcional *(no implementada aún)*.
-- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku opcional en alta → backend `SKU-000xxx` si se omite; **barcode** opcional/único; sin copiar barras→SKU salvo botón explícito; PATCH con `barcode: null` para quitar). Contrato: `docs/BACKEND_PRODUCT_SKU_BARCODE.md` + `CatalogProduct.toCreateBody` / `toPatchBody`.
+- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku opcional en alta → backend `SKU-000xxx` si se omite; **barcode** opcional/único; sin copiar barras→SKU salvo botón explícito; PATCH con `barcode: null` para quitar; **`supplierId`** opcional; tras **crear**, diálogo opcional → B3 stock inicial). Contrato: `docs/BACKEND_PRODUCT_SKU_BARCODE.md` + `FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2–3.
 - [x] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (menú del ítem en catálogo; política `PRODUCT_SOFT_DELETE_POLICY`).
 - [x] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
 - [x] **UX inventario — contador**: texto guía del módulo muestra **N líneas** (Stock) / **N productos** (Catálogo) tras cada carga (`onLoadedCount` en tabs).
@@ -184,13 +234,27 @@ Seguimiento del avance frente a la documentación del backend (`FRONTEND_INTEGRA
 
 ---
 
+## M7 — Márgenes y endpoint compuesto (solo planificación en app)
+
+Seguimiento de **backend** en tracker del repo Nest; cuando existan endpoints, añadir tareas aquí.
+
+- [ ] **M7-P1–P4** Settings / producto: `defaultMarginPercent`, `pricingMode`, overrides — modelo + UI según `FRONTEND_INTEGRATION_CONTEXT` actualizado.
+- [ ] **M7-P5** `POST /api/v1/products-with-stock` — sustituir o complementar flujo dos llamadas en alta de producto.
+- [ ] **M7-P6–P7** Post-compra / proyección Mongo — solo si la app consume esos campos en listados.
+
+---
+
 ## Referencias rápidas
 
 | Tema | Archivo |
 |------|---------|
 | UX Stock vs catálogo + `getJsonList` + cámara/contador (B7) | `docs/UX_INVENTARIO_PRODUCTOS.md` |
+| Inventario, proveedores, márgenes, fases M7 | `docs/FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` |
+| Proveedores API | `docs/BACKEND_SUPPLIERS_API_PROPOSAL.md` |
+| SKU / barcode | `docs/BACKEND_PRODUCT_SKU_BARCODE.md` |
+| Índice copia docs backend → Flutter | `docs/DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md` |
 | Idempotencia cliente (`opId`) y offline futuro | `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` (§ checklist B3 sin red + `InventoryAdjustPayloadBuilder`) |
-| API + JSON por pantalla + FX | `FRONTEND_INTEGRATION_CONTEXT.md` |
+| API + JSON por pantalla + FX | `docs/FRONTEND_INTEGRATION_CONTEXT.md` |
 | Sprints, pantallas, paquetes, UI | `IMPLEMENTACION_FLUTTER_ANDROID_GEMINI.md` |
 | Índice docs → Flutter | `DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md` |
 | Sync push/pull | `SYNC_CONTRACTS.md` |

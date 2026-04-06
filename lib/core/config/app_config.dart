@@ -1,4 +1,4 @@
-/// Base URL del API **sin** barra final (ej. `http://10.0.2.2:3000/api/v1`).
+/// Base URL del API **sin** barra final (ej. `http://10.0.2.2:3002/api/v1`).
 /// Emulador Android → `localhost` del PC es `10.0.2.2`.
 ///
 /// Override al ejecutar:
@@ -8,6 +8,6 @@ class AppConfig {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:3000/api/v1',
+    defaultValue: 'http://10.0.2.2:3002/api/v1',
   );
 }

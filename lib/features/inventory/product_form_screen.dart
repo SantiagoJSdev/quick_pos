@@ -1,8 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
+import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/suppliers_api.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/models/supplier.dart';
+import '../../core/storage/local_prefs.dart';
+import 'inventory_adjustment_screen.dart';
 import '../sale/barcode_scanner_screen.dart';
 
 const _currencies = ['USD', 'VES', 'EUR'];
@@ -14,12 +21,21 @@ class ProductFormScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.productsApi,
+    required this.suppliersApi,
+    this.inventoryApi,
+    this.localPrefs,
     this.existing,
     this.initialBarcode,
   });
 
   final String storeId;
   final ProductsApi productsApi;
+  final SuppliersApi suppliersApi;
+
+  /// Si vienen ambos, tras **crear** producto se ofrece ir a B3 (stock inicial).
+  final InventoryApi? inventoryApi;
+  final LocalPrefs? localPrefs;
+
   final CatalogProduct? existing;
 
   /// Solo alta: precarga el campo código de barras (p. ej. escaneo desde Stock/Catálogo).
@@ -45,10 +61,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _loading = false;
   String? _error;
 
+  List<Supplier> _suppliers = [];
+  bool _suppliersLoading = true;
+  String? _suppliersLoadError;
+  String? _supplierId;
+
   @override
   void initState() {
     super.initState();
     final p = widget.existing;
+    final rawSid = p?.supplierId?.trim();
+    _supplierId = (rawSid == null || rawSid.isEmpty) ? null : rawSid;
     if (p != null) {
       _sku.text = p.sku;
       _name.text = p.name;
@@ -67,6 +90,85 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _allowNoBarcode = false;
       }
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadSuppliers());
+    });
+  }
+
+  Future<void> _loadSuppliers() async {
+    setState(() {
+      _suppliersLoading = true;
+      _suppliersLoadError = null;
+    });
+    try {
+      final all = <Supplier>[];
+      String? cursor;
+      for (var i = 0; i < 40; i++) {
+        final page = await widget.suppliersApi.listSuppliers(
+          widget.storeId,
+          cursor: cursor,
+          limit: 200,
+          active: 'true',
+        );
+        all.addAll(page.items);
+        final next = page.nextCursor?.trim();
+        if (next == null || next.isEmpty) break;
+        cursor = next;
+      }
+      all.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+      if (!mounted) return;
+      setState(() {
+        _suppliers = all;
+        _suppliersLoading = false;
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _suppliers = [];
+        _suppliersLoading = false;
+        _suppliersLoadError = e.userMessageForSupport;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _suppliers = [];
+        _suppliersLoading = false;
+        _suppliersLoadError = e.toString();
+      });
+    }
+  }
+
+  List<DropdownMenuItem<String?>> _supplierDropdownItems() {
+    final out = <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(
+        value: null,
+        child: Text('Sin proveedor'),
+      ),
+    ];
+    final orphan = _supplierId;
+    if (orphan != null && !_suppliers.any((s) => s.id == orphan)) {
+      final short = orphan.length > 12 ? '${orphan.substring(0, 8)}…' : orphan;
+      out.add(
+        DropdownMenuItem<String?>(
+          value: orphan,
+          child: Text('Proveedor asignado ($short)'),
+        ),
+      );
+    }
+    for (final s in _suppliers) {
+      out.add(
+        DropdownMenuItem<String?>(
+          value: s.id,
+          child: Text(
+            s.name,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+    return out;
   }
 
   void _copyBarcodeToSku() {
@@ -160,6 +262,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       currency: _currency,
       active: widget.existing?.active ?? true,
       unit: _unit.text.trim().isEmpty ? null : _unit.text.trim(),
+      supplierId: _supplierId,
     );
 
     setState(() => _loading = true);
@@ -176,14 +279,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           product.toCreateBody(),
         );
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Producto creado · SKU ${created.sku}',
-            ),
-          ),
-        );
-        Navigator.of(context).pop(true);
+        setState(() => _loading = false);
+        await _finishAfterCreate(created);
         return;
       }
       if (!mounted) return;
@@ -200,6 +297,56 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _finishAfterCreate(CatalogProduct created) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Producto creado · SKU ${created.sku}')),
+    );
+    final inv = widget.inventoryApi;
+    final prefs = widget.localPrefs;
+    if (inv == null || prefs == null) {
+      Navigator.of(context).pop(true);
+      return;
+    }
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Cargar stock inicial?'),
+        content: Text(
+          'Podés registrar ahora la cantidad en depósito para «${created.name}». '
+          'Será un ajuste de entrada (IN_ADJUST) con motivo de inventario inicial. '
+          'También podés hacerlo después en Inventario → Stock.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Ahora no'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cargar stock inicial'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (go == true) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (ctx) => InventoryAdjustmentScreen(
+            storeId: widget.storeId,
+            inventoryApi: inv,
+            localPrefs: prefs,
+            productId: created.id,
+            productLabel: created.name,
+            suggestedReason: 'Inventario inicial',
+          ),
+        ),
+      );
+    }
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   @override
@@ -232,6 +379,43 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             textCapitalization: TextCapitalization.words,
             enabled: !_loading,
           ),
+          const SizedBox(height: 12),
+          if (_suppliersLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: LinearProgressIndicator(),
+            )
+          else ...[
+            if (_suppliersLoadError != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _suppliersLoadError!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Proveedor (opcional)',
+                helperText:
+                    'Misma tienda que el catálogo. Solo proveedores activos.',
+                border: OutlineInputBorder(),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String?>(
+                  value: _supplierId,
+                  isExpanded: true,
+                  items: _supplierDropdownItems(),
+                  onChanged: _loading
+                      ? null
+                      : (v) => setState(() => _supplierId = v),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: _barcode,

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/suppliers_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/catalog_product.dart';
@@ -13,6 +14,13 @@ import '../sale/barcode_scanner_screen.dart';
 import 'inventory_product_detail_screen.dart';
 import 'product_form_screen.dart';
 
+/// Filtro por cantidad / mínimo (`FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2).
+enum _StockListFilter {
+  all,
+  outOfStock,
+  belowMin,
+}
+
 /// B1 — contenido de **Stock** (sin `Scaffold`; va dentro de [InventoryModuleScreen]).
 class InventoryStockTab extends StatefulWidget {
   const InventoryStockTab({
@@ -20,6 +28,7 @@ class InventoryStockTab extends StatefulWidget {
     required this.storeId,
     required this.inventoryApi,
     required this.productsApi,
+    required this.suppliersApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
     this.onLoadedCount,
@@ -28,6 +37,7 @@ class InventoryStockTab extends StatefulWidget {
   final String storeId;
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
+  final SuppliersApi suppliersApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
 
@@ -43,6 +53,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   List<InventoryLine> _all = [];
   bool _loading = true;
   String? _error;
+  _StockListFilter _stockFilter = _StockListFilter.all;
 
   @override
   void initState() {
@@ -65,6 +76,17 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   }
 
   void _onSearchChanged() => setState(() {});
+
+  List<InventoryLine> get _stockFiltered {
+    switch (_stockFilter) {
+      case _StockListFilter.all:
+        return _all;
+      case _StockListFilter.outOfStock:
+        return _all.where((l) => l.isOutOfStock).toList();
+      case _StockListFilter.belowMin:
+        return _all.where((l) => l.isBelowMinimumStock).toList();
+    }
+  }
 
   Future<void> _load() async {
     setState(() {
@@ -144,6 +166,9 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,
           productsApi: widget.productsApi,
+          suppliersApi: widget.suppliersApi,
+          inventoryApi: widget.inventoryApi,
+          localPrefs: widget.localPrefs,
           initialBarcode: code,
         ),
       ),
@@ -180,9 +205,10 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   }
 
   List<InventoryLine> get _filtered {
+    final base = _stockFiltered;
     final q = _searchController.text.trim().toLowerCase();
-    if (q.isEmpty) return _all;
-    return _all.where((line) {
+    if (q.isEmpty) return base;
+    return base.where((line) {
       final name = line.product?.name?.toLowerCase() ?? '';
       final sku = line.product?.sku?.toLowerCase() ?? '';
       final bc = line.product?.barcode?.toLowerCase() ?? '';
@@ -214,10 +240,68 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           ),
         ),
         Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                Tooltip(
+                  message: 'Mostrar todas las líneas (según búsqueda).',
+                  child: FilterChip(
+                    label: const Text('Todos'),
+                    selected: _stockFilter == _StockListFilter.all,
+                    onSelected: _loading
+                        ? null
+                        : (v) => setState(() {
+                              if (v) _stockFilter = _StockListFilter.all;
+                            }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Tooltip(
+                  message:
+                      'Cantidad en cero o menos: ya no hay disponible para vender.',
+                  child: FilterChip(
+                    label: const Text('Sin stock'),
+                    selected: _stockFilter == _StockListFilter.outOfStock,
+                    onSelected: _loading
+                        ? null
+                        : (v) => setState(() {
+                              _stockFilter = v
+                                  ? _StockListFilter.outOfStock
+                                  : _StockListFilter.all;
+                            }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Tooltip(
+                  message:
+                      'Siguen teniendo stock pero ya están en el piso o por debajo '
+                      'del mínimo que marca el servidor (minStock): conviene reponer '
+                      'antes de quedarse en cero.',
+                  child: FilterChip(
+                    label: const Text('Bajo mínimo'),
+                    selected: _stockFilter == _StockListFilter.belowMin,
+                    onSelected: _loading
+                        ? null
+                        : (v) => setState(() {
+                              _stockFilter = v
+                                  ? _StockListFilter.belowMin
+                                  : _StockListFilter.all;
+                            }),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
           padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
           child: Text(
-            'Incluye productos del catálogo sin movimientos aún (0 disp.). '
-            'Buscá por nombre, SKU o código de barras; escaneá con el ícono.',
+            'Sin stock = nada disponible (cantidad ≤ 0). '
+            'Bajo mínimo = todavía hay unidades pero están por acabarse: la cantidad '
+            'es mayor que cero y no supera el piso minStock que envía el API (reponer pronto). '
+            'Incluye productos de catálogo sin movimientos (0). Buscá o escaneá con el ícono.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -277,7 +361,12 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                   ? 'No hay productos en catálogo ni líneas de inventario.\n\n'
                       'Creá productos en la pestaña Catálogo (arriba); '
                       'aparecerán acá con 0 hasta la primera compra o ajuste de stock.'
-                  : 'Ningún resultado para la búsqueda.',
+                  : _searchController.text.trim().isNotEmpty
+                      ? 'Ningún resultado para la búsqueda y el filtro actual.'
+                      : _stockFilter != _StockListFilter.all
+                          ? 'Ningún producto cumple este filtro de stock.\n\n'
+                              '“Bajo mínimo” solo aplica si el API envía minStock > 0.'
+                          : 'Ningún resultado.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -294,15 +383,27 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       itemBuilder: (context, i) {
         final line = items[i];
         final synth = line.isSyntheticInventoryRow;
+        final min = line.minStock?.trim();
+        final minSuffix = (min != null && min.isNotEmpty) ? ' · mín. $min' : '';
+        final barcodeSuffix = line.product?.barcode != null &&
+                line.product!.barcode!.isNotEmpty
+            ? ' · ${line.product!.barcode}'
+            : '';
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          leading: (!synth && (line.isOutOfStock || line.isBelowMinimumStock))
+              ? Icon(
+                  line.isOutOfStock ? Icons.inventory_2_outlined : Icons.warning_amber_outlined,
+                  color: line.isOutOfStock
+                      ? Theme.of(context).colorScheme.outline
+                      : Theme.of(context).colorScheme.tertiary,
+                )
+              : null,
           title: Text(line.displayName),
           subtitle: Text(
             synth
-                ? 'Sin movimientos de inventario · SKU: ${line.displaySku}'
-                    '${line.product?.barcode != null && line.product!.barcode!.isNotEmpty ? ' · ${line.product!.barcode}' : ''}'
-                : 'SKU: ${line.displaySku}'
-                    '${line.product?.barcode != null && line.product!.barcode!.isNotEmpty ? ' · ${line.product!.barcode}' : ''}',
+                ? 'Sin movimientos de inventario · SKU: ${line.displaySku}$barcodeSuffix$minSuffix'
+                : 'SKU: ${line.displaySku}$barcodeSuffix$minSuffix',
           ),
           onTap: () {
             Navigator.of(context).push<void>(

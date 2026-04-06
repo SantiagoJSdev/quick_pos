@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
+import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/suppliers_api.dart';
+import '../../core/storage/local_prefs.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/catalog_product.dart';
 import '../sale/barcode_scanner_screen.dart';
@@ -15,12 +18,18 @@ class ProductCatalogTab extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.productsApi,
+    required this.suppliersApi,
+    required this.inventoryApi,
+    required this.localPrefs,
     required this.catalogInvalidationBus,
     this.onLoadedCount,
   });
 
   final String storeId;
   final ProductsApi productsApi;
+  final SuppliersApi suppliersApi;
+  final InventoryApi inventoryApi;
+  final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
   final ValueChanged<int>? onLoadedCount;
 
@@ -105,6 +114,9 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,
           productsApi: widget.productsApi,
+          suppliersApi: widget.suppliersApi,
+          inventoryApi: widget.inventoryApi,
+          localPrefs: widget.localPrefs,
           existing: existing,
           initialBarcode:
               existing == null ? prefilledBarcode : null,

@@ -12,6 +12,7 @@ class CatalogProduct {
     required this.currency,
     required this.active,
     this.unit,
+    this.supplierId,
   });
 
   final String id;
@@ -26,6 +27,9 @@ class CatalogProduct {
   final bool active;
   final String? unit;
 
+  /// Proveedor principal (`Product.supplierId`); misma tienda que `X-Store-Id`.
+  final String? supplierId;
+
   static CatalogProduct fromJson(Map<String, dynamic> json) {
     return CatalogProduct(
       id: json['id']?.toString() ?? '',
@@ -39,7 +43,14 @@ class CatalogProduct {
       currency: json['currency']?.toString() ?? 'USD',
       active: json['active'] as bool? ?? true,
       unit: json['unit'] as String?,
+      supplierId: _parseOptionalId(json['supplierId']),
     );
+  }
+
+  static String? _parseOptionalId(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
   }
 
   /// `POST /products` — `docs/BACKEND_PRODUCT_SKU_BARCODE.md`: omitir `sku` vacío para que el backend asigne `SKU-000xxx`.
@@ -63,6 +74,10 @@ class CatalogProduct {
     if (description != null && description!.trim().isNotEmpty) {
       m['description'] = description!.trim();
     }
+    final sid = supplierId?.trim();
+    if (sid != null && sid.isNotEmpty) {
+      m['supplierId'] = sid;
+    }
     return m;
   }
 
@@ -85,6 +100,8 @@ class CatalogProduct {
       m['description'] =
           description!.trim().isEmpty ? null : description!.trim();
     }
+    final sid = supplierId?.trim();
+    m['supplierId'] = (sid == null || sid.isEmpty) ? null : sid;
     return m;
   }
 }

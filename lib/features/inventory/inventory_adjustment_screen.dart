@@ -19,6 +19,7 @@ class InventoryAdjustmentScreen extends StatefulWidget {
     required this.localPrefs,
     required this.productId,
     required this.productLabel,
+    this.suggestedReason,
   });
 
   final String storeId;
@@ -26,6 +27,9 @@ class InventoryAdjustmentScreen extends StatefulWidget {
   final LocalPrefs localPrefs;
   final String productId;
   final String productLabel;
+
+  /// P. ej. alta de producto + `IN_ADJUST` “Inventario inicial” (`FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §3).
+  final String? suggestedReason;
 
   @override
   State<InventoryAdjustmentScreen> createState() =>
@@ -52,6 +56,10 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
   @override
   void initState() {
     super.initState();
+    final sr = widget.suggestedReason?.trim();
+    if (sr != null && sr.isNotEmpty) {
+      _reason.text = sr;
+    }
     void onFieldChanged() {
       if (!_failedAwaitingRetry || !mounted) return;
       setState(() {
