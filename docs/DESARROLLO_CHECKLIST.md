@@ -15,6 +15,7 @@ Según **`docs/DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md`**, el backend puede a
 | **`docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`** | Contrato `GET/POST/PATCH/DELETE /suppliers`, `taxId`, compras con proveedor activo. |
 | **`docs/BACKEND_PRODUCT_SKU_BARCODE.md`** | SKU opcional / autogenerado, barcode, PATCH `barcode: null`. |
 | **`docs/BACKEND_SALES_HISTORY_API.md`** | Listado histórico ventas (pestaña General en historial). |
+| **`docs/POS_TICKETS_EN_ESPERA_FRONT_BACKEND.md`** | Tickets en espera (ON_HOLD local, sin API hasta cobrar); §13 implementación Flutter. |
 
 Variable de build: **`API_BASE_URL`** (`--dart-define`, sin barra final duplicada). Default en código: `lib/core/config/app_config.dart` (emulador `10.0.2.2` + puerto del backend).
 
@@ -28,7 +29,7 @@ Variable de build: **`API_BASE_URL`** (`--dart-define`, sin barra final duplicad
 - **Inventario:** `GET /inventory`, detalle B2 (`GET /products/:id` + ficha margen/precio, sugerencia sobre costo medio según **margen propio / tienda / manual**), movimientos, ajustes + cola sync; **Stock** mezcla líneas API + productos de catálogo sin movimientos (0 disp.); búsqueda nombre/SKU/barcode; **`minStock`** + filtros sin stock / bajo mínimo; escáner B7.
 - **Catálogo:** listado, alta/edición/baja producto con contrato **SKU/barcode**; en alta: **solo ficha** (`POST /products`) o **con stock inicial** (`POST /products-with-stock` + cabecera **`Idempotency-Key`**, `initialStock.opId` para el movimiento — §13.6b).
 - **Proveedores:** REST por tienda (`SuppliersApi`, lista con `q` + cursor, alta/edición/baja lógica, `taxId`); recepción compra con proveedor activo y mensaje si **400** por inactivo.
-- **Venta:** POS, historial local + `GET /sales`, checkout `POST /sales`, offline + `sync/push`.
+- **Venta:** POS, historial local + `GET /sales`, checkout `POST /sales`, offline + `sync/push`; **tickets en espera** (`held_tickets_v1` en prefs, recuperar / renombrar / eliminar, sin encolar `SALE` hasta **Cobrar** — ver `POS_TICKETS_EN_ESPERA_FRONT_BACKEND.md`).
 - **Compras / devoluciones / sync:** `POST /purchases`, cola; devoluciones; pull + invalidación catálogo.
 
 **Huecos respecto a `FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2–3 (integrables ya o UX):**

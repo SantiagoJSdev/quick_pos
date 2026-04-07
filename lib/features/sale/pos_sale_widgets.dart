@@ -619,6 +619,9 @@ class PosSaleCheckoutPanel extends StatelessWidget {
     this.onDiscount,
     this.currencySelector,
     this.cartFeedback,
+    this.onPutOnHold,
+    this.onOpenHeldTickets,
+    this.heldTicketsCount = 0,
   });
 
   final String functionalCode;
@@ -639,6 +642,15 @@ class PosSaleCheckoutPanel extends StatelessWidget {
 
   /// Mensaje breve al agregar al ticket (arriba de «Moneda del ticket»; no tapa Cobrar/Vaciar).
   final String? cartFeedback;
+
+  /// Guardar carrito en espera (local, sin API).
+  final VoidCallback? onPutOnHold;
+
+  /// Abrir lista de tickets en espera.
+  final VoidCallback? onOpenHeldTickets;
+
+  /// Cantidad de tickets guardados en este dispositivo / tienda.
+  final int heldTicketsCount;
 
   @override
   Widget build(BuildContext context) {
@@ -693,6 +705,25 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
+            ],
+            if (heldTicketsCount > 0 && onOpenHeldTickets != null) ...[
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: onOpenHeldTickets,
+                  icon: const Icon(Icons.inventory_2_outlined,
+                      size: 18, color: PosSaleUi.primary),
+                  label: Text(
+                    'Guardados ($heldTicketsCount)',
+                    style: const TextStyle(
+                      color: PosSaleUi.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
             ],
             if (currencySelector != null) ...[
               currencySelector!,
@@ -776,6 +807,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                     foregroundColor: PosSaleUi.textMuted,
                   ),
                   icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Vaciar ticket',
                 ),
                 const SizedBox(width: 8),
                 IconButton.filledTonal(
@@ -786,6 +818,18 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                   ),
                   icon: const Icon(Icons.percent_outlined),
                   tooltip: 'Descuentos — próximamente',
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: (cartNotEmpty && onPutOnHold != null)
+                      ? onPutOnHold
+                      : null,
+                  style: IconButton.styleFrom(
+                    backgroundColor: PosSaleUi.surface3,
+                    foregroundColor: PosSaleUi.primary,
+                  ),
+                  icon: const Icon(Icons.pause_circle_outline),
+                  tooltip: 'Poner ticket en espera',
                 ),
                 const SizedBox(width: 8),
                 Expanded(

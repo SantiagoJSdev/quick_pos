@@ -14,6 +14,7 @@ import '../../core/network/network_errors.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/models/held_ticket.dart';
 import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/pos_cart_line.dart';
 import '../../core/pos/money_string_math.dart';
@@ -25,6 +26,7 @@ import '../../core/sync/pending_sale_entry.dart';
 import '../../core/sync/sync_cycle.dart';
 import 'barcode_scanner_screen.dart';
 import 'pos_cart_quantity.dart';
+import 'pos_held_tickets_ui.dart';
 import 'pos_sale_sheets.dart';
 import 'pos_sale_ui_tokens.dart';
 import 'pos_sale_widgets.dart';
@@ -94,6 +96,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   String? _cartFeedback;
   Timer? _cartFeedbackTimer;
 
+  int _heldTicketsCount = 0;
+  String? _activeHeldTicketId;
+
   @override
   void initState() {
     super.initState();
@@ -101,7 +106,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     _searchFocus.addListener(() => setState(() {}));
     _load();
     PosTerminalInfo.load(widget.localPrefs).then((t) {
-      if (mounted) setState(() => _terminal = t);
+      if (!mounted) return;
+      setState(() => _terminal = t);
+      unawaited(_refreshHeldCount());
     });
     widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
     _refreshPendingCount();
@@ -228,7 +235,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     }
   }
 
-  Future<void> _reloadFxForDocumentCurrency() async {
+  Future<void> _reloadFxForDocumentCurrency({
+    bool rebuildDocumentLinePrices = true,
+  }) async {
     final s = _settings;
     final doc = _selectedDocumentCurrency;
     if (s == null || doc == null) return;
@@ -238,7 +247,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _fxPair = null;
     });
     if (func.toUpperCase() == doc.toUpperCase()) {
-      _rebuildCartDocumentPrices();
+      if (rebuildDocumentLinePrices) {
+        _rebuildCartDocumentPrices();
+      }
       if (mounted) setState(() {});
       return;
     }
@@ -265,7 +276,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         _fxLoadError = e.toString();
       });
     }
-    _rebuildCartDocumentPrices();
+    if (rebuildDocumentLinePrices) {
+      _rebuildCartDocumentPrices();
+    }
     if (mounted) setState(() {});
   }
 
@@ -317,6 +330,201 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   void _invalidateCheckoutIdempotency() {
     _pendingSaleId = null;
+  }
+
+  Future<void> _refreshHeldCount() async {
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      if (!mounted) return;
+      final n = await widget.localPrefs.countHeldTicketsForStoreAndDevice(
+        storeId: widget.storeId,
+        deviceId: _terminal!.deviceId,
+      );
+      if (mounted) setState(() => _heldTicketsCount = n);
+    } catch (_) {
+      if (mounted) setState(() => _heldTicketsCount = 0);
+    }
+  }
+
+  String? _matchDocumentCurrencyOption(String code) {
+    final c = code.trim().toUpperCase();
+    for (final o in _documentCurrencyOptions) {
+      if (o.toUpperCase() == c) return o;
+    }
+    return null;
+  }
+
+  Future<void> _persistCurrentCartAsHold(String? alias, String? note) async {
+    if (_cart.isEmpty) return;
+    final s = _settings;
+    final doc = _selectedDocumentCurrency;
+    if (s == null || doc == null) return;
+    _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+    if (!mounted) return;
+    final func = s.functionalCurrency.code;
+    final rest = SaleCheckoutPayload.build(
+      documentCurrencyCode: doc,
+      functionalCurrencyCode: func,
+      lines: List<PosCartLine>.from(_cart),
+      fxPair: _fxPair,
+      deviceId: _terminal!.deviceId,
+      appVersion: _terminal!.appVersion,
+      fxSource: 'POS_PREVIEW',
+    );
+    final fxRaw = rest['fxSnapshot'];
+    final fxMap = fxRaw is Map
+        ? Map<String, dynamic>.from(fxRaw)
+        : <String, dynamic>{};
+    final id = ClientMutationId.newId();
+    final tf = _cartTotalFunctional;
+    final ticket = HeldTicket.fromPosCart(
+      id: id,
+      storeId: widget.storeId,
+      deviceId: _terminal!.deviceId,
+      documentCurrencyCode: doc,
+      fxSnapshot: fxMap,
+      cartLines: List<PosCartLine>.from(_cart),
+      alias: alias,
+      note: note,
+      totalFunctional: tf,
+    );
+    final oldHeld = _activeHeldTicketId;
+    if (oldHeld != null) {
+      await widget.localPrefs.deleteHeldTicket(oldHeld);
+    }
+    await widget.localPrefs.upsertHeldTicket(ticket);
+    if (!mounted) return;
+    setState(() {
+      _cart.clear();
+      _activeHeldTicketId = null;
+      _invalidateCheckoutIdempotency();
+    });
+    await _refreshHeldCount();
+    if (mounted) _showCartFeedback('Ticket guardado en espera');
+  }
+
+  Future<void> _putCartOnHold() async {
+    if (_cart.isEmpty) return;
+    if (_settings == null || _selectedDocumentCurrency == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configuración de tienda no disponible.')),
+      );
+      return;
+    }
+    await showPosSaveHeldTicketSheet(
+      context,
+      onConfirm: _persistCurrentCartAsHold,
+    );
+  }
+
+  Future<void> _applyHeldTicketToCart(HeldTicket t) async {
+    final docCode = _matchDocumentCurrencyOption(t.documentCurrencyCode);
+    if (docCode == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'La moneda del ticket guardado (${t.documentCurrencyCode}) '
+            'no está disponible para esta tienda.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _selectedDocumentCurrency = docCode;
+      _cart
+        ..clear()
+        ..addAll(t.lines.map((l) => l.toPosCartLine()));
+      _activeHeldTicketId = t.id;
+      _invalidateCheckoutIdempotency();
+    });
+    await _reloadFxForDocumentCurrency(rebuildDocumentLinePrices: false);
+    if (mounted) _showCartFeedback('Ticket recuperado desde guardados');
+  }
+
+  Future<void> _recoverHeldTicket(HeldTicket t) async {
+    if (_cart.isNotEmpty) {
+      final choice = await showRecoverCartConflictDialog(context);
+      if (!mounted) return;
+      if (choice == null || choice == RecoverCartConflictChoice.cancel) {
+        return;
+      }
+      if (choice == RecoverCartConflictChoice.saveCurrentAndOpen) {
+        await showPosSaveHeldTicketSheet(
+          context,
+          onConfirm: _persistCurrentCartAsHold,
+        );
+        if (!mounted) return;
+      } else {
+        setState(() {
+          _cart.clear();
+          _activeHeldTicketId = null;
+          _invalidateCheckoutIdempotency();
+        });
+      }
+    }
+    await _applyHeldTicketToCart(t);
+  }
+
+  Future<void> _openHeldTicketsList() async {
+    _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+    if (!mounted) return;
+    final list = await widget.localPrefs.listHeldTicketsForStoreAndDevice(
+      storeId: widget.storeId,
+      deviceId: _terminal!.deviceId,
+    );
+    if (!mounted) return;
+    await showPosHeldTicketsListSheet(
+      context,
+      tickets: list,
+      onRecover: (t) {
+        unawaited(_recoverHeldTicket(t));
+      },
+      onRename: (t) async {
+        final alias = await showRenameHeldTicketDialog(
+          context,
+          currentAlias: t.alias ?? '',
+        );
+        if (!mounted || alias == null) return;
+        final a = alias.trim();
+        await widget.localPrefs.updateHeldTicketAlias(
+          id: t.id,
+          alias: a.isEmpty ? null : a,
+        );
+        await _refreshHeldCount();
+        if (mounted) setState(() {});
+      },
+      onDelete: (t) async {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Eliminar ticket en espera'),
+            content: Text(
+              '¿Eliminar «${t.displayTitle}»? No se puede deshacer.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        );
+        if (ok != true || !mounted) return;
+        await widget.localPrefs.deleteHeldTicket(t.id);
+        if (_activeHeldTicketId == t.id) {
+          setState(() => _activeHeldTicketId = null);
+        }
+        await _refreshHeldCount();
+        if (mounted) setState(() {});
+      },
+    );
+    await _refreshHeldCount();
   }
 
   Future<void> _load() async {
@@ -381,6 +589,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
     setState(() => _loading = false);
     await _refreshPendingCount();
+    await _refreshHeldCount();
   }
 
   String? _documentPriceLabel(CatalogProduct p) {
@@ -613,11 +822,18 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         );
         if (!mounted) return;
       }
+      final heldId = _activeHeldTicketId;
       setState(() {
         _cart.clear();
         _pendingSaleId = null;
         _checkoutBusy = false;
+        _activeHeldTicketId = null;
       });
+      if (heldId != null) {
+        await widget.localPrefs.deleteHeldTicket(heldId);
+        await _refreshHeldCount();
+      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Venta registrada.')),
       );
@@ -663,11 +879,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           if (!mounted) return;
         }
         if (!mounted) return;
+        final heldId = _activeHeldTicketId;
         setState(() {
           _cart.clear();
           _pendingSaleId = null;
           _checkoutBusy = false;
+          _activeHeldTicketId = null;
         });
+        if (heldId != null) {
+          await widget.localPrefs.deleteHeldTicket(heldId);
+          await _refreshHeldCount();
+        }
         await _refreshPendingCount();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -821,6 +1043,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     setState(() {
       _invalidateCheckoutIdempotency();
       _cart.clear();
+      _activeHeldTicketId = null;
     });
   }
 
@@ -1128,6 +1351,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 onClear: _clearCart,
                 onCharge: _onCheckout,
                 chargeBusy: _checkoutBusy,
+                onPutOnHold: _putCartOnHold,
+                onOpenHeldTickets: _openHeldTicketsList,
+                heldTicketsCount: _heldTicketsCount,
                 onDiscount: () {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(

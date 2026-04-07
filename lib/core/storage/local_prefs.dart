@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/held_ticket.dart';
 import '../models/local_supplier.dart';
 import '../models/recent_sale_ticket.dart';
 import '../sync/pending_inventory_adjust_entry.dart';
@@ -19,6 +20,7 @@ const _kPendingPurchaseReceiveV1 = 'pending_purchase_receive_v1';
 const _kPendingSaleReturnV1 = 'pending_sale_return_v1';
 const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 const _kRecentSalesV1 = 'recent_sales_v1';
+const _kHeldTicketsV1 = 'held_tickets_v1';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -235,6 +237,97 @@ class LocalPrefs {
     final c = await countPendingPurchaseReceivesForStore(storeId);
     final d = await countPendingSaleReturnsForStore(storeId);
     return a + b + c + d;
+  }
+
+  /// Tickets en espera (ON_HOLD) — **no** van a `pending_sales` ni sync hasta cobrar.
+  Future<List<HeldTicket>> loadHeldTickets() async {
+    final raw = _prefs.getString(_kHeldTicketsV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <HeldTicket>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final t = HeldTicket.tryFromJson(Map<String, dynamic>.from(e));
+        if (t != null) out.add(t);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveHeldTickets(List<HeldTicket> items) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kHeldTicketsV1, encoded);
+  }
+
+  /// Lista filtrada por tienda y dispositivo (misma política que el doc §6).
+  Future<List<HeldTicket>> listHeldTicketsForStoreAndDevice({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    final all = await loadHeldTickets();
+    return all
+        .where(
+          (t) =>
+              t.storeId == storeId &&
+              t.deviceId == deviceId &&
+              t.status == HeldTicket.statusOnHold,
+        )
+        .toList()
+      ..sort((a, b) => b.updatedAtIso.compareTo(a.updatedAtIso));
+  }
+
+  Future<void> upsertHeldTicket(HeldTicket ticket) async {
+    final list = await loadHeldTickets();
+    list.removeWhere((t) => t.id == ticket.id);
+    list.add(ticket);
+    await saveHeldTickets(list);
+  }
+
+  Future<void> deleteHeldTicket(String id) async {
+    final list = await loadHeldTickets();
+    list.removeWhere((t) => t.id == id);
+    await saveHeldTickets(list);
+  }
+
+  Future<void> updateHeldTicketAlias({
+    required String id,
+    required String? alias,
+  }) async {
+    final list = await loadHeldTickets();
+    final i = list.indexWhere((t) => t.id == id);
+    if (i < 0) return;
+    final old = list[i];
+    list[i] = HeldTicket(
+      id: old.id,
+      storeId: old.storeId,
+      deviceId: old.deviceId,
+      status: old.status,
+      alias: alias,
+      note: old.note,
+      documentCurrencyCode: old.documentCurrencyCode,
+      fxSnapshot: old.fxSnapshot,
+      totals: old.totals,
+      lines: old.lines,
+      createdAtIso: old.createdAtIso,
+      updatedAtIso: DateTime.now().toUtc().toIso8601String(),
+      heldByUserId: old.heldByUserId,
+    );
+    await saveHeldTickets(list);
+  }
+
+  Future<int> countHeldTicketsForStoreAndDevice({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    final list = await listHeldTicketsForStoreAndDevice(
+      storeId: storeId,
+      deviceId: deviceId,
+    );
+    return list.length;
   }
 
   /// Historial local de tickets: **solo día calendario actual** (local device); al cargar se purgan días anteriores.
