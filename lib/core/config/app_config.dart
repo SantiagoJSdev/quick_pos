@@ -13,8 +13,9 @@ class AppConfig {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:3002/api/v1',
+    defaultValue: 'http://192.168.0.190:3002/api/v1',
   );
+  //  defaultValue: 'http://10.0.2.2:3002/api/v1',
 
   /// PIN que acepta la app sin configurar nada al compilar ni al ejecutar.
   static const String defaultAdminPin = '1200Mia';
