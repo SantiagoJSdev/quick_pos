@@ -100,10 +100,18 @@ class ApiClient {
     String storeId,
     Object? body, {
     String? requestId,
+    String? idempotencyKey,
   }) async {
+    final headers = Map<String, String>.from(
+      _headers(storeId, requestId: requestId),
+    );
+    final ik = idempotencyKey?.trim();
+    if (ik != null && ik.isNotEmpty) {
+      headers['Idempotency-Key'] = ik;
+    }
     final res = await _client.post(
       _uri(path),
-      headers: _headers(storeId, requestId: requestId),
+      headers: headers,
       body: body == null ? null : jsonEncode(body),
     );
     return _decodeSuccess(res);

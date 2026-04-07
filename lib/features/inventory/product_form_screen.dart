@@ -3,27 +3,37 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
-import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/supplier.dart';
-import '../../core/storage/local_prefs.dart';
-import 'inventory_adjustment_screen.dart';
+import '../../core/pos/post_purchase_price_hint.dart';
+import 'product_initial_stock_sheet.dart';
 import '../sale/barcode_scanner_screen.dart';
 
 const _currencies = ['USD', 'VES', 'EUR'];
 final _decimal = RegExp(r'^\d+(\.\d+)?$');
 
-/// B5 — `POST /products` o `PATCH /products/:id`.
+bool _marginPercentInRange(String raw) {
+  if (!_decimal.hasMatch(raw.trim())) return false;
+  final v = double.tryParse(raw.trim());
+  if (v == null) return false;
+  return v >= 0 && v <= 999;
+}
+
+enum _NewProductStockChoice { soloProducto, conStockInicial }
+
+/// B5 — `POST /products` o `PATCH /products/:id`; alta con stock → M7 `POST /products-with-stock`.
 class ProductFormScreen extends StatefulWidget {
   const ProductFormScreen({
     super.key,
     required this.storeId,
     required this.productsApi,
     required this.suppliersApi,
-    this.inventoryApi,
-    this.localPrefs,
+    this.storesApi,
+    this.catalogInvalidationBus,
     this.existing,
     this.initialBarcode,
   });
@@ -32,9 +42,9 @@ class ProductFormScreen extends StatefulWidget {
   final ProductsApi productsApi;
   final SuppliersApi suppliersApi;
 
-  /// Si vienen ambos, tras **crear** producto se ofrece ir a B3 (stock inicial).
-  final InventoryApi? inventoryApi;
-  final LocalPrefs? localPrefs;
+  /// Opcional: margen de tienda para calcular precio de lista vacío al editar (`USE_STORE_DEFAULT`).
+  final StoresApi? storesApi;
+  final CatalogInvalidationBus? catalogInvalidationBus;
 
   final CatalogProduct? existing;
 
@@ -55,8 +65,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _cost = TextEditingController();
   final _unit = TextEditingController();
   final _description = TextEditingController();
+  final _marginPercentOverride = TextEditingController();
   String _currency = 'USD';
   String _type = 'GOODS';
+  String _pricingMode = 'USE_STORE_DEFAULT';
   bool _allowNoBarcode = false;
   bool _loading = false;
   String? _error;
@@ -65,6 +77,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _suppliersLoading = true;
   String? _suppliersLoadError;
   String? _supplierId;
+  String? _storeDefaultMarginPercent;
 
   @override
   void initState() {
@@ -83,6 +96,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (p.unit != null) _unit.text = p.unit!;
       if (p.description != null) _description.text = p.description!;
       _allowNoBarcode = p.barcode == null || p.barcode!.isEmpty;
+      final pm = p.pricingMode?.trim();
+      _pricingMode = (pm == null || pm.isEmpty) ? 'USE_STORE_DEFAULT' : pm;
+      if (p.marginPercentOverride != null) {
+        _marginPercentOverride.text = p.marginPercentOverride!;
+      }
     } else {
       final b = widget.initialBarcode?.trim();
       if (b != null && b.isNotEmpty) {
@@ -92,7 +110,23 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_loadSuppliers());
+      if (widget.isEdit && widget.storesApi != null) {
+        unawaited(_prefetchStoreDefaultMargin());
+      }
     });
+  }
+
+  Future<void> _prefetchStoreDefaultMargin() async {
+    final api = widget.storesApi;
+    if (api == null) return;
+    try {
+      final bs = await api.getBusinessSettings(widget.storeId);
+      if (!mounted) return;
+      final m = bs.defaultMarginPercent?.trim();
+      setState(() {
+        _storeDefaultMarginPercent = (m == null || m.isEmpty) ? null : m;
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadSuppliers() async {
@@ -171,19 +205,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return out;
   }
 
-  void _copyBarcodeToSku() {
-    final b = _barcode.text.trim();
-    if (b.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cargá o escaneá un código de barras primero.'),
-        ),
-      );
-      return;
-    }
-    setState(() => _sku.text = b);
-  }
-
   Future<void> _scanBarcodeField() async {
     if (!BarcodeScannerScreen.isSupported) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -193,6 +214,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       );
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
     setState(() {
@@ -210,7 +232,27 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _cost.dispose();
     _unit.dispose();
     _description.dispose();
+    _marginPercentOverride.dispose();
     super.dispose();
+  }
+
+  String _marginSnapshotFromExisting() {
+    final p = widget.existing;
+    if (p == null) return '';
+    final parts = <String>[];
+    final em = p.effectiveMarginPercent?.trim();
+    if (em != null && em.isNotEmpty) {
+      parts.add('Margen efectivo (última respuesta del servidor): $em%');
+    }
+    final sp = p.suggestedPrice?.trim();
+    if (sp != null && sp.isNotEmpty) {
+      parts.add('Precio sugerido: $sp ${p.currency}');
+    }
+    final mc = p.marginComputedPercent?.trim();
+    if (mc != null && mc.isNotEmpty) {
+      parts.add('Margen precio/costo: $mc%');
+    }
+    return parts.join(' · ');
   }
 
   Future<void> _save() async {
@@ -218,7 +260,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     final skuInput = _sku.text.trim();
     final name = _name.text.trim();
     final barcode = _barcode.text.trim();
-    final price = _price.text.trim();
+    final priceRaw = _price.text.trim();
     final cost = _cost.text.trim();
 
     if (name.isEmpty) {
@@ -233,9 +275,101 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       });
       return;
     }
-    if (!_decimal.hasMatch(price) || !_decimal.hasMatch(cost)) {
-      setState(() => _error = 'Precio y costo deben ser números decimales (ej. 4.99).');
+    if (!_decimal.hasMatch(cost)) {
+      setState(() => _error = 'El costo debe ser un número decimal válido (ej. 4.99).');
       return;
+    }
+    if (!widget.isEdit) {
+      if (priceRaw.isEmpty || !_decimal.hasMatch(priceRaw)) {
+        setState(
+          () => _error =
+              'En un producto nuevo indicá precio de lista y costo.',
+        );
+        return;
+      }
+    } else {
+      if (priceRaw.isNotEmpty && !_decimal.hasMatch(priceRaw)) {
+        setState(
+          () => _error =
+              'Precio de lista no válido (o dejalo vacío para calcularlo desde costo y margen).',
+        );
+        return;
+      }
+    }
+    if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
+      final mo = _marginPercentOverride.text.trim();
+      if (!_marginPercentInRange(mo)) {
+        setState(
+          () => _error =
+              'Margen propio: número entre 0 y 999 (ej. 25 o 12.5).',
+        );
+        return;
+      }
+    }
+
+    if (widget.isEdit &&
+        priceRaw.isEmpty &&
+        _pricingMode == 'USE_STORE_DEFAULT' &&
+        widget.storesApi != null &&
+        (_storeDefaultMarginPercent == null ||
+            _storeDefaultMarginPercent!.trim().isEmpty)) {
+      try {
+        final bs = await widget.storesApi!.getBusinessSettings(widget.storeId);
+        if (!mounted) return;
+        final m = bs.defaultMarginPercent?.trim();
+        setState(() {
+          _storeDefaultMarginPercent = (m == null || m.isEmpty) ? null : m;
+        });
+      } catch (_) {}
+    }
+
+    late final String listPriceForModel;
+    if (!widget.isEdit) {
+      listPriceForModel = priceRaw;
+    } else if (priceRaw.isNotEmpty) {
+      listPriceForModel = priceRaw;
+    } else if (_pricingMode == 'MANUAL_PRICE') {
+      setState(
+        () => _error =
+            'En precio manual debés indicar el precio de lista.',
+      );
+      return;
+    } else if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
+      final mo = _marginPercentOverride.text.trim();
+      final sug = PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+        cost,
+        mo,
+      );
+      if (sug == null) {
+        setState(
+          () => _error =
+              'No se pudo calcular el precio desde costo y margen propio.',
+        );
+        return;
+      }
+      listPriceForModel = sug;
+    } else {
+      final sm = _storeDefaultMarginPercent?.trim();
+      if (sm == null || sm.isEmpty) {
+        setState(
+          () => _error =
+              'Precio vacío: en Inicio → Configuración (clave) definí el margen '
+              'de la tienda, elegí margen propio, o escribí el precio de lista.',
+        );
+        return;
+      }
+      final sug = PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+        cost,
+        sm,
+      );
+      if (sug == null) {
+        setState(
+          () => _error =
+              'No se pudo calcular el precio desde costo y margen de tienda.',
+        );
+        return;
+      }
+      listPriceForModel = sug;
     }
 
     // Alta: SKU vacío → no se envía; backend asigna SKU-000xxx (`BACKEND_PRODUCT_SKU_BARCODE.md`).
@@ -257,96 +391,130 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           ? null
           : _description.text.trim(),
       type: _type,
-      price: price,
+      price: listPriceForModel,
       cost: cost,
       currency: _currency,
       active: widget.existing?.active ?? true,
       unit: _unit.text.trim().isEmpty ? null : _unit.text.trim(),
       supplierId: _supplierId,
+      pricingMode:
+          _pricingMode == 'USE_STORE_DEFAULT' ? null : _pricingMode,
+      marginPercentOverride: _pricingMode == 'USE_PRODUCT_OVERRIDE'
+          ? _marginPercentOverride.text.trim()
+          : null,
+      effectiveMarginPercent: widget.existing?.effectiveMarginPercent,
+      marginComputedPercent: widget.existing?.marginComputedPercent,
+      suggestedPrice: widget.existing?.suggestedPrice,
     );
 
-    setState(() => _loading = true);
-    try {
-      if (widget.isEdit) {
+    if (widget.isEdit) {
+      setState(() => _loading = true);
+      try {
         await widget.productsApi.updateProduct(
           widget.storeId,
           widget.existing!.id,
           product.toPatchBody(),
         );
-      } else {
-        final created = await widget.productsApi.createProduct(
-          widget.storeId,
-          product.toCreateBody(),
-        );
         if (!mounted) return;
-        setState(() => _loading = false);
-        await _finishAfterCreate(created);
-        return;
+        if (priceRaw.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Producto actualizado · precio de lista calculado: '
+                '$listPriceForModel $_currency',
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Producto actualizado')),
+          );
+        }
+        Navigator.of(context).pop(true);
+      } on ApiError catch (e) {
+        if (!mounted) return;
+        setState(() => _error = e.userMessageForSupport);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _error = e.toString());
+      } finally {
+        if (mounted) setState(() => _loading = false);
       }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Producto actualizado')),
-      );
-      Navigator.of(context).pop(true);
-    } on ApiError catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.userMessageForSupport);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _finishAfterCreate(CatalogProduct created) async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Producto creado · SKU ${created.sku}')),
-    );
-    final inv = widget.inventoryApi;
-    final prefs = widget.localPrefs;
-    if (inv == null || prefs == null) {
-      Navigator.of(context).pop(true);
       return;
     }
-    final go = await showDialog<bool>(
+
+    final choice = await showDialog<_NewProductStockChoice?>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('¿Cargar stock inicial?'),
-        content: Text(
-          'Podés registrar ahora la cantidad en depósito para «${created.name}». '
-          'Será un ajuste de entrada (IN_ADJUST) con motivo de inventario inicial. '
-          'También podés hacerlo después en Inventario → Stock.',
+        title: const Text('Alta de producto'),
+        content: const Text(
+          'Solo ficha: se crea el artículo; el stock queda en 0 hasta un ajuste en '
+          'Inventario → Stock.\n\n'
+          'Con stock inicial: una sola solicitud crea la ficha y registra la entrada. '
+          'Se envía la cabecera Idempotency-Key y un opId en el movimiento (ver '
+          'docs §13.6b).',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Ahora no'),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(ctx, _NewProductStockChoice.soloProducto),
+            child: const Text('Solo producto'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cargar stock inicial'),
+            onPressed: () =>
+                Navigator.pop(ctx, _NewProductStockChoice.conStockInicial),
+            child: const Text('Con stock inicial'),
           ),
         ],
       ),
     );
     if (!mounted) return;
-    if (go == true) {
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (ctx) => InventoryAdjustmentScreen(
-            storeId: widget.storeId,
-            inventoryApi: inv,
-            localPrefs: prefs,
-            productId: created.id,
-            productLabel: created.name,
-            suggestedReason: 'Inventario inicial',
-          ),
-        ),
-      );
+    if (choice == null) return;
+
+    if (choice == _NewProductStockChoice.soloProducto) {
+      setState(() => _loading = true);
+      try {
+        final created = await widget.productsApi.createProduct(
+          widget.storeId,
+          product.toCreateBody(),
+        );
+        if (!mounted) return;
+        widget.catalogInvalidationBus?.invalidateFromLocalMutation(
+          productIds: {created.id},
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Producto creado · SKU ${created.sku}')),
+        );
+        Navigator.of(context).pop(true);
+      } on ApiError catch (e) {
+        if (!mounted) return;
+        setState(() => _error = e.userMessageForSupport);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _error = e.toString());
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+      return;
     }
-    if (mounted) Navigator.of(context).pop(true);
+
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) => ProductInitialStockBottomSheet(
+        storeId: widget.storeId,
+        productsApi: widget.productsApi,
+        productDraft: product,
+        catalogInvalidationBus: widget.catalogInvalidationBus,
+      ),
+    );
+    if (mounted && ok == true) Navigator.of(context).pop(true);
   }
 
   @override
@@ -363,8 +531,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             decoration: InputDecoration(
               labelText: 'SKU (referencia interna)',
               helperText: widget.isEdit
-                  ? 'Obligatorio al guardar. Independiente del código de barras salvo que uses el botón de abajo.'
-                  : 'Opcional al crear: vacío → el servidor asigna SKU-000001, … No se copia del barras solo; usá «Usar código de barras como SKU» si querés el mismo valor.',
+                  ? 'Obligatorio al guardar. Independiente del código de barras.'
+                  : 'Opcional al crear: vacío → el servidor asigna SKU-000001, …',
               border: const OutlineInputBorder(),
             ),
             enabled: !_loading,
@@ -421,7 +589,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             controller: _barcode,
             decoration: InputDecoration(
               labelText: 'Código de barras (EAN / UPC)',
-              hintText: 'Lo que escaneás en caja; no es lo mismo que el SKU salvo que elijas igualarlo',
+              hintText:
+                  'Tocá el campo vacío o el ícono para abrir la cámara; podés escribir o pegar si ya hay código.',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.qr_code_scanner),
@@ -431,14 +600,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             keyboardType: TextInputType.text,
             enabled: !_loading,
-          ),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton.icon(
-              onPressed: _loading ? null : _copyBarcodeToSku,
-              icon: const Icon(Icons.link, size: 20),
-              label: const Text('Usar código de barras como SKU'),
-            ),
+            onTap: () {
+              if (_loading || !BarcodeScannerScreen.isSupported) return;
+              if (_barcode.text.trim().isNotEmpty) return;
+              _scanBarcodeField();
+            },
           ),
           SwitchListTile(
             title: const Text('Permitir sin código de barras'),
@@ -456,9 +622,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               Expanded(
                 child: TextField(
                   controller: _price,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Precio lista',
-                    border: OutlineInputBorder(),
+                    helperText: widget.isEdit
+                        ? 'Vacío al editar: se calcula como costo × (1 + margen) con margen propio o de tienda; no aplica en precio manual.'
+                        : null,
+                    border: const OutlineInputBorder(),
                   ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   enabled: !_loading,
@@ -500,6 +669,71 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Política de margen',
+              helperText:
+                  'Precio sugerido sobre costo (M7). El precio de lista lo definís arriba; '
+                  'el servidor calcula sugeridos según la regla.',
+              border: OutlineInputBorder(),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _pricingMode,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(
+                    value: 'USE_STORE_DEFAULT',
+                    child: Text('Margen de la tienda'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'USE_PRODUCT_OVERRIDE',
+                    child: Text('Margen propio (%)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'MANUAL_PRICE',
+                    child: Text('Precio manual (sin sugerido por margen)'),
+                  ),
+                ],
+                onChanged: _loading
+                    ? null
+                    : (v) {
+                        if (v != null) setState(() => _pricingMode = v);
+                      },
+              ),
+            ),
+          ),
+          if (_pricingMode == 'USE_PRODUCT_OVERRIDE') ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _marginPercentOverride,
+              decoration: const InputDecoration(
+                labelText: 'Margen % sobre costo',
+                hintText: 'ej. 25',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              enabled: !_loading,
+            ),
+          ],
+          if (widget.isEdit) ...[
+            Builder(
+              builder: (context) {
+                final snap = _marginSnapshotFromExisting();
+                if (snap.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    snap,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                );
+              },
+            ),
+          ],
           const SizedBox(height: 12),
           InputDecorator(
             decoration: const InputDecoration(

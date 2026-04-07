@@ -9,6 +9,7 @@ class BusinessSettings {
     required this.defaultSaleDocCurrency,
     required this.storeName,
     this.storeType,
+    this.defaultMarginPercent,
   });
 
   final String id;
@@ -17,6 +18,9 @@ class BusinessSettings {
   final CurrencyRef? defaultSaleDocCurrency;
   final String storeName;
   final String? storeType;
+
+  /// % margen por defecto de la tienda (`GET/PATCH .../business-settings`, M7).
+  final String? defaultMarginPercent;
 
   static BusinessSettings fromJson(Map<String, dynamic> json) {
     final store = json['store'] as Map<String, dynamic>?;
@@ -35,6 +39,13 @@ class BusinessSettings {
       ),
       storeName: store?['name'] as String? ?? '(sin nombre)',
       storeType: store?['type'] as String?,
+      defaultMarginPercent: _optString(json['defaultMarginPercent']),
     );
+  }
+
+  static String? _optString(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
   }
 }

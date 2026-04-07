@@ -16,7 +16,10 @@ import 'sale_return_screen.dart';
 import 'ticket_history_screen.dart';
 
 /// Pestaña **Venta**: menú → POS / historial / consulta de precios (misma estética oscura del POS).
-class SalesModuleScreen extends StatelessWidget {
+///
+/// [Navigator] con [GlobalKey] propio para no chocar con el navigator raíz cuando el
+/// [IndexedStack] del shell mantiene todas las pestañas montadas.
+class SalesModuleScreen extends StatefulWidget {
   const SalesModuleScreen({
     super.key,
     required this.storeId,
@@ -41,73 +44,81 @@ class SalesModuleScreen extends StatelessWidget {
   final LocalPrefs localPrefs;
 
   @override
+  State<SalesModuleScreen> createState() => _SalesModuleScreenState();
+}
+
+class _SalesModuleScreenState extends State<SalesModuleScreen> {
+  final GlobalKey<NavigatorState> _nestedNavKey = GlobalKey<NavigatorState>();
+
+  @override
   Widget build(BuildContext context) {
     return Navigator(
-        initialRoute: '/',
-        onGenerateRoute: (RouteSettings settings) {
-          if (settings.name == '/') {
-            return MaterialPageRoute<void>(
-              settings: settings,
-              builder: (navCtx) => _VentasMenuPage(
-                onOpenPos: () {
-                  Navigator.of(navCtx).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (c) => PosSaleScreen(
-                        storeId: storeId,
-                        productsApi: productsApi,
-                        storesApi: storesApi,
-                        exchangeRatesApi: exchangeRatesApi,
-                        salesApi: salesApi,
-                        syncApi: syncApi,
-                        catalogInvalidationBus: catalogInvalidationBus,
-                        localPrefs: localPrefs,
-                        onRequestExit: () => Navigator.of(c).pop(),
-                      ),
+      key: _nestedNavKey,
+      initialRoute: '/',
+      onGenerateRoute: (RouteSettings settings) {
+        if (settings.name == '/') {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (navCtx) => _VentasMenuPage(
+              onOpenPos: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => PosSaleScreen(
+                      storeId: widget.storeId,
+                      productsApi: widget.productsApi,
+                      storesApi: widget.storesApi,
+                      exchangeRatesApi: widget.exchangeRatesApi,
+                      salesApi: widget.salesApi,
+                      syncApi: widget.syncApi,
+                      catalogInvalidationBus: widget.catalogInvalidationBus,
+                      localPrefs: widget.localPrefs,
+                      onRequestExit: () => Navigator.of(c).pop(),
                     ),
-                  );
-                },
-                onOpenHistorial: () {
-                  Navigator.of(navCtx).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (c) => TicketHistoryScreen(
-                        storeId: storeId,
-                        localPrefs: localPrefs,
-                        salesApi: salesApi,
-                      ),
+                  ),
+                );
+              },
+              onOpenHistorial: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => TicketHistoryScreen(
+                      storeId: widget.storeId,
+                      localPrefs: widget.localPrefs,
+                      salesApi: widget.salesApi,
                     ),
-                  );
-                },
-                onOpenPrecios: () {
-                  Navigator.of(navCtx).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (c) => ProductPriceLookupScreen(
-                        storeId: storeId,
-                        productsApi: productsApi,
-                      ),
+                  ),
+                );
+              },
+              onOpenPrecios: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => ProductPriceLookupScreen(
+                      storeId: widget.storeId,
+                      productsApi: widget.productsApi,
                     ),
-                  );
-                },
-                onOpenDevolucion: () {
-                  Navigator.of(navCtx).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (c) => SaleReturnScreen(
-                        storeId: storeId,
-                        salesApi: salesApi,
-                        saleReturnsApi: saleReturnsApi,
-                        storesApi: storesApi,
-                        exchangeRatesApi: exchangeRatesApi,
-                        localPrefs: localPrefs,
-                        syncApi: syncApi,
-                        catalogInvalidationBus: catalogInvalidationBus,
-                      ),
+                  ),
+                );
+              },
+              onOpenDevolucion: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => SaleReturnScreen(
+                      storeId: widget.storeId,
+                      salesApi: widget.salesApi,
+                      saleReturnsApi: widget.saleReturnsApi,
+                      storesApi: widget.storesApi,
+                      exchangeRatesApi: widget.exchangeRatesApi,
+                      localPrefs: widget.localPrefs,
+                      syncApi: widget.syncApi,
+                      catalogInvalidationBus: widget.catalogInvalidationBus,
                     ),
-                  );
-                },
-              ),
-            );
-          }
-          return null;
-        },
+                  ),
+                );
+              },
+            ),
+          );
+        }
+        return null;
+      },
     );
   }
 }

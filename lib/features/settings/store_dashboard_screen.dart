@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -5,10 +7,13 @@ import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/models/business_settings.dart';
+import '../../core/pos/pos_terminal_info.dart';
+import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'exchange_rate_today_screen.dart';
 import 'register_exchange_rate_screen.dart';
+import 'store_advanced_config_screen.dart';
 
 class StoreDashboardScreen extends StatefulWidget {
   const StoreDashboardScreen({
@@ -17,12 +22,14 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.storesApi,
     required this.exchangeRatesApi,
     required this.onChangeStore,
+    required this.localPrefs,
   });
 
   final String storeId;
   final StoresApi storesApi;
   final ExchangeRatesApi exchangeRatesApi;
   final VoidCallback onChangeStore;
+  final LocalPrefs localPrefs;
 
   @override
   State<StoreDashboardScreen> createState() => _StoreDashboardScreenState();
@@ -30,11 +37,25 @@ class StoreDashboardScreen extends StatefulWidget {
 
 class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
   late Future<BusinessSettings> _future;
+  bool _terminalLoading = true;
+  String? _deviceId;
+  String? _appVersion;
 
   @override
   void initState() {
     super.initState();
     _future = widget.storesApi.getBusinessSettings(widget.storeId);
+    unawaited(_loadTerminal());
+  }
+
+  Future<void> _loadTerminal() async {
+    final t = await PosTerminalInfo.load(widget.localPrefs);
+    if (!mounted) return;
+    setState(() {
+      _deviceId = t.deviceId;
+      _appVersion = t.appVersion;
+      _terminalLoading = false;
+    });
   }
 
   Future<void> _refresh() async {
@@ -42,6 +63,23 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       _future = widget.storesApi.getBusinessSettings(widget.storeId);
     });
     await _future;
+  }
+
+  Future<void> _openPinProtectedConfig() async {
+    final ok = await showStoreConfigPinDialog(context);
+    if (!mounted || ok != true) return;
+    // Evita apilar la ruta mientras el overlay del diálogo aún se retira (GlobalKey duplicado).
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (ctx) => StoreAdvancedConfigScreen(
+          storeId: widget.storeId,
+          storesApi: widget.storesApi,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
   }
 
   Future<void> _confirmDesvincular() async {
@@ -110,6 +148,78 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
             Text(
               'Moneda de referencia para inventario y costos (p. ej. USD). '
               'La moneda del ticket en caja la define el servidor al facturar.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _terminalInfoCard(BuildContext context) {
+    if (_terminalLoading) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 16),
+        child: LinearProgressIndicator(),
+      );
+    }
+    final id = _deviceId;
+    final ver = _appVersion ?? '—';
+    if (id == null) return const SizedBox.shrink();
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Este terminal',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'App $ver',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: PosSaleUi.textMuted,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    id,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          color: PosSaleUi.text,
+                        ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Copiar ID',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: id));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('deviceId copiado')),
+                    );
+                  },
+                  icon: const Icon(Icons.copy, size: 20),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Varios equipos pueden usar la misma tienda (mismo enlace). Cada '
+              'instalación tiene su propio deviceId para ventas, historial y sync.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: PosSaleUi.textMuted,
                     height: 1.35,
@@ -207,8 +317,30 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                         ),
                   ),
                 ],
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                _terminalInfoCard(context),
+                const SizedBox(height: 16),
                 _functionalCurrencyCard(context, s),
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: _openPinProtectedConfig,
+                  icon: const Icon(Icons.lock_outline_rounded),
+                  label: const Text('Configuración (clave)'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    backgroundColor: PosSaleUi.surface3,
+                    foregroundColor: PosSaleUi.text,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Margen por defecto de la tienda e ID de tienda (copiar). '
+                  'Solo personal autorizado.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: PosSaleUi.textMuted,
+                        height: 1.35,
+                      ),
+                ),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
                   onPressed: () {

@@ -13,6 +13,11 @@ class CatalogProduct {
     required this.active,
     this.unit,
     this.supplierId,
+    this.pricingMode,
+    this.marginPercentOverride,
+    this.effectiveMarginPercent,
+    this.marginComputedPercent,
+    this.suggestedPrice,
   });
 
   final String id;
@@ -30,6 +35,21 @@ class CatalogProduct {
   /// Proveedor principal (`Product.supplierId`); misma tienda que `X-Store-Id`.
   final String? supplierId;
 
+  /// `USE_STORE_DEFAULT` | `USE_PRODUCT_OVERRIDE` | `MANUAL_PRICE` (M7).
+  final String? pricingMode;
+
+  /// Margen % propio si [pricingMode] es override (M7).
+  final String? marginPercentOverride;
+
+  /// Solo respuesta API (derivado).
+  final String? effectiveMarginPercent;
+
+  /// Solo respuesta API (indicativo).
+  final String? marginComputedPercent;
+
+  /// Solo respuesta API.
+  final String? suggestedPrice;
+
   static CatalogProduct fromJson(Map<String, dynamic> json) {
     return CatalogProduct(
       id: json['id']?.toString() ?? '',
@@ -44,7 +64,18 @@ class CatalogProduct {
       active: json['active'] as bool? ?? true,
       unit: json['unit'] as String?,
       supplierId: _parseOptionalId(json['supplierId']),
+      pricingMode: _parseOptionalString(json['pricingMode']),
+      marginPercentOverride: _parseOptionalString(json['marginPercentOverride']),
+      effectiveMarginPercent: _parseOptionalString(json['effectiveMarginPercent']),
+      marginComputedPercent: _parseOptionalString(json['marginComputedPercent']),
+      suggestedPrice: _parseOptionalString(json['suggestedPrice']),
     );
+  }
+
+  static String? _parseOptionalString(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
   }
 
   static String? _parseOptionalId(dynamic v) {
@@ -78,6 +109,14 @@ class CatalogProduct {
     if (sid != null && sid.isNotEmpty) {
       m['supplierId'] = sid;
     }
+    final pm = pricingMode?.trim();
+    if (pm == 'MANUAL_PRICE') {
+      m['pricingMode'] = 'MANUAL_PRICE';
+    } else if (pm == 'USE_PRODUCT_OVERRIDE') {
+      m['pricingMode'] = 'USE_PRODUCT_OVERRIDE';
+      final o = marginPercentOverride?.trim();
+      if (o != null && o.isNotEmpty) m['marginPercentOverride'] = o;
+    }
     return m;
   }
 
@@ -102,6 +141,17 @@ class CatalogProduct {
     }
     final sid = supplierId?.trim();
     m['supplierId'] = (sid == null || sid.isEmpty) ? null : sid;
+    final pm = (pricingMode?.trim().isEmpty ?? true)
+        ? 'USE_STORE_DEFAULT'
+        : pricingMode!.trim();
+    m['pricingMode'] = pm;
+    if (pm == 'USE_PRODUCT_OVERRIDE') {
+      final o = marginPercentOverride?.trim();
+      m['marginPercentOverride'] =
+          (o != null && o.isNotEmpty) ? o : null;
+    } else {
+      m['marginPercentOverride'] = null;
+    }
     return m;
   }
 }

@@ -50,6 +50,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
       );
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
     setState(() => _search.text = code);

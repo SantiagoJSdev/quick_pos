@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
@@ -29,6 +30,7 @@ class InventoryStockTab extends StatefulWidget {
     required this.inventoryApi,
     required this.productsApi,
     required this.suppliersApi,
+    required this.storesApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
     this.onLoadedCount,
@@ -38,6 +40,7 @@ class InventoryStockTab extends StatefulWidget {
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
   final SuppliersApi suppliersApi;
+  final StoresApi storesApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
 
@@ -54,13 +57,30 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   bool _loading = true;
   String? _error;
   _StockListFilter _stockFilter = _StockListFilter.all;
+  String? _storeDefaultMarginPercent;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
     widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
+    unawaited(_loadStoreMargin());
     _load();
+  }
+
+  Future<void> _loadStoreMargin() async {
+    try {
+      final bs =
+          await widget.storesApi.getBusinessSettings(widget.storeId);
+      if (!mounted) return;
+      final m = bs.defaultMarginPercent?.trim();
+      setState(() {
+        _storeDefaultMarginPercent =
+            (m == null || m.isEmpty) ? null : m;
+      });
+    } catch (_) {
+      /* opcional: sin margen en settings */
+    }
   }
 
   @override
@@ -167,8 +187,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           storeId: widget.storeId,
           productsApi: widget.productsApi,
           suppliersApi: widget.suppliersApi,
-          inventoryApi: widget.inventoryApi,
-          localPrefs: widget.localPrefs,
+          storesApi: widget.storesApi,
+          catalogInvalidationBus: widget.catalogInvalidationBus,
           initialBarcode: code,
         ),
       ),
@@ -186,6 +206,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       );
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
     setState(() => _searchController.text = code);
@@ -411,9 +432,13 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                 builder: (ctx) => InventoryProductDetailScreen(
                   storeId: widget.storeId,
                   inventoryApi: widget.inventoryApi,
+                  productsApi: widget.productsApi,
+                  suppliersApi: widget.suppliersApi,
                   localPrefs: widget.localPrefs,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                   initialLine: line,
+                  storeDefaultMarginPercent: _storeDefaultMarginPercent,
+                  storesApi: widget.storesApi,
                 ),
               ),
             );

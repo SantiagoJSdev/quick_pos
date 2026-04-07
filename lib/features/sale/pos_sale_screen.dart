@@ -91,6 +91,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   int _pendingSyncCount = 0;
   bool _flushBusy = false;
 
+  String? _cartFeedback;
+  Timer? _cartFeedbackTimer;
+
   @override
   void initState() {
     super.initState();
@@ -170,8 +173,18 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     }
   }
 
+  void _showCartFeedback(String message) {
+    _cartFeedbackTimer?.cancel();
+    setState(() => _cartFeedback = message);
+    _cartFeedbackTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      setState(() => _cartFeedback = null);
+    });
+  }
+
   @override
   void dispose() {
+    _cartFeedbackTimer?.cancel();
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _search.dispose();
     _searchFocus.dispose();
@@ -452,9 +465,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     });
     _search.clear();
     _searchFocus.unfocus();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${p.name} × $add en el ticket')),
-    );
+    _showCartFeedback('${p.name} × $add en el ticket');
   }
 
   Future<void> _openScanner() async {
@@ -466,6 +477,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       );
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
 
@@ -812,14 +824,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     });
   }
 
-  void _openScanChoices() {
-    showPosScanSheet(
-      context,
-      onOpenCamera: _openScanner,
-      onSimulate: _simulateRandomScan,
-    );
-  }
-
   void _simulateRandomScan() {
     final active = _all.where((p) => p.active).toList();
     if (active.isEmpty) {
@@ -916,7 +920,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             PosSaleSearchBlock(
               controller: _search,
               focusNode: _searchFocus,
-              onScanTap: _openScanChoices,
+              onScanTap: _openScanner,
+              onScanLongPress: _simulateRandomScan,
               onClear: () {
                 _search.clear();
                 setState(() {});
@@ -1118,6 +1123,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 itemsSummary:
                     '${_cart.length} líneas · ${_cartQtySummary()} u.',
                 cartNotEmpty: !cartEmpty,
+                cartFeedback: _cartFeedback,
                 chargeInlineHint: cartEmpty ? '' : '$tf $func',
                 onClear: _clearCart,
                 onCharge: _onCheckout,

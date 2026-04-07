@@ -9,6 +9,7 @@ import '../../core/api/purchases_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/pos/post_purchase_price_hint.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
@@ -404,7 +405,10 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         ),
       );
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Compra registrada.')),
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(PostPurchasePriceHint.afterPurchaseSnackMessage),
+        ),
       );
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {

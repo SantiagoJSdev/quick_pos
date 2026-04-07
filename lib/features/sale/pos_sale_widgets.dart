@@ -168,12 +168,15 @@ class PosSaleSearchBlock extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.onScanTap,
+    this.onScanLongPress,
     this.onClear,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onScanTap;
+  /// Demo / emulador: escaneo aleatorio sin cámara.
+  final VoidCallback? onScanLongPress;
   final VoidCallback? onClear;
 
   @override
@@ -263,24 +266,30 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
             ),
           ),
           const SizedBox(width: 8),
-          Material(
-            color: PosSaleUi.primaryDim,
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: widget.onScanTap,
+          Tooltip(
+            message: widget.onScanLongPress != null
+                ? 'Escanear con la cámara (mantén pulsado: simular en demo)'
+                : 'Escanear con la cámara',
+            child: Material(
+              color: PosSaleUi.primaryDim,
               borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: PosSaleUi.primary.withValues(alpha: 0.35),
+              child: InkWell(
+                onTap: widget.onScanTap,
+                onLongPress: widget.onScanLongPress,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: PosSaleUi.primary.withValues(alpha: 0.35),
+                    ),
                   ),
+                  child: const Icon(Icons.qr_code_scanner,
+                      color: PosSaleUi.primary, size: 22),
                 ),
-                child: const Icon(Icons.qr_code_scanner,
-                    color: PosSaleUi.primary, size: 22),
               ),
             ),
           ),
@@ -609,6 +618,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
     required this.chargeInlineHint,
     this.onDiscount,
     this.currencySelector,
+    this.cartFeedback,
   });
 
   final String functionalCode;
@@ -627,8 +637,12 @@ class PosSaleCheckoutPanel extends StatelessWidget {
   final VoidCallback? onDiscount;
   final Widget? currencySelector;
 
+  /// Mensaje breve al agregar al ticket (arriba de «Moneda del ticket»; no tapa Cobrar/Vaciar).
+  final String? cartFeedback;
+
   @override
   Widget build(BuildContext context) {
+    final feedback = cartFeedback?.trim();
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: const BoxDecoration(
@@ -641,6 +655,45 @@ class PosSaleCheckoutPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (feedback != null && feedback.isNotEmpty) ...[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: PosSaleUi.primaryDim,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: PosSaleUi.primary.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 18,
+                        color: PosSaleUi.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          feedback,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            height: 1.25,
+                            color: PosSaleUi.text,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             if (currencySelector != null) ...[
               currencySelector!,
               const SizedBox(height: 8),

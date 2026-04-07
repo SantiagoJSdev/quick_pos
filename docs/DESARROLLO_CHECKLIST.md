@@ -25,8 +25,8 @@ Variable de build: **`API_BASE_URL`** (`--dart-define`, sin barra final duplicad
 **Listo en código** (alineado a los docs anteriores, salvo donde se indica gap):
 
 - **Tienda / FX / cliente HTTP:** enlace tienda, business settings, tasas, `ApiClient`, montos string, `deviceId` / `appVersion`.
-- **Inventario:** `GET /inventory`, detalle, movimientos, ajustes + cola sync; **Stock** mezcla líneas API + productos de catálogo sin movimientos (0 disp.); búsqueda nombre/SKU/barcode; **`minStock`** + filtros sin stock / bajo mínimo; escáner B7.
-- **Catálogo:** listado, alta/edición/baja producto con contrato **SKU/barcode**; tras alta, opción **cargar stock inicial** (B3).
+- **Inventario:** `GET /inventory`, detalle B2 (`GET /products/:id` + ficha margen/precio, sugerencia sobre costo medio según **margen propio / tienda / manual**), movimientos, ajustes + cola sync; **Stock** mezcla líneas API + productos de catálogo sin movimientos (0 disp.); búsqueda nombre/SKU/barcode; **`minStock`** + filtros sin stock / bajo mínimo; escáner B7.
+- **Catálogo:** listado, alta/edición/baja producto con contrato **SKU/barcode**; en alta: **solo ficha** (`POST /products`) o **con stock inicial** (`POST /products-with-stock` + cabecera **`Idempotency-Key`**, `initialStock.opId` para el movimiento — §13.6b).
 - **Proveedores:** REST por tienda (`SuppliersApi`, lista con `q` + cursor, alta/edición/baja lógica, `taxId`); recepción compra con proveedor activo y mensaje si **400** por inactivo.
 - **Venta:** POS, historial local + `GET /sales`, checkout `POST /sales`, offline + `sync/push`.
 - **Compras / devoluciones / sync:** `POST /purchases`, cola; devoluciones; pull + invalidación catálogo.
@@ -35,9 +35,9 @@ Variable de build: **`API_BASE_URL`** (`--dart-define`, sin barra final duplicad
 
 - [x] **`supplierId` en producto:** `CatalogProduct` + `toCreateBody` / `toPatchBody` + selector de proveedor activo en `ProductFormScreen` (carga `GET /suppliers` paginado).
 - [x] **`minStock` y filtros:** `InventoryLine.minStock` + getters `isOutOfStock` / `isBelowMinimumStock`; chips **Todos / Sin stock / Bajo mínimo** en `InventoryStockTab`; detalle B2 muestra stock mínimo si viene del API.
-- [x] **Alta “producto + stock inicial”:** tras **crear** producto, diálogo opcional → **B3** `IN_ADJUST` con motivo sugerido «Inventario inicial» (`ProductFormScreen` + `InventoryAdjustmentScreen.suggestedReason`). Sigue vigente **`POST /products-with-stock` (M7)** para una sola llamada cuando exista.
+- [x] **Alta “producto + stock inicial” (M7):** `ProductFormScreen` → “Con stock inicial” → sheet `ProductInitialStockBottomSheet` → **`POST /api/v1/products-with-stock`** con **`Idempotency-Key`** (UUID al abrir el sheet; misma clave + mismo JSON en reintentos; nuevo UUID si cambia el cuerpo o **409**); **`initialStock.opId`** aparte (`ClientMutationId`). Ajuste manual posterior sigue en **B3**.
 
-**Bloqueado por backend M7** (ver §4 del mismo doc + tracker backend): `defaultMarginPercent`, `pricingMode`, `marginPercentOverride`, `effectiveMarginPercent` / precio sugerido, `POST /products-with-stock`, política post-compra sobre precio. La app puede añadir **calculadora local** de margen sin persistir hasta que exista API.
+**Resto M7 (backend / app):** política post-compra sobre precio (P6–P7) y proyección Mongo si el listado lo exige. **Modelo + UI de márgenes** en app: `BusinessSettings.defaultMarginPercent` + `PATCH`; `CatalogProduct` + formulario catálogo (`pricingMode`, override, lectura de sugeridos §13.5).
 
 ---
 
@@ -48,8 +48,8 @@ Orden recomendado; marcar en las secciones inferiores del checklist al cerrar ca
 1. **Mantener docs** al día: al cambiar el backend, recopiar según `DOCUMENTOS_A_COPIAR_AL_PROYECTO_FLUTTER.md` (o `docs/backend/` solo lectura).
 2. ~~**`supplierId` en catálogo**~~ — hecho.
 3. ~~**Inventario `minStock` + filtros**~~ — hecho.
-4. ~~**Flujo post-crear → stock inicial**~~ — hecho (diálogo + B3).
-5. **Cuando M7 exista en API:** `products-with-stock`, settings de margen, campos de pricing en producto — integrar y actualizar este checklist + `FRONTEND_INTEGRATION_CONTEXT`.
+4. ~~**Flujo alta con stock inicial**~~ — hecho (`products-with-stock` + §13.6b).
+5. ~~**Settings de margen + pricing en producto**~~ — hecho en cliente (`StoresApi.patchBusinessSettings`, `StoreDashboardScreen`, `ProductFormScreen`). **Pendiente** si el backend cambia reglas: revisar §13.5 y actualizar `FRONTEND_INTEGRATION_CONTEXT`.
 
 ---
 
@@ -147,7 +147,7 @@ Orden recomendado; marcar en las secciones inferiores del checklist al cerrar ca
 - [x] **B2** Detalle stock: `GET /api/v1/inventory/{productId}` (404 → sin ficha aún; se muestra línea de la lista); `GET /api/v1/inventory/movements?productId=&limit=` — pantalla al tocar un ítem en **Stock** (`InventoryProductDetailScreen`).
 - [x] **B3** Ajuste stock: `POST /api/v1/inventory/adjustments` — `InventoryAdjustmentScreen` desde detalle B2 (`IN_ADJUST` / `OUT_ADJUST`, `quantity` string, `reason` obligatorio en UI, `unitCostFunctional` solo en entradas, **`opId`** vía `ClientMutationId` — reintento con mismo id; al editar el formulario tras fallo, nuevo `opId`). Payload sync alineado: `InventoryAdjustPayloadBuilder` (`lib/core/sync/inventory_adjust_payload_builder.dart`). **Sin red / cola:** checklist explícita en `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md` § “Punto de implementación: guardar sin red en B3”.
 - [x] **B4** Lista catálogo: `GET /api/v1/products?includeInactive=false` (opcional `source=auto|mongo|postgres`); cabecera `X-Catalog-Source` en UI debug opcional *(no implementada aún)*.
-- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}` — `ProductFormScreen` (sku opcional en alta → backend `SKU-000xxx` si se omite; **barcode** opcional/único; sin copiar barras→SKU salvo botón explícito; PATCH con `barcode: null` para quitar; **`supplierId`** opcional; tras **crear**, diálogo opcional → B3 stock inicial). Contrato: `docs/BACKEND_PRODUCT_SKU_BARCODE.md` + `FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2–3.
+- [x] **B5** Alta/edición producto: `POST /api/v1/products`, `PATCH /api/v1/products/{id}`; alta **con stock** → `POST /api/v1/products-with-stock` + **`Idempotency-Key`** (`ProductInitialStockBottomSheet`, §13.6b). `ProductFormScreen` (sku opcional en alta → backend `SKU-000xxx` si se omite; **barcode** opcional/único; sin copiar barras→SKU salvo botón explícito; PATCH con `barcode: null` para quitar; **`supplierId`** opcional). Contrato: `docs/BACKEND_PRODUCT_SKU_BARCODE.md` + `FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2–3.
 - [x] **B6** Desactivar producto: `DELETE /api/v1/products/{id}` (menú del ítem en catálogo; política `PRODUCT_SOFT_DELETE_POLICY`).
 - [x] **B7** Inventario + **cámara** (tras o junto a **P1**, mismo paquete de escaneo): (1) botón **Escanear** en **Stock** y **Catálogo** junto al buscador — rellenar filtro por código leído / `product.barcode`; si no hay coincidencia, ofrecir **crear producto** con barcode precargado. (2) En **ProductFormScreen** (alta/edición), **Escanear** junto al campo código de barras para no cargar manual. Ver `docs/UX_INVENTARIO_PRODUCTOS.md` § “Cámara / QR en Inventario”.
 - [x] **UX inventario — contador**: texto guía del módulo muestra **N líneas** (Stock) / **N productos** (Catálogo) tras cada carga (`onLoadedCount` en tabs).
@@ -227,10 +227,10 @@ Orden recomendado; marcar en las secciones inferiores del checklist al cerrar ca
 
 ## 4) Integración y calidad (transversal)
 
-- [ ] Checklist §7 `FRONTEND_INTEGRATION_CONTEXT.md`: selector moneda documento, pantalla tasa, ticket dual, offline FX en SQLite si aplica.
-- [ ] Multi-dispositivo misma tienda: mismo `X-Store-Id`, distintos `deviceId` por instalación.
-- [ ] No usar `GET /api/v1/ops/metrics` en la app POS salvo necesidad operativa y credenciales correctas.
-- [ ] Pruebas manuales o `flutter test` en flujos críticos (cliente API mockeado si aplica).
+- [x] Checklist §7 `FRONTEND_INTEGRATION_CONTEXT.md`: selector moneda documento, tasa del día / registrar tasa, ticket dual y `fxSnapshot` en POS — ya cubierto en **§2.1–2.2** (sin caché FX en SQLite: la app usa tasa en sesión + `fxSnapshot` en cola offline).
+- [x] Multi-dispositivo misma tienda: un `storeId` en `LocalPrefs`; **`deviceId`** estable por instalación (`getOrCreateDeviceId`); card **Este terminal** en `StoreDashboardScreen` (copiar ID). Documentado en `pos_terminal_info.dart`.
+- [x] **`GET /api/v1/ops/metrics`:** no hay llamadas en `lib/` (solo scroll `metrics` de Flutter en proveedores).
+- [x] **`flutter test`:** p. ej. `test/catalog_product_margins_test.dart` (M7 cuerpos producto); seguir ampliando con API mockeada según prioridad.
 
 ---
 
@@ -238,9 +238,9 @@ Orden recomendado; marcar en las secciones inferiores del checklist al cerrar ca
 
 Seguimiento de **backend** en tracker del repo Nest; cuando existan endpoints, añadir tareas aquí.
 
-- [ ] **M7-P1–P4** Settings / producto: `defaultMarginPercent`, `pricingMode`, overrides — modelo + UI según `FRONTEND_INTEGRATION_CONTEXT` actualizado.
-- [ ] **M7-P5** `POST /api/v1/products-with-stock` — sustituir o complementar flujo dos llamadas en alta de producto.
-- [ ] **M7-P6–P7** Post-compra / proyección Mongo — solo si la app consume esos campos en listados.
+- [x] **M7-P1–P4** Settings / producto: `defaultMarginPercent` en `BusinessSettings` + tarjeta y `PATCH` en `StoreDashboardScreen`; `CatalogProduct` (`pricingMode`, `marginPercentOverride`, derivados §13.5) + selector y campo en `ProductFormScreen` (`toCreateBody` / `toPatchBody`).
+- [x] **M7-P5** `POST /api/v1/products-with-stock` — `ApiClient.postJson` + `ProductsApi.createProductWithStock`; sheet con idempotencia §13.6b (sustituye el flujo crear+B3 para “con stock inicial”).
+- [x] **M7-P6–P7** Post-compra / listados: política en `docs/BACKEND_POST_PURCHASE_PRICE_POLICY.md`; **catálogo** muestra `suggestedPrice` / margen efectivo y aviso `MANUAL_PRICE`; **recepción** snackbar P6; **detalle stock** texto de política + sugerencia local (costo medio × margen tienda) y nota API vs `Product.cost`. **P7 Mongo:** la app solo consume `GET /products` (cabecera `X-Catalog-Source` ya documentada); sin lógica extra en cliente.
 
 ---
 

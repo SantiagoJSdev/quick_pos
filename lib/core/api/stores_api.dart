@@ -14,6 +14,19 @@ class StoresApi {
     return BusinessSettings.fromJson(json);
   }
 
+  /// `PATCH /stores/:storeId/business-settings` — p. ej. `defaultMarginPercent` (string 0–999, M7).
+  Future<BusinessSettings> patchBusinessSettings(
+    String storeId,
+    Map<String, dynamic> body,
+  ) async {
+    final json = await _client.patchJson(
+      '/stores/$storeId/business-settings',
+      storeId,
+      body,
+    );
+    return BusinessSettings.fromJson(json);
+  }
+
   /// Alta de tienda desde el dispositivo con **UUID generado en el cliente**.
   ///
   /// Contrato documentado: `FRONTEND_INTEGRATION_CONTEXT.md` §13.0 y

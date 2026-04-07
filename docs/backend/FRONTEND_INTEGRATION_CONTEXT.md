@@ -42,7 +42,7 @@ Actualizado con **multi-moneda (Venezuela)** y el stack actual (Postgres, outbox
 
 **Compras / recepción (M5/M6 complemento):**
 
-- `POST /api/v1/purchases` — recepción de mercancía: `supplierId` (UUID), `lines[]` (`productId`, `quantity`, `unitCost` en moneda documento), opcional `id` (idempotencia), `documentCurrencyCode`, `fxSnapshot` (misma forma que ventas). Crea `Purchase` estado `RECEIVED`, `dateReceived` = ahora, movimientos `IN_PURCHASE` y actualiza costo medio funcional del inventario.
+- `POST /api/v1/purchases` — recepción de mercancía: `supplierId` (UUID), `lines[]` (`productId`, `quantity`, `unitCost` en moneda documento), opcional `id` (idempotencia), `documentCurrencyCode`, `fxSnapshot` (misma forma que ventas). Crea `Purchase` estado `RECEIVED`, `dateReceived` = ahora, movimientos `IN_PURCHASE` y actualiza **costo medio funcional del inventario** (`InventoryItem`). **No** cambia solo `Product.price` ni `Product.cost` del catálogo. Tras compra, sugerencia de nuevo precio de lista: ver **`docs/BACKEND_POST_PURCHASE_PRICE_POLICY.md`** y §13.10.
 - `GET /api/v1/purchases/:id` — detalle con líneas y proveedor.
 - Proveedores (por tienda, `X-Store-Id`): **`GET /api/v1/suppliers`** (lista paginada, `q`, `active`, `cursor`), **`POST /api/v1/suppliers`** (alta; el servidor devuelve `id`), **`GET/PATCH/DELETE`** `/suppliers/:id` (`DELETE` = soft `active=false`). Contrato: **`docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`**. El seed crea un proveedor “general” **por tienda** si no hay ninguno. `POST /purchases` exige `supplierId` de **esa tienda** y proveedor **activo**.
 
@@ -209,6 +209,7 @@ Qué documentos del backend copiar al repo Flutter y dónde pegarlos:
 | Proveedores (CRUD / lista) | `docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`, `src/modules/suppliers/` |
 | Registro POS (`POSDevice`) | `src/modules/pos-device/pos-device.service.ts` (ventas + sync) |
 | Compras API | `src/modules/purchases/` |
+| Política precio tras compra (M7-P6) | `docs/BACKEND_POST_PURCHASE_PRICE_POLICY.md` |
 | Devoluciones venta | `src/modules/sale-returns/` + `docs/api/RETURNS_POLICY.md` |
 | FX snapshot tienda | `src/modules/exchange-rates/store-fx-snapshot.service.ts` |
 | Observabilidad M5 | `src/modules/ops/` (`GET /ops/metrics`, `OpsAuthGuard`, scheduler) |

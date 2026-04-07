@@ -4,11 +4,17 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
+import '../../core/api/products_api.dart';
+import '../../core/api/stores_api.dart';
+import '../../core/api/suppliers_api.dart';
+import '../../core/models/catalog_product.dart';
 import '../../core/models/inventory_line.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
+import '../../core/pos/post_purchase_price_hint.dart';
 import 'inventory_adjustment_screen.dart';
+import 'product_form_screen.dart';
 
 /// B2 — detalle de stock + movimientos recientes.
 class InventoryProductDetailScreen extends StatefulWidget {
@@ -16,16 +22,26 @@ class InventoryProductDetailScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.inventoryApi,
+    required this.productsApi,
+    required this.suppliersApi,
+    this.storesApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
     required this.initialLine,
+    this.storeDefaultMarginPercent,
   });
 
   final String storeId;
   final InventoryApi inventoryApi;
+  final ProductsApi productsApi;
+  final SuppliersApi suppliersApi;
+  final StoresApi? storesApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
   final InventoryLine initialLine;
+
+  /// Margen % de tienda si el producto usa `USE_STORE_DEFAULT` o aún no cargó la ficha.
+  final String? storeDefaultMarginPercent;
 
   String get _productId {
     final fromLine = initialLine.productId.trim();
@@ -41,6 +57,7 @@ class InventoryProductDetailScreen extends StatefulWidget {
 class _InventoryProductDetailScreenState
     extends State<InventoryProductDetailScreen> {
   InventoryLine? _line;
+  CatalogProduct? _catalogProduct;
   List<StockMovement> _movements = [];
   bool _loading = true;
   String? _error;
@@ -87,11 +104,14 @@ class _InventoryProductDetailScreenState
         productId: pid,
         limit: 100,
       );
+      final productFuture = widget.productsApi.getProduct(widget.storeId, pid);
       final detail = await detailFuture;
       final mov = await movFuture;
+      final product = await productFuture;
       if (!mounted) return;
       setState(() {
         _line = detail ?? widget.initialLine;
+        _catalogProduct = product;
         _movements = mov;
         _loading = false;
       });
@@ -125,6 +145,22 @@ class _InventoryProductDetailScreenState
     if (ok == true && mounted) await _load();
   }
 
+  Future<void> _openEditProduct(CatalogProduct product) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (ctx) => ProductFormScreen(
+          storeId: widget.storeId,
+          productsApi: widget.productsApi,
+          suppliersApi: widget.suppliersApi,
+          storesApi: widget.storesApi,
+          catalogInvalidationBus: widget.catalogInvalidationBus,
+          existing: product,
+        ),
+      ),
+    );
+    if (changed == true && mounted) await _load();
+  }
+
   String _formatWhen(DateTime? t) {
     if (t == null) return '—';
     final l = t.toLocal();
@@ -141,11 +177,18 @@ class _InventoryProductDetailScreenState
     final title = line.displayName;
 
     final pid = widget._productId;
+    final cat = _catalogProduct;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
         actions: [
+          if (cat != null && !_loading && _error == null)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Editar producto y margen',
+              onPressed: () => _openEditProduct(cat),
+            ),
           if (pid.isNotEmpty && !_loading && _error == null)
             IconButton(
               icon: const Icon(Icons.tune),
@@ -189,6 +232,78 @@ class _InventoryProductDetailScreenState
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
+                      if (cat == null && pid.isNotEmpty) ...[
+                        Card(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              'No se pudo cargar la ficha del producto. '
+                              'Para margen individual y precio: pestaña Catálogo → editar.',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (cat != null) ...[
+                        Text(
+                          'Precio y margen (catálogo)',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _kv(
+                                  'Precio lista',
+                                  '${cat.price} ${cat.currency}',
+                                ),
+                                _kv('Costo ficha', '${cat.cost} ${cat.currency}'),
+                                _kv(
+                                  'Política de margen',
+                                  PostPurchasePriceHint.pricingModeLabelEs(
+                                    cat.pricingMode,
+                                  ),
+                                ),
+                                if (cat.pricingMode == 'USE_PRODUCT_OVERRIDE' &&
+                                    cat.marginPercentOverride != null &&
+                                    cat.marginPercentOverride!.trim().isNotEmpty)
+                                  _kv(
+                                    'Margen propio %',
+                                    cat.marginPercentOverride!.trim(),
+                                  ),
+                                if (cat.effectiveMarginPercent != null &&
+                                    cat.effectiveMarginPercent!.trim().isNotEmpty)
+                                  _kv(
+                                    'Margen efectivo (API)',
+                                    '${cat.effectiveMarginPercent!.trim()}%',
+                                  ),
+                                if (cat.suggestedPrice != null &&
+                                    cat.suggestedPrice!.trim().isNotEmpty)
+                                  _kv(
+                                    'Precio sugerido (API, sobre costo ficha)',
+                                    '${cat.suggestedPrice!.trim()} ${cat.currency}',
+                                  ),
+                                const SizedBox(height: 8),
+                                FilledButton.tonalIcon(
+                                  onPressed: () => _openEditProduct(cat),
+                                  icon: const Icon(Icons.percent_outlined),
+                                  label: const Text('Cambiar margen / precio'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
                       Text(
                         'Stock',
                         style: Theme.of(context).textTheme.titleMedium,
@@ -224,6 +339,78 @@ class _InventoryProductDetailScreenState
                             ],
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        PostPurchasePriceHint.stockDetailPolicyLine,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                              height: 1.35,
+                            ),
+                      ),
+                      Builder(
+                        builder: (ctx) {
+                          final avg = line.averageUnitCostFunctional?.trim();
+                          if (avg == null || avg.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          final p = _catalogProduct;
+                          if (p?.pricingMode == 'MANUAL_PRICE') {
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                'Precio manual: no aplica sugerencia por margen '
+                                'sobre el costo medio de depósito.',
+                                style: Theme.of(ctx)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(ctx)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
+                              ),
+                            );
+                          }
+                          final marginPct =
+                              PostPurchasePriceHint
+                                  .marginPercentForAverageCostSuggestion(
+                            product: p,
+                            storeDefaultMarginPercent:
+                                widget.storeDefaultMarginPercent,
+                          );
+                          if (marginPct == null || marginPct.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          final localSug = PostPurchasePriceHint
+                              .suggestedListFromAverageCostAndStoreMargin(
+                            line.averageUnitCostFunctional,
+                            marginPct,
+                          );
+                          if (localSug == null) {
+                            return const SizedBox.shrink();
+                          }
+                          final src = p?.pricingMode == 'USE_PRODUCT_OVERRIDE'
+                              ? 'margen propio del producto'
+                              : 'margen de la tienda';
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Sugerido sobre costo medio ($src, $marginPct%): '
+                              '$localSug (moneda funcional). '
+                              '${PostPurchasePriceHint.catalogSuggestedUsesProductCost}',
+                              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(ctx)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                    height: 1.35,
+                                  ),
+                            ),
+                          );
+                        },
                       ),
                       if (pid.isNotEmpty) ...[
                         const SizedBox(height: 12),

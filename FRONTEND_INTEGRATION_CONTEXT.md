@@ -20,29 +20,31 @@ Actualizado con **multi-moneda (Venezuela)** y el stack actual (Postgres, outbox
 - Para `GET /api/v1/stores/:storeId/business-settings`, `X-Store-Id` debe ser **igual** a `:storeId`.
 - Validacion: DTOs con `class-validator`; cuerpos JSON.
 - Productos hoy:
-  - `POST /api/v1/products` — crear (genera `OutboxEvent` `PRODUCT_CREATED`).
+  - `POST /api/v1/products` — crear (genera `OutboxEvent` `PRODUCT_CREATED`). **`sku`** opcional: si falta o va vacío, el servidor asigna **`SKU-000001`**, `SKU-000002`, … **`barcode`** opcional; vacío → `null` (único solo si informado). No mezclar barcode↔sku en el cliente salvo confirmación del usuario. Detalle: **`docs/BACKEND_PRODUCT_SKU_BARCODE.md`**. Opcionales: **`pricingMode`** (`USE_STORE_DEFAULT` \| `USE_PRODUCT_OVERRIDE` \| `MANUAL_PRICE`), **`marginPercentOverride`** (string 0–999), **`supplierId`**. Respuesta (y listados) incluyen derivados de margen usando **`defaultMarginPercent`** de la tienda del header **`X-Store-Id`**: **`effectiveMarginPercent`**, **`marginComputedPercent`**, **`suggestedPrice`** (ver §13.5).
   - `GET /api/v1/products` — lista; `includeInactive=true|false`; lectura **Mongo** `products_read` por defecto con **fallback Postgres** (query `source=auto|mongo|postgres`, default `auto`). Respuesta incluye cabecera `X-Catalog-Source: mongo|postgres`.
   - `GET /api/v1/products/:id` — mismo criterio de origen; en `auto`, si no hay doc en Mongo se intenta Postgres (retraso del worker).
   - `PATCH /api/v1/products/:id` — actualiza (`PRODUCT_UPDATED`).
   - `DELETE /api/v1/products/:id` — soft delete (`PRODUCT_DEACTIVATED`).
+  - `POST /api/v1/products-with-stock` — alta **atómica**: mismo cuerpo que `POST /products` más **`initialStock`** (`quantity` obligatorio; opcional `unitCostFunctional`, `reason`, `opId` para el movimiento). **Obligatorio** header **`Idempotency-Key: <uuid>`** (generar **una vez por intento de pantalla** antes del POST). Misma clave + mismo JSON en reintentos → **200** con la **misma** respuesta **sin** crear otro producto. Misma clave + JSON distinto → **409**. Respuesta `{ product, inventory }`. TTL de registro configurable (`IDEMPOTENCY_TTL_HOURS`, default 7 días). Ver §13.6b.
 
 **Inventario por tienda (M2):**
 
 - `GET /api/v1/inventory` — líneas `InventoryItem` de la tienda del header + datos básicos del `product`.
 - `GET /api/v1/inventory/:productId` — una línea; `404` si aún no existe (se crea al primer ajuste).
-- `GET /api/v1/inventory/movements?productId=<opcional>&limit=<1-500>` — últimos `StockMovement` de la tienda (`X-Store-Id`); `productId` filtra por producto. **Respuesta:** array JSON **en la raíz** `[ ... ]` sin envelope (Nest); detalle §13.8.1.
+- `GET /api/v1/inventory/movements?productId=&limit=` — últimos `StockMovement` (default 100, max 500).
 - `POST /api/v1/inventory/adjustments` — cuerpo: `productId`, `type` `IN_ADJUST`|`OUT_ADJUST`, `quantity` (string > 0), opcional `reason`, `unitCostFunctional` (entrada; si falta usa costo medio actual o `Product.cost`), `opId` (idempotencia). Respuesta `{ status: applied|skipped, movementId? }`.
 
 **Ventas (M4):**
 
+- `GET /api/v1/sales` — historial de la tienda (cabecera `X-Store-Id`). Query opcional: `dateFrom`, `dateTo` (`YYYY-MM-DD` en **zona `Store.timezone`**, o UTC si la tienda no tiene timezone), `deviceId`, `limit` (default 50, max 200), `cursor` (siguiente página; opaco), `format`=`object`|`array`. Por defecto respuesta **`{ items, nextCursor, meta }`** con `meta.timezone`, fechas efectivas y texto de interpretación; con `format=array` solo el array (sin paginar por cursor). Máximo **31 días** calendario inclusive entre from/to (o defaults documentados). Orden: más reciente primero. Detalle líneas: `GET /sales/:id`. Contrato detallado: **`docs/BACKEND_SALES_HISTORY_API.md`**.
 - `POST /api/v1/sales` — confirma venta: `lines[]` (`productId`, `quantity`, `price` string, opcional `discount`), opcional `id` (UUID cliente; si ya existe venta con ese id en la tienda, respuesta idempotente sin duplicar stock), `documentCurrencyCode`, `userId`, `deviceId`, opcional `appVersion`, `fxSnapshot` (`baseCurrencyCode`, `quoteCurrencyCode`, `rateQuotePerBase`, `effectiveDate` `YYYY-MM-DD`, opcional `fxSource` e.g. `POS_OFFLINE`). Si envías **`deviceId`**, el servidor **crea o actualiza** el registro `POSDevice` de esa tienda (`lastSeen`, `appVersion` si viene) y **enlaza la venta**; si ese `deviceId` ya está en **otra** tienda → **409 Conflict**. Sin `deviceId`, la venta se guarda igual pero sin terminal en cabecera. Descuenta stock (`OUT_SALE`) y guarda importes documento + funcional en cabecera y líneas.
 - `GET /api/v1/sales/:id` — detalle con líneas (misma tienda que `X-Store-Id`).
 
 **Compras / recepción (M5/M6 complemento):**
 
-- `POST /api/v1/purchases` — recepción de mercancía: `supplierId` (UUID), `lines[]` (`productId`, `quantity`, `unitCost` en moneda documento), opcional `id` (idempotencia), `documentCurrencyCode`, `fxSnapshot` (misma forma que ventas). Crea `Purchase` estado `RECEIVED`, `dateReceived` = ahora, movimientos `IN_PURCHASE` y actualiza costo medio funcional del inventario.
+- `POST /api/v1/purchases` — recepción de mercancía: `supplierId` (UUID), `lines[]` (`productId`, `quantity`, `unitCost` en moneda documento), opcional `id` (idempotencia), `documentCurrencyCode`, `fxSnapshot` (misma forma que ventas). Crea `Purchase` estado `RECEIVED`, `dateReceived` = ahora, movimientos `IN_PURCHASE` y actualiza **costo medio funcional del inventario** (`InventoryItem`). **No** cambia solo `Product.price` ni `Product.cost` del catálogo. Tras compra, sugerencia de nuevo precio de lista: ver **`docs/BACKEND_POST_PURCHASE_PRICE_POLICY.md`** y §13.10.
 - `GET /api/v1/purchases/:id` — detalle con líneas y proveedor.
-- Proveedores: el seed crea un `Supplier` por defecto si la tabla está vacía; **no hay** `GET /suppliers` ni CRUD en API. Para `POST /purchases` hace falta un `supplierId` (UUID) obtenido de seed, Prisma Studio o admin. La app Flutter puede guardar proveedores **solo en local** hasta que exista endpoint.
+- Proveedores (por tienda, `X-Store-Id`): **`GET /api/v1/suppliers`** (lista paginada, `q`, `active`, `cursor`), **`POST /api/v1/suppliers`** (alta; el servidor devuelve `id`), **`GET/PATCH/DELETE`** `/suppliers/:id` (`DELETE` = soft `active=false`). Contrato: **`docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`**. El seed crea un proveedor “general” **por tienda** si no hay ninguno. `POST /purchases` exige `supplierId` de **esa tienda** y proveedor **activo**.
 
 **Devoluciones de venta (M6):**
 
@@ -52,8 +54,9 @@ Actualizado con **multi-moneda (Venezuela)** y el stack actual (Postgres, outbox
 
 **Configuracion de tienda (moneda funcional, moneda documento por defecto):**
 
-- `GET /api/v1/stores/:storeId/business-settings` — devuelve `functionalCurrency`, `defaultSaleDocCurrency`, datos de `store`.  
+- `GET /api/v1/stores/:storeId/business-settings` — devuelve `functionalCurrency`, `defaultSaleDocCurrency`, datos de `store`, y opcional **`defaultMarginPercent`** (string decimal, % margen por defecto de la tienda).  
   - Si no existe fila `BusinessSettings` para esa tienda: `404` (ejecutar seed, usar onboarding PUT abajo, o admin).
+- `PATCH /api/v1/stores/:storeId/business-settings` — body `{ "defaultMarginPercent": "15" }` (número en string; rango **0–999**). Misma cabecera `X-Store-Id` = `:storeId`; aplica **`StoreConfiguredGuard`** (tienda ya configurada). Respuesta **mismo shape** que el `GET`.
 
 **Onboarding desde el POS** (servidor con `STORE_ONBOARDING_ENABLED=1`; si no, **403**):
 
@@ -198,10 +201,15 @@ Qué documentos del backend copiar al repo Flutter y dónde pegarlos:
 | Idempotencia tests | `docs/qa/IDEMPOTENCY_OPID_TEST_CASES.md` |
 | Tracker | `docs/IMPLEMENTATION_TRACKER.md` |
 | Productos API | `src/modules/products/` |
+| SKU vs barcode (POS) | `docs/BACKEND_PRODUCT_SKU_BARCODE.md` |
+| Inventario + proveedores + márgenes (PDFs → API) | `docs/FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` + `IMPLEMENTATION_TRACKER.md` §5.1 (M7) |
 | Inventario API | `src/modules/inventory/` |
 | Ventas API | `src/modules/sales/` |
+| Historial ventas (listado) | `docs/BACKEND_SALES_HISTORY_API.md`, `GET /api/v1/sales` |
+| Proveedores (CRUD / lista) | `docs/BACKEND_SUPPLIERS_API_PROPOSAL.md`, `src/modules/suppliers/` |
 | Registro POS (`POSDevice`) | `src/modules/pos-device/pos-device.service.ts` (ventas + sync) |
 | Compras API | `src/modules/purchases/` |
+| Política precio tras compra (M7-P6) | `docs/BACKEND_POST_PURCHASE_PRICE_POLICY.md` |
 | Devoluciones venta | `src/modules/sale-returns/` + `docs/api/RETURNS_POLICY.md` |
 | FX snapshot tienda | `src/modules/exchange-rates/store-fx-snapshot.service.ts` |
 | Observabilidad M5 | `src/modules/ops/` (`GET /ops/metrics`, `OpsAuthGuard`, scheduler) |
@@ -263,6 +271,7 @@ Respuesta **200** (objeto Prisma serializado; `Decimal` suele ir como string en 
   "storeId": "550e8400-e29b-41d4-a716-446655440001",
   "functionalCurrencyId": "curr-usd-uuid",
   "defaultSaleDocCurrencyId": "curr-ves-uuid",
+  "defaultMarginPercent": "15",
   "createdAt": "2026-04-01T12:00:00.000Z",
   "updatedAt": "2026-04-01T12:00:00.000Z",
   "functionalCurrency": {
@@ -351,13 +360,22 @@ El controlador devuelve el array de productos (forma según `products.service`);
   "name": "Arroz 1kg",
   "description": null,
   "type": "GOODS",
+  "pricingMode": "USE_STORE_DEFAULT",
+  "marginPercentOverride": null,
   "price": "2.50",
   "cost": "1.80",
   "currency": "USD",
   "active": true,
-  "unit": "unidad"
+  "unit": "unidad",
+  "effectiveMarginPercent": "15",
+  "marginComputedPercent": "38.88888888888888888888888888889",
+  "suggestedPrice": "2.07"
 }
 ```
+
+- **`effectiveMarginPercent`**: margen % que aplica la regla (`USE_STORE_DEFAULT` → margen tienda; `USE_PRODUCT_OVERRIDE` → override; `MANUAL_PRICE` → `null`).
+- **`marginComputedPercent`**: `(price - cost) / cost × 100` si `cost` &gt; 0 (indicativo si moneda de lista ≠ funcional).
+- **`suggestedPrice`**: `cost × (1 + margenEfectivo/100)` si hay margen efectivo y `cost` &gt; 0; `null` en `MANUAL_PRICE`.
 
 Cabecera respuesta: `X-Catalog-Source: mongo` o `postgres`.
 
@@ -375,7 +393,48 @@ Cabecera respuesta: `X-Catalog-Source: mongo` o `postgres`.
 }
 ```
 
+Opcionales: `"pricingMode": "USE_PRODUCT_OVERRIDE"`, `"marginPercentOverride": "25"` (margen % sobre costo, rango 0–999). En **`PATCH /products/:id`**, enviar **`marginPercentOverride": null`** borra el override.
+
 **Response:** producto creado (incl. `id`, timestamps). Errores comunes: `sku` duplicado → 409/400 según implementación.
+
+### 13.6b Alta producto + stock inicial → `POST /products-with-stock`
+
+**Cabeceras obligatorias**
+
+| Header | Uso |
+|--------|-----|
+| `X-Store-Id` | Igual que el resto del POS. |
+| `Idempotency-Key` | UUID generado en el **cliente** al **iniciar** el flujo (no por cada retry aleatorio). Mismo valor en todos los reintentos del **mismo** alta. **Nuevo** producto en otra pantalla → **nuevo** UUID. |
+
+**Contrato anti-duplicados (Flutter / POS)**
+
+1. Al abrir el asistente “producto + stock inicial”, generar `idempotencyKey = Uuid().v4()` (o equivalente) y guardarlo en estado del formulario hasta que el POST termine en **200** o el usuario cancele.
+2. Si hay timeout o error de red, **reintentar** con el **mismo** `Idempotency-Key` y el **mismo** cuerpo JSON (bit a bit lógico: mismos campos/valores). El servidor devuelve la respuesta guardada y **no** crea un segundo `Product`.
+3. Si el usuario **cambia** el formulario y reutiliza por error la misma clave → **409** `Conflict` (mensaje: clave ya usada con otro cuerpo).
+4. `initialStock.opId` sigue siendo opcional y solo idempotencia del **movimiento** en inventario (distinto del `Idempotency-Key` de la petición HTTP).
+
+Cuerpo = campos de **`POST /products`** + **`initialStock`**:
+
+```json
+{
+  "name": "Refresco 2L",
+  "price": "2.00",
+  "cost": "1.20",
+  "currency": "USD",
+  "initialStock": {
+    "quantity": "48",
+    "unitCostFunctional": "1.20",
+    "reason": "Inventario inicial",
+    "opId": "00000000-0000-4000-8000-000000000099"
+  }
+}
+```
+
+`unitCostFunctional` es opcional (misma regla que `IN_ADJUST`: si falta, entra el `cost` del producto).
+
+**Response 200:** `{ "product": { ... }, "inventory": { ... } }` — `inventory` es la fila `InventoryItem` de esa tienda con `product` anidado resumido (como en `GET /inventory`).
+
+**Errores:** sin `Idempotency-Key` o UUID inválido → **400**. Clave repetida con JSON distinto → **409**.
 
 ### 13.7 Ajuste inventario → `POST /inventory/adjustments`
 
@@ -413,8 +472,6 @@ Idempotencia con el mismo `opId` (opcional en body):
 
 Segunda vez: `{ "status": "skipped" }`.
 
-**Cliente Flutter (Quick POS):** en ajustes de inventario la app envía siempre un `opId` (UUID v4) tras pasar validación local: el **mismo** `opId` en reintentos si falla la red; si el usuario **cambia** el formulario tras un fallo, se genera uno **nuevo**. Ver `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md`.
-
 ### 13.8 Lista inventario → `GET /inventory`
 
 Ejemplo de **una línea** (estructura según servicio; incluye producto embebido o join):
@@ -435,65 +492,6 @@ Ejemplo de **una línea** (estructura según servicio; incluye producto embebido
   }
 }
 ```
-
-### 13.8.1 Movimientos → `GET /inventory/movements`
-
-**Ruta:** `GET /api/v1/inventory/movements?productId=<uuid opcional>&limit=<1-500>`  
-**Cabecera:** `X-Store-Id` (igual que el resto de inventario).
-
-**Respuesta 200:** **sin envelope** — el cuerpo es un **array JSON** en la raíz, `[ ... ]` (`List<StockMovement>` en Nest). Los `Decimal` de Prisma serializan como **string**; las fechas como **ISO 8601**.
-
-**Implementación backend (Quick Market API, referencia):**
-
-```ts
-listMovements(storeId: string, productId?: string, limit = 100) {
-  const take = Math.min(500, Math.max(1, limit));
-  return this.prisma.stockMovement.findMany({
-    where: { storeId, ...(productId ? { productId } : {}) },
-    orderBy: { createdAt: 'desc' },
-    take,
-    include: {
-      product: { select: { id: true, sku: true, name: true } },
-    },
-  });
-}
-```
-
-**`type`:** uno de  
-`IN_PURCHASE` | `IN_RETURN` | `IN_ADJUST` | `IN_TRANSFER` | `OUT_SALE` | `OUT_LOSS` | `OUT_ADJUST` | `OUT_TRANSFER`.
-
-**Nulables:** `opId`, `referenceId`, `reason`, `costAtMoment`, `priceAtMoment`, `unitCostFunctional`, `totalCostFunctional` pueden ser `null`.
-
-**`product`:** en este listado **siempre** viene — objeto `{ id, sku, name }`.
-
-Ejemplo **ilustrativo** (un elemento del array):
-
-```json
-[
-  {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "opId": "sync-op-uuid:prod-uuid",
-    "productId": "20000000-0000-4000-8000-000000000002",
-    "storeId": "550e8400-e29b-41d4-a716-446655440001",
-    "type": "OUT_SALE",
-    "quantity": "2",
-    "costAtMoment": null,
-    "priceAtMoment": "91.25",
-    "unitCostFunctional": "2.5",
-    "totalCostFunctional": "5",
-    "referenceId": "venta-uuid-si-aplica",
-    "reason": null,
-    "createdAt": "2026-04-04T18:30:00.000Z",
-    "product": {
-      "id": "20000000-0000-4000-8000-000000000002",
-      "sku": "SKU-001",
-      "name": "Arroz 1kg"
-    }
-  }
-]
-```
-
-**Cliente Flutter:** tras `jsonDecode`, la raíz debe ser `List<dynamic>`; `ApiClient.getJsonList` ya soporta array en raíz. Mapear **camelCase** en `StockMovement.fromJson` (cantidades e importes como `String`). Si un proxy u otro cliente envolviera la respuesta, adaptar solo la capa que llama a `getJsonList` (p. ej. `envelope['data']`); **el backend Nest actual no envuelve**.
 
 ### 13.9 POS / Sprint 2 → `POST /sales`
 
@@ -528,11 +526,46 @@ Online sin offline: omitir `fxSource` o no usar `POS_OFFLINE`; el servidor contr
 
 **Response:** venta con `saleLines`, totales `totalDocument`, `totalFunctional`, campos `fx*` en cabecera (Decimal como string).
 
+### 13.9b Historial ventas → `GET /sales?dateFrom=&dateTo=&deviceId=&limit=&cursor=`
+
+`dateFrom` / `dateTo` = calendario en zona **`meta.timezone`** (tienda). Respuesta por defecto:
+
+```json
+{
+  "items": [
+    {
+      "id": "sale-uuid",
+      "createdAt": "2026-04-05T14:30:00.000Z",
+      "documentCurrencyCode": "VES",
+      "totalDocument": "182.50",
+      "totalFunctional": "5.0",
+      "deviceId": "pos-device-uuid",
+      "status": "CONFIRMED"
+    }
+  ],
+  "nextCursor": null,
+  "meta": {
+    "timezone": "America/Caracas",
+    "dateFrom": "2026-04-01",
+    "dateTo": "2026-04-07",
+    "rangeInterpretation": "Calendar dates …",
+    "limit": 50,
+    "hasMore": false
+  }
+}
+```
+
+### 13.9c Proveedores → `GET /suppliers` / `POST /suppliers`
+
+**POST** (201): `{ "name": "Mi proveedor", "taxId": "J-123", "phone": "0414..." }` → respuesta incluye `id` para usar en compras.
+
+**GET** por defecto: `{ "items": [...], "nextCursor": null, "meta": { "limit", "hasMore", "activeFilter" } }`.
+
 ### 13.10 Compra / recepción → `POST /purchases`
 
 ```json
 {
-  "supplierId": "supplier-uuid-del-seed",
+  "supplierId": "uuid-devuelto-por-get-o-post-suppliers",
   "documentCurrencyCode": "VES",
   "lines": [
     {
@@ -549,6 +582,8 @@ Online sin offline: omitir `fxSource` o no usar `POS_OFFLINE`; el servidor contr
   }
 }
 ```
+
+**Después de una compra (precio de venta):** el backend **no** actualiza el **`price`** del producto. El costo valorizado de la tienda queda en **`GET /inventory/:productId`** (`averageUnitCostFunctional`). Los campos derivados del catálogo (`suggestedPrice` en `GET /products`) usan **`Product.cost`** hasta que alguien haga **`PATCH /products/:id`**. Detalle y tabla por `pricingMode`: **`docs/BACKEND_POST_PURCHASE_PRICE_POLICY.md`**.
 
 ### 13.11 Devolución → `POST /sale-returns`
 

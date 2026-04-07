@@ -4,6 +4,9 @@ import '../storage/local_prefs.dart';
 
 /// Datos del terminal para **`POST /api/v1/sales`** y **`POST /api/v1/sync/push`**.
 ///
+/// **Varios equipos, misma tienda:** todas las instalaciones comparten el `storeId`
+/// guardado en [LocalPrefs]; cada una tiene su propio `deviceId` ([LocalPrefs.getOrCreateDeviceId]).
+///
 /// Contrato: `FRONTEND_INTEGRATION_CONTEXT.md` (§2 ventas, §5 sync, §8, §13.9, §13.12).
 /// - `deviceId` estable por instalación; upsert `POSDevice` + enlace venta; **409** si el
 ///   mismo id ya está en otra tienda.

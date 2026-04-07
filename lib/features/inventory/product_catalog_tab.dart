@@ -3,10 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
-import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
+import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
-import '../../core/storage/local_prefs.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/catalog_product.dart';
 import '../sale/barcode_scanner_screen.dart';
@@ -19,8 +18,7 @@ class ProductCatalogTab extends StatefulWidget {
     required this.storeId,
     required this.productsApi,
     required this.suppliersApi,
-    required this.inventoryApi,
-    required this.localPrefs,
+    required this.storesApi,
     required this.catalogInvalidationBus,
     this.onLoadedCount,
   });
@@ -28,8 +26,7 @@ class ProductCatalogTab extends StatefulWidget {
   final String storeId;
   final ProductsApi productsApi;
   final SuppliersApi suppliersApi;
-  final InventoryApi inventoryApi;
-  final LocalPrefs localPrefs;
+  final StoresApi storesApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final ValueChanged<int>? onLoadedCount;
 
@@ -115,8 +112,8 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           storeId: widget.storeId,
           productsApi: widget.productsApi,
           suppliersApi: widget.suppliersApi,
-          inventoryApi: widget.inventoryApi,
-          localPrefs: widget.localPrefs,
+          storesApi: widget.storesApi,
+          catalogInvalidationBus: widget.catalogInvalidationBus,
           existing: existing,
           initialBarcode:
               existing == null ? prefilledBarcode : null,
@@ -146,6 +143,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       );
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
     setState(() => _searchController.text = code);
@@ -310,14 +308,47 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final p = items[i];
+        final bc =
+            p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : '';
+        final subChildren = <Widget>[
+          Text(
+            'SKU ${p.sku}$bc',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          Text(
+            'Lista ${p.price} ${p.currency}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ];
+        final sugTrim = p.suggestedPrice?.trim();
+        if (sugTrim != null && sugTrim.isNotEmpty) {
+          final em = p.effectiveMarginPercent?.trim();
+          final mPart =
+              (em != null && em.isNotEmpty) ? ' (margen efectivo $em%)' : '';
+          subChildren.add(
+            Text(
+              'Sugerido API $sugTrim ${p.currency}$mPart',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          );
+        }
+        if (p.pricingMode == 'MANUAL_PRICE') {
+          subChildren.add(
+            Text(
+              'Precio manual: una compra no cambia la lista en el servidor.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          );
+        }
         return ListTile(
           title: Text(p.name),
-          subtitle: Text(
-            'SKU ${p.sku}'
-            '${p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : ''}\n'
-            '${p.price} ${p.currency}',
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: subChildren,
           ),
-          isThreeLine: true,
+          isThreeLine: subChildren.length >= 2,
           onTap: () => _openForm(existing: p),
           trailing: PopupMenuButton<String>(
             onSelected: (v) {
