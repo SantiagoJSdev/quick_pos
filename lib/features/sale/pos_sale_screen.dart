@@ -73,6 +73,9 @@ class PosSaleScreen extends StatefulWidget {
 }
 
 class _PosSaleScreenState extends State<PosSaleScreen> {
+  static const double _kSearchRowExtent = 72;
+  static const int _kSearchVisibleRows = 5;
+
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   List<CatalogProduct> _all = [];
@@ -94,6 +97,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   bool _flushBusy = false;
 
   String? _cartFeedback;
+  bool _cartFeedbackIsError = false;
   Timer? _cartFeedbackTimer;
 
   int _heldTicketsCount = 0;
@@ -155,38 +159,62 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
 
     if (!silent && cycle.pullError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync pull: ${cycle.pullError}')),
+      _showCheckoutPanelMessage(
+        'Sync pull: ${cycle.pullError}',
+        error: true,
       );
     }
 
     final r = cycle.flush;
     if (r.removedCount > 0) {
       if (!silent) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              r.removedCount == 1
-                  ? '1 operación de la cola sincronizada.'
-                  : '${r.removedCount} operaciones de la cola sincronizadas.',
-            ),
-          ),
+        _showCheckoutPanelMessage(
+          r.removedCount == 1
+              ? '1 operación de la cola sincronizada.'
+              : '${r.removedCount} operaciones de la cola sincronizadas.',
         );
       }
     } else if (!silent && r.apiMessage != null && pendingN > 0) {
+      _showCheckoutPanelMessage(r.apiMessage!, error: true);
+    }
+  }
+
+  bool get _checkoutPanelVisible =>
+      !_loading && _error == null && _selectedDocumentCurrency != null;
+
+  void _showCheckoutPanelMessage(
+    String message, {
+    bool error = false,
+    Duration? duration,
+  }) {
+    _cartFeedbackTimer?.cancel();
+    final d = duration ??
+        Duration(seconds: error ? 4 : 3);
+    if (_checkoutPanelVisible) {
+      setState(() {
+        _cartFeedback = message;
+        _cartFeedbackIsError = error;
+      });
+      _cartFeedbackTimer = Timer(d, () {
+        if (!mounted) return;
+        setState(() {
+          _cartFeedback = null;
+          _cartFeedbackIsError = false;
+        });
+      });
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(r.apiMessage!)),
+        SnackBar(content: Text(message)),
       );
     }
   }
 
   void _showCartFeedback(String message) {
-    _cartFeedbackTimer?.cancel();
-    setState(() => _cartFeedback = message);
-    _cartFeedbackTimer = Timer(const Duration(seconds: 2), () {
-      if (!mounted) return;
-      setState(() => _cartFeedback = null);
-    });
+    _showCheckoutPanelMessage(
+      message,
+      error: false,
+      duration: const Duration(seconds: 2),
+    );
   }
 
   @override
@@ -313,12 +341,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (next.length != _cart.length && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Algunas líneas se quitaron del ticket: moneda o tasa no compatibles.',
-              ),
-            ),
+          _showCheckoutPanelMessage(
+            'Algunas líneas se quitaron del ticket: moneda o tasa no compatibles.',
+            error: true,
           );
         }
       });
@@ -406,8 +431,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   Future<void> _putCartOnHold() async {
     if (_cart.isEmpty) return;
     if (_settings == null || _selectedDocumentCurrency == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuración de tienda no disponible.')),
+      _showCheckoutPanelMessage(
+        'Configuración de tienda no disponible.',
+        error: true,
       );
       return;
     }
@@ -421,13 +447,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final docCode = _matchDocumentCurrencyOption(t.documentCurrencyCode);
     if (docCode == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'La moneda del ticket guardado (${t.documentCurrencyCode}) '
-            'no está disponible para esta tienda.',
-          ),
-        ),
+      _showCheckoutPanelMessage(
+        'La moneda del ticket guardado (${t.documentCurrencyCode}) '
+        'no está disponible para esta tienda.',
+        error: true,
       );
       return;
     }
@@ -478,6 +501,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     await showPosHeldTicketsListSheet(
       context,
       tickets: list,
+      reloadTickets: () async {
+        _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+        return widget.localPrefs.listHeldTicketsForStoreAndDevice(
+          storeId: widget.storeId,
+          deviceId: _terminal!.deviceId,
+        );
+      },
       onRecover: (t) {
         unawaited(_recoverHeldTicket(t));
       },
@@ -612,24 +642,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final s = _settings;
     final doc = _selectedDocumentCurrency;
     if (s == null || doc == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _contextError ?? 'No se cargó la configuración de la tienda.',
-          ),
-        ),
+      _showCheckoutPanelMessage(
+        _contextError ?? 'No se cargó la configuración de la tienda.',
+        error: true,
       );
       return;
     }
     final func = s.functionalCurrency.code;
     if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _fxLoadError ??
-                'Falta tasa $func → $doc para vender en $doc.',
-          ),
-        ),
+      _showCheckoutPanelMessage(
+        _fxLoadError ?? 'Falta tasa $func → $doc para vender en $doc.',
+        error: true,
       );
       return;
     }
@@ -641,13 +664,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       pair: _fxPair,
     );
     if (docPrice == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'El producto está en ${p.currency}: solo se admite precio en $doc '
-            'o en $func con tasa cargada.',
-          ),
-        ),
+      _showCheckoutPanelMessage(
+        'El producto está en ${p.currency}: solo se admite precio en $doc '
+        'o en $func con tasa cargada.',
+        error: true,
       );
       return;
     }
@@ -679,10 +699,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   Future<void> _openScanner() async {
     if (!BarcodeScannerScreen.isSupported) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('El escáner solo está disponible en Android e iOS.'),
-        ),
+      _showCheckoutPanelMessage(
+        'El escáner solo está disponible en Android e iOS.',
+        error: true,
       );
       return;
     }
@@ -747,13 +766,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       );
     } else {
       setState(() => _search.text = code);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Ningún producto activo con código "$code". '
-            'Buscá en Catálogo o cargá el código de barras en la ficha del producto.',
-          ),
-        ),
+      _showCheckoutPanelMessage(
+        'Ningún producto activo con código "$code". '
+        'Buscá en Catálogo o cargá el código de barras en la ficha del producto.',
+        error: true,
+        duration: const Duration(seconds: 5),
       );
     }
   }
@@ -770,19 +787,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final s = _settings;
     final doc = _selectedDocumentCurrency;
     if (s == null || doc == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuración de tienda no disponible.')),
+      _showCheckoutPanelMessage(
+        'Configuración de tienda no disponible.',
+        error: true,
       );
       return;
     }
     final func = s.functionalCurrency.code;
     if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _fxLoadError ?? 'Definí la tasa del día antes de cobrar.',
-          ),
-        ),
+      _showCheckoutPanelMessage(
+        _fxLoadError ?? 'Definí la tasa del día antes de cobrar.',
+        error: true,
       );
       return;
     }
@@ -834,16 +849,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         await _refreshHeldCount();
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Venta registrada.')),
-      );
+      _showCheckoutPanelMessage('Venta registrada.');
       unawaited(_runSyncCycle(silent: true, doPull: false));
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() => _checkoutBusy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.userMessageForSupport)),
-      );
+      _showCheckoutPanelMessage(e.userMessageForSupport, error: true);
     } catch (e) {
       if (!mounted) return;
       if (isLikelyNetworkFailure(e)) {
@@ -892,20 +903,15 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         }
         await _refreshPendingCount();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Sin conexión: venta guardada en cola. Se enviará con sync/push '
-              'cuando haya red (botón Sincronizar o al abrir Venta).',
-            ),
-          ),
+        _showCheckoutPanelMessage(
+          'Sin conexión: venta guardada en cola. Se enviará con sync/push '
+          'cuando haya red (botón Sincronizar o al abrir Venta).',
+          duration: const Duration(seconds: 5),
         );
         return;
       }
       setState(() => _checkoutBusy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      _showCheckoutPanelMessage(e.toString(), error: true);
     }
   }
 
@@ -1000,7 +1006,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     found.sort(
       (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
     );
-    return found.take(6).toList();
+    if (found.length > 100) {
+      return found.sublist(0, 100);
+    }
+    return found;
   }
 
   void _bumpLine(int index, double delta) {
@@ -1050,8 +1059,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   void _simulateRandomScan() {
     final active = _all.where((p) => p.active).toList();
     if (active.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay productos en catálogo.')),
+      _showCheckoutPanelMessage(
+        'No hay productos en catálogo.',
+        error: true,
       );
       return;
     }
@@ -1165,18 +1175,19 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
               Material(
                 color: PosSaleUi.surface2,
                 elevation: 3,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
-                  child: _searchPreview.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Text(
-                            'Sin coincidencias',
-                            style: TextStyle(color: PosSaleUi.textMuted),
-                          ),
-                        )
-                      : ListView.separated(
-                          shrinkWrap: true,
+                child: _searchPreview.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'Sin coincidencias',
+                          style: TextStyle(color: PosSaleUi.textMuted),
+                        ),
+                      )
+                    : SizedBox(
+                        height: _kSearchRowExtent * _kSearchVisibleRows +
+                            (_kSearchVisibleRows - 1),
+                        child: ListView.separated(
+                          padding: EdgeInsets.zero,
                           itemCount: _searchPreview.length,
                           separatorBuilder: (context, i) => const Divider(
                             height: 1,
@@ -1198,7 +1209,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                             );
                           },
                         ),
-                ),
+                      ),
               ),
             Expanded(
               child: _loading
@@ -1347,6 +1358,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                     '${_cart.length} líneas · ${_cartQtySummary()} u.',
                 cartNotEmpty: !cartEmpty,
                 cartFeedback: _cartFeedback,
+                cartFeedbackIsError: _cartFeedbackIsError,
                 chargeInlineHint: cartEmpty ? '' : '$tf $func',
                 onClear: _clearCart,
                 onCharge: _onCheckout,
@@ -1355,11 +1367,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 onOpenHeldTickets: _openHeldTicketsList,
                 heldTicketsCount: _heldTicketsCount,
                 onDiscount: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Descuentos: próximamente.'),
-                    ),
-                  );
+                  _showCheckoutPanelMessage('Descuentos: próximamente.');
                 },
                 currencySelector: _documentCurrencyOptions.length > 1
                     ? Row(

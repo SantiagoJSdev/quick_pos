@@ -106,7 +106,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     CatalogProduct? existing,
     String? prefilledBarcode,
   }) async {
-    final changed = await Navigator.of(context).push<bool>(
+    await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,
@@ -120,7 +120,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (mounted) await _load();
   }
 
   bool _anyProductExactBarcode(String raw) {

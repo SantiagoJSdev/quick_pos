@@ -227,6 +227,7 @@ Future<RecoverCartConflictChoice?> showRecoverCartConflictDialog(
 Future<void> showPosHeldTicketsListSheet(
   BuildContext context, {
   required List<HeldTicket> tickets,
+  required Future<List<HeldTicket>> Function() reloadTickets,
   required void Function(HeldTicket t) onRecover,
   required Future<void> Function(HeldTicket t) onRename,
   required Future<void> Function(HeldTicket t) onDelete,
@@ -235,130 +236,176 @@ Future<void> showPosHeldTicketsListSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (ctx) {
-      final h = MediaQuery.sizeOf(ctx).height * 0.55;
-      final bottom = MediaQuery.paddingOf(ctx).bottom;
-      return Container(
-        margin: const EdgeInsets.only(top: 12),
-        decoration: const BoxDecoration(
-          color: PosSaleUi.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border(top: BorderSide(color: PosSaleUi.border)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: PosSaleUi.border,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Tickets en espera',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: PosSaleUi.text,
-                  ),
-                ),
-              ),
-            ),
-            if (tickets.isEmpty)
-              Padding(
-                padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + bottom),
-                child: const Text(
-                  'No hay tickets guardados en este dispositivo.',
-                  style: TextStyle(color: PosSaleUi.textMuted),
-                ),
-              )
-            else
-              SizedBox(
-                height: h,
-                child: ListView.separated(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottom),
-                  itemCount: tickets.length,
-                  separatorBuilder: (_, _) => const Divider(
-                    height: 1,
-                    color: PosSaleUi.divider,
-                  ),
-                  itemBuilder: (c, i) {
-                    final t = tickets[i];
-                    final timeShort = t.updatedAtIso.length >= 16
-                        ? t.updatedAtIso.substring(0, 16).replaceFirst('T', ' ')
-                        : t.updatedAtIso;
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: 4,
-                        horizontal: 4,
-                      ),
-                      title: Text(
-                        t.displayTitle,
-                        style: const TextStyle(
-                          color: PosSaleUi.text,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '$timeShort · ${t.lineCount} ítems · '
-                        '${t.totalDocument} ${t.documentCurrencyCode}',
-                        style: const TextStyle(
-                          color: PosSaleUi.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            tooltip: 'Renombrar',
-                            onPressed: () async {
-                              await onRename(t);
-                            },
-                            icon: const Icon(Icons.edit_outlined,
-                                color: PosSaleUi.textMuted, size: 20),
-                          ),
-                          IconButton(
-                            tooltip: 'Eliminar',
-                            onPressed: () async {
-                              await onDelete(t);
-                            },
-                            icon: const Icon(Icons.delete_outline,
-                                color: PosSaleUi.error, size: 22),
-                          ),
-                          FilledButton.tonal(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              onRecover(t);
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: PosSaleUi.primaryDim,
-                              foregroundColor: PosSaleUi.primary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                            ),
-                            child: const Text('Recuperar'),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
-      );
-    },
+    builder: (ctx) => _HeldTicketsListSheet(
+      initialTickets: tickets,
+      reloadTickets: reloadTickets,
+      onRecover: onRecover,
+      onRename: onRename,
+      onDelete: onDelete,
+    ),
   );
+}
+
+class _HeldTicketsListSheet extends StatefulWidget {
+  const _HeldTicketsListSheet({
+    required this.initialTickets,
+    required this.reloadTickets,
+    required this.onRecover,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  final List<HeldTicket> initialTickets;
+  final Future<List<HeldTicket>> Function() reloadTickets;
+  final void Function(HeldTicket t) onRecover;
+  final Future<void> Function(HeldTicket t) onRename;
+  final Future<void> Function(HeldTicket t) onDelete;
+
+  @override
+  State<_HeldTicketsListSheet> createState() => _HeldTicketsListSheetState();
+}
+
+class _HeldTicketsListSheetState extends State<_HeldTicketsListSheet> {
+  late List<HeldTicket> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List<HeldTicket>.from(widget.initialTickets);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final h = MediaQuery.sizeOf(context).height * 0.55;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      decoration: const BoxDecoration(
+        color: PosSaleUi.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(top: BorderSide(color: PosSaleUi.border)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: PosSaleUi.border,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Tickets en espera',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: PosSaleUi.text,
+                ),
+              ),
+            ),
+          ),
+          if (_items.isEmpty)
+            Padding(
+              padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + bottom),
+              child: const Text(
+                'No hay tickets guardados en este dispositivo.',
+                style: TextStyle(color: PosSaleUi.textMuted),
+              ),
+            )
+          else
+            SizedBox(
+              height: h,
+              child: ListView.separated(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottom),
+                itemCount: _items.length,
+                separatorBuilder: (_, _) => const Divider(
+                  height: 1,
+                  color: PosSaleUi.divider,
+                ),
+                itemBuilder: (c, i) {
+                  final t = _items[i];
+                  final timeShort = t.updatedAtIso.length >= 16
+                      ? t.updatedAtIso.substring(0, 16).replaceFirst('T', ' ')
+                      : t.updatedAtIso;
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 4,
+                      horizontal: 4,
+                    ),
+                    title: Text(
+                      t.displayTitle,
+                      style: const TextStyle(
+                        color: PosSaleUi.text,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '$timeShort · ${t.lineCount} ítems · '
+                      '${t.totalDocument} ${t.documentCurrencyCode}',
+                      style: const TextStyle(
+                        color: PosSaleUi.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Renombrar',
+                          onPressed: () async {
+                            await widget.onRename(t);
+                            if (!mounted) return;
+                            final next = await widget.reloadTickets();
+                            if (mounted) {
+                              setState(() => _items = next);
+                            }
+                          },
+                          icon: const Icon(Icons.edit_outlined,
+                              color: PosSaleUi.textMuted, size: 20),
+                        ),
+                        IconButton(
+                          tooltip: 'Eliminar',
+                          onPressed: () async {
+                            await widget.onDelete(t);
+                            if (!mounted) return;
+                            final next = await widget.reloadTickets();
+                            if (mounted) setState(() => _items = next);
+                          },
+                          icon: const Icon(Icons.delete_outline,
+                              color: PosSaleUi.error, size: 22),
+                        ),
+                        FilledButton.tonal(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            widget.onRecover(t);
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: PosSaleUi.primaryDim,
+                            foregroundColor: PosSaleUi.primary,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                          child: const Text('Recuperar'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 Future<String?> showRenameHeldTicketDialog(

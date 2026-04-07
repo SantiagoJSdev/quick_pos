@@ -619,6 +619,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
     this.onDiscount,
     this.currencySelector,
     this.cartFeedback,
+    this.cartFeedbackIsError = false,
     this.onPutOnHold,
     this.onOpenHeldTickets,
     this.heldTicketsCount = 0,
@@ -643,6 +644,9 @@ class PosSaleCheckoutPanel extends StatelessWidget {
   /// Mensaje breve al agregar al ticket (arriba de «Moneda del ticket»; no tapa Cobrar/Vaciar).
   final String? cartFeedback;
 
+  /// Estilo de aviso (error) para el mismo bloque que [cartFeedback].
+  final bool cartFeedbackIsError;
+
   /// Guardar carrito en espera (local, sin API).
   final VoidCallback? onPutOnHold;
 
@@ -655,6 +659,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final feedback = cartFeedback?.trim();
+    final err = cartFeedbackIsError;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: const BoxDecoration(
@@ -670,32 +675,39 @@ class PosSaleCheckoutPanel extends StatelessWidget {
             if (feedback != null && feedback.isNotEmpty) ...[
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: PosSaleUi.primaryDim,
+                  color: err
+                      ? PosSaleUi.error.withValues(alpha: 0.12)
+                      : PosSaleUi.primaryDim,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: PosSaleUi.primary.withValues(alpha: 0.35),
+                    color: err
+                        ? PosSaleUi.error.withValues(alpha: 0.45)
+                        : PosSaleUi.primary.withValues(alpha: 0.35),
                   ),
                 ),
                 child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
-                        Icons.check_circle_outline_rounded,
+                        err
+                            ? Icons.error_outline_rounded
+                            : Icons.check_circle_outline_rounded,
                         size: 18,
-                        color: PosSaleUi.primary,
+                        color: err ? PosSaleUi.error : PosSaleUi.primary,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           feedback,
-                          maxLines: 2,
+                          maxLines: 4,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             height: 1.25,
-                            color: PosSaleUi.text,
+                            color: err ? PosSaleUi.error : PosSaleUi.text,
                             fontWeight: FontWeight.w500,
                           ),
                         ),

@@ -110,7 +110,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_loadSuppliers());
-      if (widget.isEdit && widget.storesApi != null) {
+      if (widget.storesApi != null) {
         unawaited(_prefetchStoreDefaultMargin());
       }
     });
@@ -279,22 +279,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       setState(() => _error = 'El costo debe ser un número decimal válido (ej. 4.99).');
       return;
     }
-    if (!widget.isEdit) {
-      if (priceRaw.isEmpty || !_decimal.hasMatch(priceRaw)) {
-        setState(
-          () => _error =
-              'En un producto nuevo indicá precio de lista y costo.',
-        );
-        return;
-      }
-    } else {
-      if (priceRaw.isNotEmpty && !_decimal.hasMatch(priceRaw)) {
-        setState(
-          () => _error =
-              'Precio de lista no válido (o dejalo vacío para calcularlo desde costo y margen).',
-        );
-        return;
-      }
+    if (priceRaw.isNotEmpty && !_decimal.hasMatch(priceRaw)) {
+      setState(
+        () => _error =
+            'Precio de lista no válido (o dejalo vacío para calcularlo desde costo y margen).',
+      );
+      return;
     }
     if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
       final mo = _marginPercentOverride.text.trim();
@@ -307,8 +297,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       }
     }
 
-    if (widget.isEdit &&
-        priceRaw.isEmpty &&
+    if (priceRaw.isEmpty &&
         _pricingMode == 'USE_STORE_DEFAULT' &&
         widget.storesApi != null &&
         (_storeDefaultMarginPercent == null ||
@@ -324,9 +313,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
 
     late final String listPriceForModel;
-    if (!widget.isEdit) {
-      listPriceForModel = priceRaw;
-    } else if (priceRaw.isNotEmpty) {
+    if (priceRaw.isNotEmpty) {
       listPriceForModel = priceRaw;
     } else if (_pricingMode == 'MANUAL_PRICE') {
       setState(
@@ -622,12 +609,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               Expanded(
                 child: TextField(
                   controller: _price,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: 'Precio lista',
-                    helperText: widget.isEdit
-                        ? 'Vacío al editar: se calcula como costo × (1 + margen) con margen propio o de tienda; no aplica en precio manual.'
-                        : null,
-                    border: const OutlineInputBorder(),
+                    helperText:
+                        'Vacío: se calcula desde costo y margen (tienda o propio). '
+                        'En precio manual hay que escribirlo.',
+                    border: OutlineInputBorder(),
                   ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   enabled: !_loading,
