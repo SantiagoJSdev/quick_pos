@@ -276,6 +276,50 @@ Documento unico para registrar todas las pruebas manuales del frontend (actuales
 - Resultado esperado:
   - UI actualiza inmediatamente en cada accion.
 
+### MT-POS-004 - Cobro mixto online (USD + VES) exacto
+- Estado: `[ ]`
+- Precondicion: backend disponible, tasa cargada para par funcional/documento.
+- Pasos:
+  1. En POS, armar ticket en moneda documento (ej. VES).
+  2. En bloque `Pago mixto`, ingresar `Pago en USD`.
+  3. Verificar texto `Equivale a ...` con tasa del ticket.
+  4. Completar `Pago en VES` para cuadrar total.
+  5. Cobrar.
+- Resultado esperado:
+  - `Cobrar` solo habilita al cuadrar (o superar) el total.
+  - Venta responde OK.
+  - Backend registra `payments[]` y resumen (`paymentsCount`, `paidDocumentTotal`, `changeDocument`).
+
+### MT-POS-005 - Cobro mixto offline y flush por sync/push
+- Estado: `[ ]`
+- Precondicion: backend apagado.
+- Pasos:
+  1. Crear ticket y cargar pagos mixtos (USD + VES).
+  2. Cobrar offline.
+  3. Encender backend y ejecutar sync/reconexion.
+- Resultado esperado:
+  - Venta queda en cola `SALE` sin perder `payments`.
+  - En flush, backend acepta `payload.sale.payments`.
+  - Operacion sale de cola sin duplicados.
+
+### MT-POS-006 - Error PAYMENTS_TOTAL_MISMATCH
+- Estado: `[ ]`
+- Pasos:
+  1. Ingresar pagos mixtos menores al total.
+  2. Intentar cobrar.
+- Resultado esperado:
+  - Front bloquea `Cobrar` mostrando faltante.
+  - Si llega rechazo backend, mensaje claro de total no cuadra.
+
+### MT-POS-007 - Error PAYMENTS_MISSING_FX_SNAPSHOT / FX_PAIR_MISMATCH
+- Estado: `[ ]`
+- Pasos:
+  1. Forzar backend para devolver `PAYMENTS_MISSING_FX_SNAPSHOT` o `PAYMENTS_FX_PAIR_MISMATCH`.
+  2. Intentar cobro mixto.
+- Resultado esperado:
+  - UI muestra mensaje comprensible para soporte/caja.
+  - No hay crash ni limpieza incorrecta del ticket.
+
 ---
 
 ## 6) Historial y detalle

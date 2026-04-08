@@ -80,7 +80,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _paymentFunctionalCtrl = TextEditingController();
-  final _paymentDocumentCtrl = TextEditingController();
+  double _appliedFunctionalPayment = 0;
   List<CatalogProduct> _all = [];
   final List<PosCartLine> _cart = [];
   bool _loading = true;
@@ -98,8 +98,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   int _pendingSyncCount = 0;
   bool _flushBusy = false;
-  String? _pendingSyncStatusText;
-  bool _pendingSyncStatusIsError = false;
+  Timer? _pendingCountPoll;
 
   String? _cartFeedback;
   bool _cartFeedbackIsError = false;
@@ -113,8 +112,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     super.initState();
     _search.addListener(() => setState(() {}));
     _searchFocus.addListener(() => setState(() {}));
-    _paymentFunctionalCtrl.addListener(() => setState(() {}));
-    _paymentDocumentCtrl.addListener(() => setState(() {}));
     _load();
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (!mounted) return;
@@ -123,6 +120,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     });
     widget.catalogInvalidationBus.addListener(_onCatalogInvalidated);
     _refreshPendingCount();
+    _pendingCountPoll = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _refreshPendingCount(),
+    );
   }
 
   void _onCatalogInvalidated() {
@@ -166,10 +167,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
 
     if (!silent && cycle.pullError != null) {
-      setState(() {
-        _pendingSyncStatusText = 'Sync pull: ${cycle.pullError}';
-        _pendingSyncStatusIsError = true;
-      });
       _showCheckoutPanelMessage(
         'Sync pull: ${cycle.pullError}',
         error: true,
@@ -181,10 +178,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       final msg = r.removedCount == 1
           ? '1 operación de la cola sincronizada.'
           : '${r.removedCount} operaciones de la cola sincronizadas.';
-      setState(() {
-        _pendingSyncStatusText = msg;
-        _pendingSyncStatusIsError = false;
-      });
       if (!silent) {
         _showCheckoutPanelMessage(
           msg,
@@ -196,10 +189,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           : (r.hadRetryableFailure
               ? '\nSe reintentará automáticamente.'
               : '');
-      setState(() {
-        _pendingSyncStatusText = '${r.apiMessage!}$suffix';
-        _pendingSyncStatusIsError = true;
-      });
       _showCheckoutPanelMessage('${r.apiMessage!}$suffix', error: true);
     }
   }
@@ -213,6 +202,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     Duration? duration,
   }) {
     _cartFeedbackTimer?.cancel();
+    _pendingCountPoll?.cancel();
     final d = duration ??
         Duration(seconds: error ? 4 : 3);
     if (_checkoutPanelVisible) {
@@ -249,7 +239,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     _search.dispose();
     _searchFocus.dispose();
     _paymentFunctionalCtrl.dispose();
-    _paymentDocumentCtrl.dispose();
     super.dispose();
   }
 
@@ -483,6 +472,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
       _invalidateCheckoutIdempotency();
     });
+    _clearMixedPaymentInputs();
     await _refreshHeldCount();
     if (mounted) _showCartFeedback('Ticket guardado en espera');
   }
@@ -521,6 +511,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = t.id;
       _invalidateCheckoutIdempotency();
     });
+    _clearMixedPaymentInputs();
     await _reloadFxForDocumentCurrency(rebuildDocumentLinePrices: false);
     if (mounted) _showCartFeedback('Ticket recuperado desde guardados');
   }
@@ -924,8 +915,15 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       return;
     }
     if (!_canChargeWithMixedPayments) {
-      _showCheckoutPanelMessage(_remainingDocumentLabel, error: true);
+      _showCheckoutPanelMessage(_remainingMixedLabel, error: true);
       return;
+    }
+    if (_mixedChangeFunctional > 0) {
+      final proceed = await _showChangeSuggestionModal(
+        functionalCode: func,
+        documentCode: doc,
+      );
+      if (!proceed) return;
     }
 
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
@@ -943,6 +941,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       payments: _buildPaymentsForPayload(
         functionalCode: func,
         documentCode: doc,
+        saleFxSnapshot: _currentSaleFxSnapshot(
+          functionalCode: func,
+          documentCode: doc,
+        ),
       ),
       clientSaleId: _pendingSaleId,
     );
@@ -984,67 +986,92 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       unawaited(_runSyncCycle(silent: true, doPull: false));
     } on ApiError catch (e) {
       if (!mounted) return;
+      final lower = e.userMessageForSupport.toLowerCase();
+      final shouldQueueOffline = e.isRetryableSyncFailure ||
+          lower.contains('timeout') ||
+          lower.contains('socket') ||
+          lower.contains('connection') ||
+          lower.contains('network');
+      if (shouldQueueOffline) {
+        await _queueSaleOffline(restBody, doc);
+        return;
+      }
       setState(() => _checkoutBusy = false);
-      _showCheckoutPanelMessage(e.userMessageForSupport, error: true);
+      final raw = e.userMessageForSupport;
+      final msg = raw.contains('PAYMENTS_TOTAL_MISMATCH')
+          ? 'El total pagado no cuadra con el total del ticket.'
+          : raw.contains('PAYMENTS_MISSING_FX_SNAPSHOT')
+              ? 'Falta la tasa (fxSnapshot) para convertir uno de los pagos.'
+              : raw.contains('PAYMENTS_FX_PAIR_MISMATCH')
+                  ? 'La tasa enviada no coincide con el par de monedas del ticket.'
+                  : raw.contains('PAYMENTS_INVALID_AMOUNT')
+                      ? 'Hay un monto de pago inválido. Revisá los campos de cobro.'
+                      : raw;
+      _showCheckoutPanelMessage(msg, error: true);
     } catch (e) {
       if (!mounted) return;
       if (isLikelyNetworkFailure(e)) {
-        final syncOpId = ClientMutationId.newId();
-        final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
-          restBody,
-          widget.storeId,
-          fxSource: 'POS_OFFLINE',
-        );
-        await widget.localPrefs.appendPendingSale(
-          PendingSaleEntry(
-            opId: syncOpId,
-            storeId: widget.storeId,
-            sale: saleMap,
-            opTimestampIso: DateTime.now().toUtc().toIso8601String(),
-          ),
-        );
-        final totalDoc = _cartTotalDocument;
-        final clientSid = _pendingSaleId;
-        if (clientSid != null &&
-            clientSid.isNotEmpty &&
-            totalDoc != null) {
-          await widget.localPrefs.prependRecentSaleTicket(
-            RecentSaleTicket(
-              storeId: widget.storeId,
-              saleId: clientSid,
-              totalDocument: totalDoc,
-              documentCurrencyCode: doc,
-              recordedAtIso: DateTime.now().toUtc().toIso8601String(),
-              status: RecentSaleTicket.statusQueued,
-            ),
-          );
-          if (!mounted) return;
-        }
-        if (!mounted) return;
-        final heldId = _activeHeldTicketId;
-        setState(() {
-          _cart.clear();
-          _pendingSaleId = null;
-          _checkoutBusy = false;
-          _activeHeldTicketId = null;
-        });
-        _clearMixedPaymentInputs();
-        if (heldId != null) {
-          await widget.localPrefs.deleteHeldTicket(heldId);
-          await _refreshHeldCount();
-        }
-        await _refreshPendingCount();
-        if (!mounted) return;
-        _showCheckoutPanelMessage(
-          'Sin conexión: venta guardada en cola. Se enviará con sync/push '
-          'cuando haya red (botón Sincronizar o al abrir Venta).',
-          duration: const Duration(seconds: 5),
-        );
+        await _queueSaleOffline(restBody, doc);
         return;
       }
       setState(() => _checkoutBusy = false);
       _showCheckoutPanelMessage(e.toString(), error: true);
     }
+  }
+
+  Future<void> _queueSaleOffline(
+    Map<String, dynamic> restBody,
+    String doc,
+  ) async {
+    final syncOpId = ClientMutationId.newId();
+    final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
+      restBody,
+      widget.storeId,
+      fxSource: 'POS_OFFLINE',
+    );
+    await widget.localPrefs.appendPendingSale(
+      PendingSaleEntry(
+        opId: syncOpId,
+        storeId: widget.storeId,
+        sale: saleMap,
+        opTimestampIso: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+    final totalDoc = _cartTotalDocument;
+    final clientSid = _pendingSaleId;
+    if (clientSid != null && clientSid.isNotEmpty && totalDoc != null) {
+      await widget.localPrefs.prependRecentSaleTicket(
+        RecentSaleTicket(
+          storeId: widget.storeId,
+          saleId: clientSid,
+          totalDocument: totalDoc,
+          documentCurrencyCode: doc,
+          recordedAtIso: DateTime.now().toUtc().toIso8601String(),
+          status: RecentSaleTicket.statusQueued,
+        ),
+      );
+      if (!mounted) return;
+    }
+    if (!mounted) return;
+    final heldId = _activeHeldTicketId;
+    setState(() {
+      _cart.clear();
+      _pendingSaleId = null;
+      _checkoutBusy = false;
+      _activeHeldTicketId = null;
+    });
+    _clearMixedPaymentInputs();
+    if (heldId != null) {
+      await widget.localPrefs.deleteHeldTicket(heldId);
+      await _refreshHeldCount();
+    }
+    await _refreshPendingCount();
+    if (!mounted) return;
+    _showCheckoutPanelMessage(
+      'Se perdió conexión con el servidor. POS pasó a modo offline y la venta '
+      'quedó en cola para sincronizar automáticamente al reconectar.',
+      duration: const Duration(seconds: 6),
+    );
   }
 
   String _cartQtySummary() {
@@ -1079,10 +1106,14 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   double get _paymentFunctionalAmount =>
-      _parseAmountInput(_paymentFunctionalCtrl.text);
+      _appliedFunctionalPayment;
 
-  double get _paymentDocumentAmount =>
-      _parseAmountInput(_paymentDocumentCtrl.text);
+  double get _paymentFunctionalAppliedToSale {
+    final total = _cartTotalFunctionalAmount;
+    final paid = _paymentFunctionalAmount;
+    if (paid <= 0) return 0;
+    return paid > total ? total : paid;
+  }
 
   double get _cartTotalDocumentAmount =>
       _parseAmountInput(_cartTotalDocument ?? '0');
@@ -1101,13 +1132,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   double get _paymentFunctionalInDocument =>
-      _paymentFunctionalAmount * _functionalToDocumentRate;
+      _paymentFunctionalAppliedToSale * _functionalToDocumentRate;
 
-  double get _paymentTotalInDocument =>
-      _paymentFunctionalInDocument + _paymentDocumentAmount;
+  double get _paymentTotalInDocument => _paymentFunctionalInDocument;
 
   bool get _hasAnyMixedPaymentInput =>
-      _paymentFunctionalAmount > 0 || _paymentDocumentAmount > 0;
+      _paymentFunctionalAmount > 0;
 
   bool get _canChargeWithMixedPayments {
     if (!_hasAnyMixedPaymentInput) return true;
@@ -1123,38 +1153,147 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return 'Falta por cobrar en $doc: ${_fmt2(remaining)}';
   }
 
-  String get _paymentEquivalentLabel {
-    final doc = _selectedDocumentCurrency ?? '';
+  double get _cartTotalFunctionalAmount =>
+      _parseAmountInput(_cartTotalFunctional ?? '0');
+
+  double get _remainingFunctionalAmount {
+    final rem = _cartTotalFunctionalAmount - _paymentFunctionalAmount;
+    return rem > 0 ? rem : 0;
+  }
+
+  String get _remainingFunctionalLabel {
     final func = _functionalCode;
-    return 'Equivale a: ${_fmt2(_paymentFunctionalInDocument)} $doc @ '
-        '${_fmt2(_functionalToDocumentRate)} ($func->$doc)';
+    return 'Resta en $func: ${_fmt2(_remainingFunctionalAmount)}';
+  }
+
+  String get _remainingMixedLabel =>
+      '$_remainingFunctionalLabel · $_remainingDocumentLabel';
+
+  double get _mixedChangeFunctional {
+    final change = _paymentFunctionalAmount - _cartTotalFunctionalAmount;
+    return change > 0 ? change : 0;
+  }
+
+  Future<void> _openUsdPaymentModal() async {
+    final func = _functionalCode;
+    if (func.isEmpty) return;
+    _paymentFunctionalCtrl.clear();
+    final accepted = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Pago en $func'),
+        content: TextField(
+          controller: _paymentFunctionalCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Monto',
+            hintText: '0.00',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final v = _parseAmountInput(_paymentFunctionalCtrl.text);
+              Navigator.pop(ctx, v);
+            },
+            child: const Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || accepted == null || accepted <= 0) return;
+    setState(() {
+      _appliedFunctionalPayment += accepted;
+    });
+    _showCheckoutPanelMessage(
+      'Pago aplicado: ${_fmt2(accepted)} $func. $_remainingMixedLabel',
+    );
+  }
+
+  Future<bool> _showChangeSuggestionModal({
+    required String functionalCode,
+    required String documentCode,
+  }) async {
+    final changeFunc = _mixedChangeFunctional;
+    final changeDoc = changeFunc * _functionalToDocumentRate;
+    final wholeFunc = changeFunc.floorToDouble();
+    final fracFunc = changeFunc - wholeFunc;
+    final fracDoc = fracFunc * _functionalToDocumentRate;
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Vuelto sugerido'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Sobrante: ${_fmt2(changeFunc)} $functionalCode'),
+            const SizedBox(height: 8),
+            Text('Vuelto en VES: ${_fmt2(changeDoc)} $documentCode'),
+            const SizedBox(height: 4),
+            Text(
+              'Vuelto mixto (USD + VES): ${_fmt2(wholeFunc)} $functionalCode + '
+              '${_fmt2(fracDoc)} $documentCode',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Volver'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cobrar'),
+          ),
+        ],
+      ),
+    );
+    return proceed == true;
+  }
+
+  Map<String, dynamic> _currentSaleFxSnapshot({
+    required String functionalCode,
+    required String documentCode,
+  }) {
+    final rate = SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
+      functionalCode: functionalCode,
+      documentCode: documentCode,
+      pair: _fxPair,
+    );
+    final rawDate = _fxPair?.rate.effectiveDate.trim() ?? '';
+    final date = rawDate.isEmpty
+        ? DateTime.now().toUtc().toIso8601String().substring(0, 10)
+        : (rawDate.length >= 10 ? rawDate.substring(0, 10) : rawDate);
+    return <String, dynamic>{
+      'baseCurrencyCode': functionalCode.trim(),
+      'quoteCurrencyCode': documentCode.trim(),
+      'rateQuotePerBase': rate,
+      'effectiveDate': date,
+    };
   }
 
   List<Map<String, dynamic>>? _buildPaymentsForPayload({
     required String functionalCode,
     required String documentCode,
+    required Map<String, dynamic> saleFxSnapshot,
   }) {
     final payments = <Map<String, dynamic>>[];
     if (_paymentFunctionalAmount > 0) {
       final fx = <String, dynamic>{
-        'baseCurrencyCode': functionalCode,
-        'quoteCurrencyCode': documentCode,
-        'rateQuotePerBase': _fmt2(_functionalToDocumentRate),
-        'effectiveDate': DateTime.now().toUtc().toIso8601String().substring(0, 10),
+        ...saleFxSnapshot,
       };
       payments.add({
         'method': 'CASH_${functionalCode.toUpperCase()}',
-        'amount': _fmt2(_paymentFunctionalAmount),
+        'amount': _fmt2(_paymentFunctionalAppliedToSale),
         'currencyCode': functionalCode.toUpperCase(),
         if (functionalCode.toUpperCase() != documentCode.toUpperCase())
           'fxSnapshot': fx,
-      });
-    }
-    if (_paymentDocumentAmount > 0) {
-      payments.add({
-        'method': 'CASH_${documentCode.toUpperCase()}',
-        'amount': _fmt2(_paymentDocumentAmount),
-        'currencyCode': documentCode.toUpperCase(),
       });
     }
     return payments.isEmpty ? null : payments;
@@ -1162,7 +1301,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   void _clearMixedPaymentInputs() {
     _paymentFunctionalCtrl.clear();
-    _paymentDocumentCtrl.clear();
+    _appliedFunctionalPayment = 0;
   }
 
   String _functionalFromDocument(String documentAmount) {
@@ -1355,39 +1494,21 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
               Material(
                 color: PosSaleUi.primaryDim,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
+                  padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const Icon(Icons.cloud_upload_outlined,
                           color: PosSaleUi.primary, size: 20),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '$_pendingSyncCount en cola (sync/push).',
-                              style: const TextStyle(
-                                color: PosSaleUi.text,
-                                fontSize: 13,
-                              ),
-                            ),
-                            if (_pendingSyncStatusText != null) ...[
-                              const SizedBox(height: 3),
-                              Text(
-                                _pendingSyncStatusText!,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: _pendingSyncStatusIsError
-                                      ? Colors.orangeAccent
-                                      : PosSaleUi.textMuted,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ],
+                        child: Text(
+                          '$_pendingSyncCount en cola',
+                          style: const TextStyle(
+                            color: PosSaleUi.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                       if (_flushBusy)
@@ -1635,13 +1756,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 cartNotEmpty: !cartEmpty,
                 cartFeedback: _cartFeedback,
                 cartFeedbackIsError: _cartFeedbackIsError,
-                chargeInlineHint: cartEmpty ? '' : '$tf $func',
-                paymentFunctionalLabel: 'Pago en $func',
-                paymentDocumentLabel: 'Pago en $doc',
-                paymentFunctionalController: _paymentFunctionalCtrl,
-                paymentDocumentController: _paymentDocumentCtrl,
-                paymentFunctionalEquivalentInDocument: _paymentEquivalentLabel,
-                remainingDocumentAmount: _remainingDocumentLabel,
+                onOpenMixedPayment: _openUsdPaymentModal,
+                onClearMixedPayment: _appliedFunctionalPayment > 0
+                    ? () => setState(_clearMixedPaymentInputs)
+                    : null,
+                mixedPaymentAppliedLabel:
+                    'Pago USD aplicado: ${_fmt2(_paymentFunctionalAmount)} $func',
+                mixedPaymentRemainingLabel: _remainingMixedLabel,
                 canChargeWithPayments: _canChargeWithMixedPayments,
                 onClear: _clearCart,
                 onCharge: _onCheckout,

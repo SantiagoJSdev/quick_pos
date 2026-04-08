@@ -23,6 +23,9 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.exchangeRatesApi,
     required this.onChangeStore,
     required this.localPrefs,
+    required this.forcedOffline,
+    required this.onlineStatus,
+    required this.onToggleConnectivityMode,
   });
 
   final String storeId;
@@ -30,6 +33,9 @@ class StoreDashboardScreen extends StatefulWidget {
   final ExchangeRatesApi exchangeRatesApi;
   final VoidCallback onChangeStore;
   final LocalPrefs localPrefs;
+  final bool forcedOffline;
+  final bool onlineStatus;
+  final VoidCallback onToggleConnectivityMode;
 
   @override
   State<StoreDashboardScreen> createState() => _StoreDashboardScreenState();
@@ -440,6 +446,34 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(44),
                   ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.tonalIcon(
+                  onPressed: widget.onToggleConnectivityMode,
+                  icon: Icon(
+                    widget.forcedOffline ? Icons.wifi : Icons.wifi_off,
+                  ),
+                  label: Text(
+                    widget.forcedOffline
+                        ? 'Poner Online'
+                        : 'Poner Offline',
+                  ),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                    backgroundColor: widget.forcedOffline
+                        ? Colors.red.withValues(alpha: 0.16)
+                        : Colors.green.withValues(alpha: 0.16),
+                    foregroundColor:
+                        widget.forcedOffline ? Colors.red : Colors.green,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  widget.onlineStatus ? 'Estado actual: Online' : 'Estado actual: Offline',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: widget.onlineStatus ? Colors.green : Colors.red,
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
                 const SizedBox(height: 28),
                 OutlinedButton.icon(

@@ -58,6 +58,7 @@ Pruebas manuales centralizadas en `docs/MANUAL_TESTS.md`.
 - [x] Sugerencias en POS: maximo 5 filas visibles con scroll.
 - [x] Inputs de barcode: escribir sin abrir camara automaticamente.
 - [x] Vista operativa de cola pendiente en Ventas (filtro por tipo + copiar `opId`).
+- [x] Cobro mixto en POS (USD/VES) con validacion de faltante antes de cobrar.
 - [~] Uniformar visualmente todos los banners de estado offline entre modulos.
 
 ## 6) Fase F - QA funcional minima
@@ -78,6 +79,9 @@ Pruebas manuales centralizadas en `docs/MANUAL_TESTS.md`.
 - [x] Soporte de fotos de producto (preview local + guardado sin bloqueo).
 - [x] Cola de upload de fotos persistente (estructura local + worker con reintentos y clasificación manual/retryable).
 - [x] Integracion backend para upload/asociacion de foto de producto.
+- [x] Integracion backend para `payments[]` en `POST /sales` y `sync/push` `SALE`.
+- [x] Propagacion offline de `payments[]` (cola local -> sync/push).
+- [x] Manejo de errores de contrato de cobro mixto (`PAYMENTS_*`) en UI POS.
 
 ## 8) Criterio de cierre
 
@@ -88,12 +92,14 @@ Se considera cierre operativo cuando:
 - [ ] Pendientes de cola no generan duplicados en backend.
 - [ ] Configuracion de URL dinamica esta implementada y validada en QA LAN.
 - [ ] Flujo de fotos queda implementado o explicitamente descartado/documentado.
+- [ ] Cobro mixto validado en QA movil fisico (online + offline + errores de contrato).
 
 ## 9) Escenarios QA rapidos (ejecucion sugerida)
 
 - [ ] Perfil `LAN` configurado + `Probar conexion` OK.
 - [ ] Backend apagado: sin loaders infinitos en POS/Buscar precio/Inventario/Historial.
 - [ ] Operacion offline encolada correctamente (venta o devolucion).
+- [ ] Operacion `SALE` offline con `payments[]` sincroniza correctamente al reconectar.
 - [ ] Reconexion: cola disminuye y datos se sincronizan.
 - [ ] Cambio de perfil valida badge de entorno (`LOCAL/LAN/PROD`).
 

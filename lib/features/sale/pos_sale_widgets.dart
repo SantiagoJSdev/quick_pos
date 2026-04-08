@@ -667,7 +667,6 @@ class PosSaleCheckoutPanel extends StatelessWidget {
     required this.onClear,
     required this.onCharge,
     required this.chargeBusy,
-    required this.chargeInlineHint,
     this.onDiscount,
     this.currencySelector,
     this.cartFeedback,
@@ -675,12 +674,10 @@ class PosSaleCheckoutPanel extends StatelessWidget {
     this.onPutOnHold,
     this.onOpenHeldTickets,
     this.heldTicketsCount = 0,
-    this.paymentFunctionalLabel,
-    this.paymentDocumentLabel,
-    this.paymentFunctionalController,
-    this.paymentDocumentController,
-    this.paymentFunctionalEquivalentInDocument,
-    this.remainingDocumentAmount,
+    this.onOpenMixedPayment,
+    this.onClearMixedPayment,
+    this.mixedPaymentAppliedLabel,
+    this.mixedPaymentRemainingLabel,
     this.canChargeWithPayments = true,
   });
 
@@ -696,7 +693,6 @@ class PosSaleCheckoutPanel extends StatelessWidget {
   final VoidCallback onClear;
   final VoidCallback onCharge;
   final bool chargeBusy;
-  final String chargeInlineHint;
   final VoidCallback? onDiscount;
   final Widget? currencySelector;
 
@@ -714,12 +710,10 @@ class PosSaleCheckoutPanel extends StatelessWidget {
 
   /// Cantidad de tickets guardados en este dispositivo / tienda.
   final int heldTicketsCount;
-  final String? paymentFunctionalLabel;
-  final String? paymentDocumentLabel;
-  final TextEditingController? paymentFunctionalController;
-  final TextEditingController? paymentDocumentController;
-  final String? paymentFunctionalEquivalentInDocument;
-  final String? remainingDocumentAmount;
+  final VoidCallback? onOpenMixedPayment;
+  final VoidCallback? onClearMixedPayment;
+  final String? mixedPaymentAppliedLabel;
+  final String? mixedPaymentRemainingLabel;
   final bool canChargeWithPayments;
 
   @override
@@ -876,72 +870,99 @@ class PosSaleCheckoutPanel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            if (paymentFunctionalLabel != null &&
-                paymentDocumentLabel != null &&
-                paymentFunctionalController != null &&
-                paymentDocumentController != null) ...[
+            if (onOpenMixedPayment != null) ...[
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: PosSaleUi.surface3,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: PosSaleUi.border),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Text(
-                      'Pago mixto',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: PosSaleUi.text,
-                            fontWeight: FontWeight.w600,
-                          ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (mixedPaymentAppliedLabel != null)
+                            Text(
+                              mixedPaymentAppliedLabel!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: PosSaleUi.text,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          if (mixedPaymentRemainingLabel != null) ...[
+                            const SizedBox(height: 2),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: (canChargeWithPayments
+                                        ? PosSaleUi.success
+                                        : PosSaleUi.error)
+                                    .withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: (canChargeWithPayments
+                                          ? PosSaleUi.success
+                                          : PosSaleUi.error)
+                                      .withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      canChargeWithPayments
+                                          ? Icons.check_circle_outline
+                                          : Icons.error_outline,
+                                      size: 13,
+                                      color: canChargeWithPayments
+                                          ? PosSaleUi.success
+                                          : PosSaleUi.error,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        mixedPaymentRemainingLabel!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: canChargeWithPayments
+                                              ? PosSaleUi.success
+                                              : PosSaleUi.error,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: paymentFunctionalController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        labelText: paymentFunctionalLabel,
-                        hintText: '0.00',
-                      ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: onOpenMixedPayment,
+                      icon: const Icon(Icons.attach_money, size: 16),
+                      label: const Text('Pago USD'),
                     ),
-                    if (paymentFunctionalEquivalentInDocument != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        paymentFunctionalEquivalentInDocument!,
-                        style: const TextStyle(
-                          color: PosSaleUi.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: paymentDocumentController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        labelText: paymentDocumentLabel,
-                        hintText: '0.00',
-                      ),
-                    ),
-                    if (remainingDocumentAmount != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        remainingDocumentAmount!,
-                        style: TextStyle(
-                          color: canChargeWithPayments
-                              ? PosSaleUi.success
-                              : PosSaleUi.error,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    if (onClearMixedPayment != null) ...[
+                      const SizedBox(width: 4),
+                      IconButton(
+                        onPressed: onClearMixedPayment,
+                        tooltip: 'Limpiar pago USD',
+                        icon: const Icon(Icons.clear, size: 18),
                       ),
                     ],
                   ],
@@ -1020,20 +1041,6 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                                   fontSize: 15,
                                 ),
                               ),
-                              if (cartNotEmpty && chargeInlineHint.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  chargeInlineHint,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white.withValues(alpha: 0.9),
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures()
-                                    ],
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
                   ),

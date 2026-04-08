@@ -61,6 +61,8 @@ Este documento sirve para:
 1. Buscar producto (nombre, SKU, barcode) y agregar al carrito.
 2. Manejo de moneda documento + conversion a funcional.
 3. Cobro: `POST /sales`.
+4. Cobro mixto: `payments[]` opcional (ej. USD + VES) con validacion de restante antes de confirmar.
+5. Si un pago viene en moneda distinta a la moneda documento, se envia `fxSnapshot` en la linea de pago.
 4. Si no hay red, venta a cola local y luego `sync/push`.
 
 ### 4.6 Tickets en espera (held)
@@ -132,6 +134,17 @@ Este documento sirve para:
 - `GET /sale-returns/:id`
 - `POST /sync/push`
 - `GET /sync/pull`
+
+Notas de contrato vigentes para ventas:
+
+- `POST /sales` acepta `payments[]` opcional.
+- `GET /sales/:id` devuelve `payments` + resumen (`paymentsCount`, `paidDocumentTotal`, `changeDocument`).
+- `sync/push` (`opType: SALE`) acepta `payload.sale.payments`.
+- Codigos de error esperados para cobro mixto:
+  - `PAYMENTS_INVALID_AMOUNT`
+  - `PAYMENTS_MISSING_FX_SNAPSHOT`
+  - `PAYMENTS_FX_PAIR_MISMATCH`
+  - `PAYMENTS_TOTAL_MISMATCH`
 
 ## 7) Componentes Flutter relevantes
 
@@ -205,6 +218,11 @@ Fuente unica de pruebas manuales: `docs/MANUAL_TESTS.md`.
   - `POST /uploads/products-image` (multipart, campo `file`),
   - `PATCH /products/:id/image` para asociar `imageUrl`,
   - cola local con reintentos automáticos y clasificación manual/retryable.
+- Cobro mixto implementado end-to-end en frontend:
+  - UI de `Pago en funcional` + `Pago en documento`,
+  - validacion de faltante en documento antes de cobrar,
+  - envio de `payments[]` en REST y en `sync/push` offline,
+  - manejo de errores de contrato `PAYMENTS_*` en mensajes de caja.
 - Pendiente principal: ejecutar QA manual formal y cerrar evidencia.
 
 ## 12) QA rapido de validacion offline (movil)

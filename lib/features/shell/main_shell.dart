@@ -72,13 +72,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   static const _syncDebounce = Duration(seconds: 8);
   static const _syncPeriodic = Duration(seconds: 90);
+  static const _healthProbePeriodic = Duration(seconds: 15);
 
   Timer? _periodicSync;
+  Timer? _healthProbeTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   List<ConnectivityResult>? _lastConn;
   DateTime? _lastAutoSyncAt;
   bool _autoSyncBusy = false;
   bool _isOnline = true;
+  bool _backendReachable = true;
+  bool _manualForceOffline = false;
+
+  void _recomputeOnlineFlag() {
+    final hasNetwork =
+        connectivityAppearsOnline(_lastConn ?? const [ConnectivityResult.none]);
+    _isOnline = !_manualForceOffline && hasNetwork && _backendReachable;
+  }
 
   String get _apiEnvironmentLabel {
     final uri = Uri.tryParse(AppConfig.effectiveApiBaseUrl);
@@ -130,29 +140,57 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Future<void> _initConnectivityHooks() async {
     try {
       _lastConn = await Connectivity().checkConnectivity();
-      _isOnline = connectivityAppearsOnline(
-        _lastConn ?? const [ConnectivityResult.none],
-      );
+      _recomputeOnlineFlag();
       if (mounted) setState(() {});
     } catch (_) {}
     _connSub = Connectivity().onConnectivityChanged.listen((next) {
-      final appearsOnline = connectivityAppearsOnline(next);
-      if (mounted && appearsOnline != _isOnline) {
-        setState(() => _isOnline = appearsOnline);
+      final prev = _lastConn;
+      _lastConn = List<ConnectivityResult>.from(next);
+      if (mounted) {
+        setState(_recomputeOnlineFlag);
       }
-      if (connectivityTransitionedToOnline(_lastConn, next)) {
+      if (connectivityTransitionedToOnline(prev, next)) {
         unawaited(_runAutoSync(reason: 'connectivity'));
       }
-      _lastConn = List<ConnectivityResult>.from(next);
     });
     _periodicSync = Timer.periodic(_syncPeriodic, (_) {
       unawaited(_runAutoSync(reason: 'periodic'));
     });
+    _healthProbeTimer = Timer.periodic(_healthProbePeriodic, (_) {
+      unawaited(_probeBackendHealth());
+    });
+    unawaited(_probeBackendHealth());
+  }
+
+  Future<void> _probeBackendHealth() async {
+    if (!mounted || _manualForceOffline) return;
+    final hasNetwork =
+        connectivityAppearsOnline(_lastConn ?? const [ConnectivityResult.none]);
+    if (!hasNetwork) {
+      if (_backendReachable) {
+        _backendReachable = false;
+        if (mounted) setState(_recomputeOnlineFlag);
+      }
+      return;
+    }
+    try {
+      await widget.storesApi.getBusinessSettings(widget.storeId);
+      if (!_backendReachable) {
+        _backendReachable = true;
+        if (mounted) setState(_recomputeOnlineFlag);
+      }
+    } catch (_) {
+      if (_backendReachable) {
+        _backendReachable = false;
+        if (mounted) setState(_recomputeOnlineFlag);
+      }
+    }
   }
 
   /// [startup] sin debounce; el resto evita ráfagas (resume + conectividad + timer).
   Future<void> _runAutoSync({required String reason}) async {
     if (!mounted) return;
+    if (_manualForceOffline) return;
     if (_autoSyncBusy) return;
     final now = DateTime.now();
     if (reason != 'startup' &&
@@ -173,7 +211,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     try {
       final t = await PosTerminalInfo.load(widget.localPrefs);
       if (!mounted) return;
-      await runSyncCycle(
+      final cycle = await runSyncCycle(
         storeId: widget.storeId,
         prefs: widget.localPrefs,
         syncApi: widget.syncApi,
@@ -183,6 +221,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         doPull: true,
         doFlush: true,
       );
+      _backendReachable = cycle.pullError == null &&
+          !cycle.flush.hadTransportFailure &&
+          !cycle.flush.hadRetryableFailure;
+      if (mounted) {
+        setState(_recomputeOnlineFlag);
+      }
       await flushPendingCatalogMutations(
         storeId: widget.storeId,
         prefs: widget.localPrefs,
@@ -214,6 +258,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               .invalidateFromLocalMutation(productIds: {updated.id});
         },
       );
+      if (mounted) setState(_recomputeOnlineFlag);
+    } catch (_) {
+      _backendReachable = false;
+      if (mounted) {
+        setState(_recomputeOnlineFlag);
+      }
     } finally {
       _autoSyncBusy = false;
     }
@@ -230,6 +280,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _periodicSync?.cancel();
+    _healthProbeTimer?.cancel();
     _connSub?.cancel();
     super.dispose();
   }
@@ -250,6 +301,21 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   exchangeRatesApi: widget.exchangeRatesApi,
                   onChangeStore: widget.onChangeStore,
                   localPrefs: widget.localPrefs,
+                  forcedOffline: _manualForceOffline,
+                  onlineStatus: _isOnline,
+                  onToggleConnectivityMode: () {
+                    setState(() {
+                      _manualForceOffline = !_manualForceOffline;
+                      if (!_manualForceOffline) {
+                        _backendReachable = true;
+                      }
+                      _recomputeOnlineFlag();
+                    });
+                    if (!_manualForceOffline) {
+                      unawaited(_runAutoSync(reason: 'manual-online'));
+                      unawaited(_probeBackendHealth());
+                    }
+                  },
                 ),
               ),
               KeyedSubtree(
