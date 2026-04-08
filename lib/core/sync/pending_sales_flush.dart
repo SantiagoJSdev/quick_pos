@@ -8,12 +8,16 @@ class SyncFlushResult {
     required this.sentCount,
     required this.removedOpIds,
     this.hadTransportFailure = false,
+    this.hadRetryableFailure = false,
+    this.hadManualReviewFailure = false,
     this.apiMessage,
   });
 
   final int sentCount;
   final List<String> removedOpIds;
   final bool hadTransportFailure;
+  final bool hadRetryableFailure;
+  final bool hadManualReviewFailure;
   final String? apiMessage;
 
   int get removedCount => removedOpIds.length;
@@ -152,6 +156,8 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: const [],
+      hadRetryableFailure: e.isRetryableSyncFailure,
+      hadManualReviewFailure: e.isManualReviewSyncFailure,
       apiMessage: e.userMessageForSupport,
     );
   } catch (e) {

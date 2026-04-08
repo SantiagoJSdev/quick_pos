@@ -168,3 +168,88 @@ Cuando se agregue o cambie una funcionalidad:
 - Mantener **solo este archivo** como fuente de verdad en `docs/`.
 - Evitar crear docs paralelos; todo nuevo contexto va aqui.
 - Si se necesita detalle tecnico temporal, incorporarlo y resumirlo aqui antes de cerrar la tarea.
+- Excepcion operativa: las pruebas manuales se registran en `docs/MANUAL_TESTS.md`.
+- Regla: cada nueva prueba manual o ajuste de QA manual debe cargarse en `docs/MANUAL_TESTS.md`.
+
+## 10) Estado Offline (decision vigente)
+
+- Objetivo: app operativa offline en Inicio, Inventario, Catalogo, POS, Compras y Devoluciones.
+- Compras: habilitadas offline via cola y `PURCHASE_RECEIVE`.
+- Devoluciones: habilitadas offline via cola y `SALE_RETURN`.
+- Catalogo: full offline para crear/editar/borrar con sincronizacion posterior.
+- Frecuencia de auto-sync: cada 90 segundos + disparo inmediato al reconectar.
+- UX de conectividad: indicador visible verde (online) / rojo (offline).
+- Regla UX: sync en segundo plano, sin bloquear navegacion ni uso normal.
+
+## 11) Plan V2 integrado (offline + compras + fotos + config URL)
+
+Se integra como referencia ejecutiva el plan `FRONT_OFFLINE_EXECUTION_PLAN_V2.md` recibido desde backend.
+
+### 11.1 Alcance alineado
+
+- Compras proveedor con entrada de stock: usar `POST /purchases` online y `PURCHASE_RECEIVE` offline.
+- Offline-first transversal: cola local, `sync/push`, `sync/pull`, lock anti-concurrencia y scheduler.
+- Fotos de producto: propuesta en dos fases (preview local + upload background) sujeta a endpoints backend.
+- Configuracion dinamica de URL backend: implementada en frontend (Ajustes + perfiles + prueba de conexion).
+
+### 11.2 Estado de ejecucion consolidado
+
+Fuente de seguimiento operativo: `docs/FRONT_OFFLINE_IMPLEMENTATION_CHECKLIST.md`.
+Fuente unica de pruebas manuales: `docs/MANUAL_TESTS.md`.
+
+- Estado global actual: **en progreso avanzado**.
+- Ya implementado: base offline en POS/Inventario/Catalogo, scheduler 90s + reconexion, fallback de read models, tickets en espera, devoluciones/compras offline en cola.
+- Ya implementado tambien: configuracion dinamica de URL/IP desde Ajustes, prueba de conexion, selector de perfil (Produccion/LAN/Local), y badge de entorno activo (LOCAL/LAN/PROD).
+- Ya implementado tambien: clasificacion base de errores de sync (retryable/manual) y vista de operaciones pendientes en Ventas.
+- Fotos implementadas end-to-end:
+  - `POST /uploads/products-image` (multipart, campo `file`),
+  - `PATCH /products/:id/image` para asociar `imageUrl`,
+  - cola local con reintentos automáticos y clasificación manual/retryable.
+- Pendiente principal: ejecutar QA manual formal y cerrar evidencia.
+
+## 12) QA rapido de validacion offline (movil)
+
+Ejecutar este bloque en Android fisico para validar comportamiento base:
+
+1. Abrir `Inicio -> Configuracion (clave)`.
+2. En `Conexion backend`, elegir perfil `LAN`, cargar IP LAN real y tocar `Probar conexion`.
+3. Guardar URL y verificar badge global de entorno (`LAN`).
+4. Apagar backend y entrar a `POS`, `Buscar precio`, `Inventario`, `Historial`: no debe haber loading infinito.
+5. Con backend caido, crear una operacion offline (venta o devolucion) y confirmar que queda en cola.
+6. Encender backend, esperar reconexion (o tocar `Sincronizar`) y validar que pendientes bajan.
+7. Cambiar a `Produccion` o `Local` desde perfiles y confirmar que badge cambia (`PROD` o `LOCAL`).
+8. Registrar evidencia minima (captura + resultado) por escenario para cerrar Fase F.
+
+## 13) Bitacora de cambios recientes
+
+- 2026-04-07:
+  - Main shell ajustado a auto-sync cada 90s.
+  - Trigger de sync por reconexion mantenido.
+  - Lock en auto-sync para evitar ejecuciones concurrentes.
+  - Indicador de estado de red agregado en barra inferior (online/offline).
+  - Catalogo offline inicial implementado:
+    - cache local de productos en `LocalPrefs`,
+    - cola local `pending_catalog_mutations_v1` (create/update/deactivate),
+    - flush automatico en segundo plano desde `MainShell`,
+    - fallback de lectura a cache cuando falla red/API en lista de catalogo.
+  - POS offline reforzado:
+    - `PosSaleScreen` ahora usa cache local de catalogo si falla `GET /products`,
+    - carga `business-settings` desde cache local si falla red,
+    - usa cache local de par FX para seguir cobrando en modo offline,
+    - al volver red, sync y pull mantienen consistencia.
+  - `products-with-stock` offline:
+    - en `ProductInitialStockBottomSheet`, si no hay red se encola mutacion local
+      tipo `CREATE_PRODUCT_WITH_STOCK` con `Idempotency-Key` persistido,
+    - se crea placeholder local en cache de catalogo,
+    - `flushPendingCatalogMutations` reintenta esa mutacion al reconectar y
+      reemplaza placeholder por producto real del servidor.
+  - Read models locales (Inicio/Inventario/Historial):
+    - Inicio (`StoreDashboardScreen`) usa cache de `business-settings` si falla red,
+    - Inventario (`InventoryStockTab`) guarda y usa cache local de líneas (`inventory_cache_v1`),
+    - Historial General (`TicketHistoryScreen`) guarda última consulta y la muestra sin red
+      (`sales_general_cache_v1`) cuando no hay respuesta del API.
+  - Refuerzo de visibilidad de cache/offline:
+    - Tasa del día (`ExchangeRateTodayScreen`) con cache local por par/fecha
+      (`latest_rate_cache_v1_*`) y fallback sin red,
+    - badge de “mostrando datos cacheados” en Inicio, Inventario y Historial General
+      cuando los datos vienen de fallback offline.

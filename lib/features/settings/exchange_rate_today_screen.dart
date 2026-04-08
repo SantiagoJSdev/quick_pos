@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/models/latest_exchange_rate.dart';
+import '../../core/storage/local_prefs.dart';
 import 'register_exchange_rate_screen.dart';
 
 const _kPairs = ['USD', 'VES', 'EUR'];
@@ -12,12 +13,14 @@ class ExchangeRateTodayScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.exchangeRatesApi,
+    required this.localPrefs,
     this.initialBase,
     this.initialQuote,
   });
 
   final String storeId;
   final ExchangeRatesApi exchangeRatesApi;
+  final LocalPrefs localPrefs;
   final String? initialBase;
   final String? initialQuote;
 
@@ -32,6 +35,7 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
   LatestExchangeRate? _data;
   bool _loading = true;
   String? _error;
+  bool _fromCache = false;
 
   @override
   void initState() {
@@ -70,6 +74,7 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _fromCache = false;
     });
     try {
       final effectiveOn = _effectiveOnController.text.trim();
@@ -79,25 +84,65 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
         quoteCurrencyCode: _quote,
         effectiveOn: effectiveOn.isEmpty ? null : effectiveOn,
       );
+      await widget.localPrefs.saveLatestRateCache(
+        storeId: widget.storeId,
+        baseCurrencyCode: _base,
+        quoteCurrencyCode: _quote,
+        effectiveOn: effectiveOn.isEmpty ? null : effectiveOn,
+        rate: data,
+      );
       if (!mounted) return;
       setState(() {
         _data = data;
         _loading = false;
+        _fromCache = false;
       });
     } on ApiError catch (e) {
+      final effectiveOn = _effectiveOnController.text.trim();
+      final cached = await widget.localPrefs.loadLatestRateCache(
+        storeId: widget.storeId,
+        baseCurrencyCode: _base,
+        quoteCurrencyCode: _quote,
+        effectiveOn: effectiveOn.isEmpty ? null : effectiveOn,
+      );
       if (!mounted) return;
-      setState(() {
-        _data = null;
-        _error = e.userMessageForSupport;
-        _loading = false;
-      });
+      if (cached != null) {
+        setState(() {
+          _data = cached;
+          _error = null;
+          _loading = false;
+          _fromCache = true;
+        });
+      } else {
+        setState(() {
+          _data = null;
+          _error = e.userMessageForSupport;
+          _loading = false;
+        });
+      }
     } catch (e) {
+      final effectiveOn = _effectiveOnController.text.trim();
+      final cached = await widget.localPrefs.loadLatestRateCache(
+        storeId: widget.storeId,
+        baseCurrencyCode: _base,
+        quoteCurrencyCode: _quote,
+        effectiveOn: effectiveOn.isEmpty ? null : effectiveOn,
+      );
       if (!mounted) return;
-      setState(() {
-        _data = null;
-        _error = e.toString();
-        _loading = false;
-      });
+      if (cached != null) {
+        setState(() {
+          _data = cached;
+          _error = null;
+          _loading = false;
+          _fromCache = true;
+        });
+      } else {
+        setState(() {
+          _data = null;
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -155,6 +200,21 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
               child: const Text('Consultar tasa'),
             ),
             const SizedBox(height: 32),
+            if (_fromCache) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+                ),
+                child: const Text(
+                  'Mostrando tasa cacheada (modo offline).',
+                  style: TextStyle(fontSize: 12, color: Colors.orange),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (_loading)
               const Center(
                 child: Padding(

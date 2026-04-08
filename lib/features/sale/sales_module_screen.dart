@@ -11,6 +11,8 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import 'pos_sale_screen.dart';
 import 'pos_sale_ui_tokens.dart';
+import 'pending_sync_ops_screen.dart';
+import 'pending_photo_uploads_screen.dart';
 import 'product_price_lookup_screen.dart';
 import 'sale_return_screen.dart';
 import 'ticket_history_screen.dart';
@@ -94,6 +96,7 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                     builder: (c) => ProductPriceLookupScreen(
                       storeId: widget.storeId,
                       productsApi: widget.productsApi,
+                      localPrefs: widget.localPrefs,
                     ),
                   ),
                 );
@@ -114,6 +117,26 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                   ),
                 );
               },
+              onOpenPendientes: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => PendingSyncOpsScreen(
+                      storeId: widget.storeId,
+                      localPrefs: widget.localPrefs,
+                    ),
+                  ),
+                );
+              },
+              onOpenFotosPendientes: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => PendingPhotoUploadsScreen(
+                      storeId: widget.storeId,
+                      localPrefs: widget.localPrefs,
+                    ),
+                  ),
+                );
+              },
             ),
           );
         }
@@ -129,12 +152,16 @@ class _VentasMenuPage extends StatelessWidget {
     required this.onOpenHistorial,
     required this.onOpenPrecios,
     required this.onOpenDevolucion,
+    required this.onOpenPendientes,
+    required this.onOpenFotosPendientes,
   });
 
   final VoidCallback onOpenPos;
   final VoidCallback onOpenHistorial;
   final VoidCallback onOpenPrecios;
   final VoidCallback onOpenDevolucion;
+  final VoidCallback onOpenPendientes;
+  final VoidCallback onOpenFotosPendientes;
 
   @override
   Widget build(BuildContext context) {
@@ -177,6 +204,20 @@ class _VentasMenuPage extends StatelessWidget {
               title: 'Buscar precio de producto',
               subtitle: 'Consulta precio de lista sin armar ticket',
               onTap: onOpenPrecios,
+            ),
+            const SizedBox(height: 12),
+            _VentasTile(
+              icon: Icons.pending_actions_outlined,
+              title: 'Operaciones pendientes',
+              subtitle: 'Ver cola local de sync/push para soporte',
+              onTap: onOpenPendientes,
+            ),
+            const SizedBox(height: 12),
+            _VentasTile(
+              icon: Icons.photo_library_outlined,
+              title: 'Fotos pendientes',
+              subtitle: 'Ver cola de uploads de fotos y revisión manual',
+              onTap: onOpenFotosPendientes,
             ),
           ],
         ),

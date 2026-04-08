@@ -138,11 +138,45 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
   Future<void> _loadSettings() async {
     try {
       final s = await widget.storesApi.getBusinessSettings(widget.storeId);
+      await widget.localPrefs.saveBusinessSettingsCache(
+        widget.storeId,
+        {
+          'id': s.id,
+          'storeId': s.storeId,
+          'defaultMarginPercent': s.defaultMarginPercent,
+          'functionalCurrency': {
+            'code': s.functionalCurrency.code,
+            'name': s.functionalCurrency.name,
+          },
+          'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
+              ? null
+              : {
+                  'code': s.defaultSaleDocCurrency!.code,
+                  'name': s.defaultSaleDocCurrency!.name,
+                },
+          'store': {
+            'name': s.storeName,
+            'type': s.storeType,
+          },
+        },
+      );
       if (mounted) setState(() => _settings = s);
     } on ApiError catch (e) {
-      if (mounted) setState(() => _error = e.userMessageForSupport);
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      if (!mounted) return;
+      if (cached != null) {
+        setState(() => _settings = cached);
+      } else {
+        setState(() => _error = e.userMessageForSupport);
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      if (!mounted) return;
+      if (cached != null) {
+        setState(() => _settings = cached);
+      } else {
+        setState(() => _error = e.toString());
+      }
     }
   }
 
@@ -195,6 +229,14 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
     setState(() => _fxLoadError = null);
     try {
       final pair = await _fetchFxPair(func, doc);
+      if (pair != null) {
+        await widget.localPrefs.savePosFxPairCache(
+          storeId: widget.storeId,
+          functionalCode: func,
+          documentCode: doc,
+          pair: pair,
+        );
+      }
       if (mounted) {
         setState(() {
           _fxPair = pair;
@@ -202,7 +244,18 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      final cached = await widget.localPrefs.loadPosFxPairCache(
+        storeId: widget.storeId,
+        functionalCode: func,
+        documentCode: doc,
+      );
+      if (!mounted) return;
+      if (cached != null) {
+        setState(() {
+          _fxPair = cached;
+          _fxLoadError = null;
+        });
+      } else {
         setState(() {
           _fxPair = null;
           _fxLoadError = e.toString();

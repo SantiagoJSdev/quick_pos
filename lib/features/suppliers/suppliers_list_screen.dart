@@ -10,6 +10,7 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/models/local_supplier.dart';
 import '../../core/models/supplier.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
@@ -100,6 +101,11 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
         active: _activeParam,
       );
       if (!mounted) return;
+      await widget.localPrefs.saveLocalSuppliers(
+        page.items
+            .map((e) => LocalSupplier(id: e.id, name: e.name))
+            .toList(),
+      );
       setState(() {
         if (reset) {
           _list = page.items;
@@ -112,21 +118,61 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
         _error = null;
       });
     } on ApiError catch (e) {
+      final local = await widget.localPrefs.getLocalSuppliers();
       if (!mounted) return;
-      setState(() {
-        if (reset) _list = [];
-        _error = e.userMessageForSupport;
-        _loading = false;
-        _loadingMore = false;
-      });
+      if (reset && local.isNotEmpty) {
+        setState(() {
+          _list = local
+              .map(
+                (x) => Supplier(
+                  id: x.id,
+                  storeId: widget.storeId,
+                  name: x.name,
+                  active: true,
+                ),
+              )
+              .toList();
+          _error = null;
+          _loading = false;
+          _loadingMore = false;
+          _nextCursor = null;
+        });
+      } else {
+        setState(() {
+          if (reset) _list = [];
+          _error = e.userMessageForSupport;
+          _loading = false;
+          _loadingMore = false;
+        });
+      }
     } catch (e) {
+      final local = await widget.localPrefs.getLocalSuppliers();
       if (!mounted) return;
-      setState(() {
-        if (reset) _list = [];
-        _error = e.toString();
-        _loading = false;
-        _loadingMore = false;
-      });
+      if (reset && local.isNotEmpty) {
+        setState(() {
+          _list = local
+              .map(
+                (x) => Supplier(
+                  id: x.id,
+                  storeId: widget.storeId,
+                  name: x.name,
+                  active: true,
+                ),
+              )
+              .toList();
+          _error = null;
+          _loading = false;
+          _loadingMore = false;
+          _nextCursor = null;
+        });
+      } else {
+        setState(() {
+          if (reset) _list = [];
+          _error = e.toString();
+          _loading = false;
+          _loadingMore = false;
+        });
+      }
     }
   }
 

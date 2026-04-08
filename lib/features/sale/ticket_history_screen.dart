@@ -450,6 +450,7 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
   SalesListMeta? _meta;
   bool _hasFetched = false;
   String? _deviceId;
+  bool _usingCachedData = false;
 
   @override
   void initState() {
@@ -525,8 +526,47 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
         _loadingMore = false;
         _hasFetched = true;
         _error = null;
+        _usingCachedData = false;
       });
+      if (reset) {
+        await widget.localPrefs.saveSalesGeneralCache(
+          widget.storeId,
+          rows: page.items,
+          meta: page.meta,
+          dateFrom: _ymd(from),
+          dateTo: _ymd(to),
+          onlyThisDevice: _onlyThisDevice,
+        );
+      }
     } catch (e) {
+      if (reset) {
+        final cached = await widget.localPrefs.loadSalesGeneralCache(widget.storeId);
+        if (cached != null && cached.rows.isNotEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _rows = cached.rows;
+            _meta = cached.meta;
+            _nextCursor = null;
+            _loading = false;
+            _loadingMore = false;
+            _hasFetched = true;
+            _error = null;
+            _usingCachedData = true;
+            if (cached.dateFrom != null) {
+              final p = DateTime.tryParse(cached.dateFrom!);
+              if (p != null) _from = DateTime(p.year, p.month, p.day);
+            }
+            if (cached.dateTo != null) {
+              final p = DateTime.tryParse(cached.dateTo!);
+              if (p != null) _to = DateTime(p.year, p.month, p.day);
+            }
+            if (cached.onlyThisDevice != null) {
+              _onlyThisDevice = cached.onlyThisDevice!;
+            }
+          });
+          return;
+        }
+      }
       if (!mounted) return;
       String msg = e.toString();
       if (e is ApiError) {
@@ -546,6 +586,7 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
         }
         _loading = false;
         _loadingMore = false;
+        _usingCachedData = false;
       });
     }
   }
@@ -640,6 +681,13 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
           Text(
             _error!,
             style: const TextStyle(color: Colors.orangeAccent, fontSize: 13),
+          ),
+        ],
+        if (_usingCachedData) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'Mostrando historial cacheado (modo offline).',
+            style: TextStyle(color: Colors.orange, fontSize: 12),
           ),
         ],
         const SizedBox(height: 16),

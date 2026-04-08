@@ -132,6 +132,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   suppliersApi: widget.suppliersApi,
                   storesApi: widget.storesApi,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
+                  localPrefs: widget.localPrefs,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _catalogProductCount = n);
                   },

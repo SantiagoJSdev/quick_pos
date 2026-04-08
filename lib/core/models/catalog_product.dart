@@ -18,6 +18,7 @@ class CatalogProduct {
     this.effectiveMarginPercent,
     this.marginComputedPercent,
     this.suggestedPrice,
+    this.imageUrl,
   });
 
   final String id;
@@ -50,6 +51,9 @@ class CatalogProduct {
   /// Solo respuesta API.
   final String? suggestedPrice;
 
+  /// Foto asociada al producto (URL relativa o absoluta según backend).
+  final String? imageUrl;
+
   static CatalogProduct fromJson(Map<String, dynamic> json) {
     return CatalogProduct(
       id: json['id']?.toString() ?? '',
@@ -69,6 +73,7 @@ class CatalogProduct {
       effectiveMarginPercent: _parseOptionalString(json['effectiveMarginPercent']),
       marginComputedPercent: _parseOptionalString(json['marginComputedPercent']),
       suggestedPrice: _parseOptionalString(json['suggestedPrice']),
+      imageUrl: _parseOptionalString(json['imageUrl']),
     );
   }
 

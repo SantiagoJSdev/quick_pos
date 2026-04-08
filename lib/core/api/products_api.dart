@@ -95,4 +95,21 @@ class ProductsApi {
   Future<void> deactivateProduct(String storeId, String productId) {
     return _client.deleteNoContent('/products/$productId', storeId);
   }
+
+  Future<CatalogProduct> associateProductImage(
+    String storeId,
+    String productId, {
+    required String imageUrl,
+  }) async {
+    final json = await _client.patchJson(
+      '/products/$productId/image',
+      storeId,
+      {'imageUrl': imageUrl},
+    );
+    return CatalogProduct.fromJson(json);
+  }
+
+  Future<void> removeProductImage(String storeId, String productId) {
+    return _client.deleteNoContent('/products/$productId/image', storeId);
+  }
 }

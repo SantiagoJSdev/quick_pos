@@ -1,15 +1,21 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/catalog/pending_catalog_mutation_entry.dart';
+import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/photos/pending_product_photo_upload_entry.dart';
 import '../../core/models/supplier.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
+import '../../core/storage/local_prefs.dart';
 import 'product_initial_stock_sheet.dart';
 import '../sale/barcode_scanner_screen.dart';
 
@@ -32,6 +38,7 @@ class ProductFormScreen extends StatefulWidget {
     required this.storeId,
     required this.productsApi,
     required this.suppliersApi,
+    required this.localPrefs,
     this.storesApi,
     this.catalogInvalidationBus,
     this.existing,
@@ -41,6 +48,7 @@ class ProductFormScreen extends StatefulWidget {
   final String storeId;
   final ProductsApi productsApi;
   final SuppliersApi suppliersApi;
+  final LocalPrefs localPrefs;
 
   /// Opcional: margen de tienda para calcular precio de lista vacío al editar (`USE_STORE_DEFAULT`).
   final StoresApi? storesApi;
@@ -72,6 +80,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _allowNoBarcode = false;
   bool _loading = false;
   String? _error;
+  final ImagePicker _picker = ImagePicker();
+  String? _photoLocalPath;
 
   List<Supplier> _suppliers = [];
   bool _suppliersLoading = true;
@@ -221,6 +231,42 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _barcode.text = code;
       _allowNoBarcode = false;
     });
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    try {
+      final x = await _picker.pickImage(
+        source: source,
+        imageQuality: 82,
+        maxWidth: 1080,
+      );
+      if (!mounted || x == null) return;
+      setState(() => _photoLocalPath = x.path);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo cargar foto: $e')),
+      );
+    }
+  }
+
+  void _clearPhoto() {
+    setState(() => _photoLocalPath = null);
+  }
+
+  Future<void> _queuePhotoUploadIfAny(String productId) async {
+    final path = _photoLocalPath?.trim();
+    final pid = productId.trim();
+    if (path == null || path.isEmpty || pid.isEmpty) return;
+    await widget.localPrefs.appendPendingProductPhotoUpload(
+      PendingProductPhotoUploadEntry(
+        opId: ClientMutationId.newId(),
+        storeId: widget.storeId,
+        productId: pid,
+        localFilePath: path,
+        createdAtIso: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
   }
 
   @override
@@ -392,6 +438,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       effectiveMarginPercent: widget.existing?.effectiveMarginPercent,
       marginComputedPercent: widget.existing?.marginComputedPercent,
       suggestedPrice: widget.existing?.suggestedPrice,
+      imageUrl: widget.existing?.imageUrl,
     );
 
     if (widget.isEdit) {
@@ -402,6 +449,33 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           widget.existing!.id,
           product.toPatchBody(),
         );
+        if (!mounted) return;
+        final cached = await widget.localPrefs.loadCatalogProductsCache();
+        final i = cached.indexWhere((x) => x.id == widget.existing!.id);
+        if (i >= 0) {
+          cached[i] = CatalogProduct(
+            id: widget.existing!.id,
+            sku: product.sku,
+            name: product.name,
+            barcode: product.barcode,
+            description: product.description,
+            type: product.type,
+            price: product.price,
+            cost: product.cost,
+            currency: product.currency,
+            active: true,
+            unit: product.unit,
+            supplierId: product.supplierId,
+            pricingMode: product.pricingMode,
+            marginPercentOverride: product.marginPercentOverride,
+            effectiveMarginPercent: product.effectiveMarginPercent,
+            marginComputedPercent: product.marginComputedPercent,
+            suggestedPrice: product.suggestedPrice,
+            imageUrl: product.imageUrl,
+          );
+          await widget.localPrefs.saveCatalogProductsCache(cached);
+        }
+        await _queuePhotoUploadIfAny(widget.existing!.id);
         if (!mounted) return;
         if (priceRaw.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -420,6 +494,58 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         Navigator.of(context).pop(true);
       } on ApiError catch (e) {
         if (!mounted) return;
+        final msg = e.userMessageForSupport.toLowerCase();
+        if (msg.contains('socket') ||
+            msg.contains('connection') ||
+            msg.contains('timeout') ||
+            msg.contains('network')) {
+          final pending = await widget.localPrefs.loadPendingCatalogMutations();
+          pending.add(
+            PendingCatalogMutationEntry(
+              opId: ClientMutationId.newId(),
+              storeId: widget.storeId,
+              type: PendingCatalogMutationEntry.typeUpdate,
+              createdAtIso: DateTime.now().toUtc().toIso8601String(),
+              productId: widget.existing!.id,
+              body: product.toPatchBody(),
+            ),
+          );
+          await widget.localPrefs.savePendingCatalogMutations(pending);
+          final cached = await widget.localPrefs.loadCatalogProductsCache();
+          final i = cached.indexWhere((x) => x.id == widget.existing!.id);
+          if (i >= 0) {
+            cached[i] = CatalogProduct(
+              id: widget.existing!.id,
+              sku: product.sku,
+              name: product.name,
+              barcode: product.barcode,
+              description: product.description,
+              type: product.type,
+              price: product.price,
+              cost: product.cost,
+              currency: product.currency,
+              active: true,
+              unit: product.unit,
+              supplierId: product.supplierId,
+              pricingMode: product.pricingMode,
+              marginPercentOverride: product.marginPercentOverride,
+              effectiveMarginPercent: product.effectiveMarginPercent,
+              marginComputedPercent: product.marginComputedPercent,
+              suggestedPrice: product.suggestedPrice,
+              imageUrl: product.imageUrl,
+            );
+          }
+          await widget.localPrefs.saveCatalogProductsCache(cached);
+          await _queuePhotoUploadIfAny(widget.existing!.id);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sin conexión: edición guardada en cola.'),
+            ),
+          );
+          Navigator.of(context).pop(true);
+          return;
+        }
         setState(() => _error = e.userMessageForSupport);
       } catch (e) {
         if (!mounted) return;
@@ -470,15 +596,80 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           product.toCreateBody(),
         );
         if (!mounted) return;
+        final cached = await widget.localPrefs.loadCatalogProductsCache();
+        cached.removeWhere((x) => x.id == created.id);
+        cached.add(created);
+        await widget.localPrefs.saveCatalogProductsCache(cached);
         widget.catalogInvalidationBus?.invalidateFromLocalMutation(
           productIds: {created.id},
         );
+        await _queuePhotoUploadIfAny(created.id);
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Producto creado · SKU ${created.sku}')),
+          SnackBar(
+            content: Text(
+              _photoLocalPath == null
+                  ? 'Producto creado · SKU ${created.sku}'
+                  : 'Producto creado · SKU ${created.sku} · foto en cola',
+            ),
+          ),
         );
         Navigator.of(context).pop(true);
       } on ApiError catch (e) {
         if (!mounted) return;
+        final msg = e.userMessageForSupport.toLowerCase();
+        if (msg.contains('socket') ||
+            msg.contains('connection') ||
+            msg.contains('timeout') ||
+            msg.contains('network')) {
+          final localId = 'local_${ClientMutationId.newId()}';
+          final pending = await widget.localPrefs.loadPendingCatalogMutations();
+          pending.add(
+            PendingCatalogMutationEntry(
+              opId: ClientMutationId.newId(),
+              storeId: widget.storeId,
+              type: PendingCatalogMutationEntry.typeCreate,
+              createdAtIso: DateTime.now().toUtc().toIso8601String(),
+              localTempId: localId,
+              body: product.toCreateBody(),
+            ),
+          );
+          await widget.localPrefs.savePendingCatalogMutations(pending);
+          final cached = await widget.localPrefs.loadCatalogProductsCache();
+          cached.add(
+            CatalogProduct(
+              id: localId,
+              sku: product.sku.isEmpty ? 'PENDIENTE' : product.sku,
+              name: product.name,
+              barcode: product.barcode,
+              description: product.description,
+              type: product.type,
+              price: product.price,
+              cost: product.cost,
+              currency: product.currency,
+              active: true,
+              unit: product.unit,
+              supplierId: product.supplierId,
+              pricingMode: product.pricingMode,
+              marginPercentOverride: product.marginPercentOverride,
+              imageUrl: product.imageUrl,
+            ),
+          );
+          await widget.localPrefs.saveCatalogProductsCache(cached);
+          await _queuePhotoUploadIfAny(localId);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                _photoLocalPath == null
+                    ? 'Sin conexión: producto guardado en cola.'
+                    : 'Sin conexión: producto y foto guardados en cola.',
+              ),
+            ),
+          );
+          Navigator.of(context).pop(true);
+          return;
+        }
         setState(() => _error = e.userMessageForSupport);
       } catch (e) {
         if (!mounted) return;
@@ -497,10 +688,20 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       builder: (ctx) => ProductInitialStockBottomSheet(
         storeId: widget.storeId,
         productsApi: widget.productsApi,
+        localPrefs: widget.localPrefs,
         productDraft: product,
         catalogInvalidationBus: widget.catalogInvalidationBus,
       ),
     );
+    if (ok == true && _photoLocalPath != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Producto con stock creado. La foto queda en preview local pendiente de integración backend.',
+          ),
+        ),
+      );
+    }
     if (mounted && ok == true) Navigator.of(context).pop(true);
   }
 
@@ -533,6 +734,73 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             textCapitalization: TextCapitalization.words,
             enabled: !_loading,
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Foto del producto (preview local)',
+              helperText:
+                  'No bloquea guardado. Upload a backend se integrará cuando exista endpoint.',
+              border: OutlineInputBorder(),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  height: 170,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Theme.of(context).dividerColor,
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: _photoLocalPath == null
+                      ? Center(
+                          child: Text(
+                            'Sin foto seleccionada',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      : Image.file(
+                          File(_photoLocalPath!),
+                          fit: BoxFit.cover,
+                        ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            _loading ? null : () => _pickPhoto(ImageSource.gallery),
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: const Text('Galería'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            _loading ? null : () => _pickPhoto(ImageSource.camera),
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        label: const Text('Cámara'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Quitar foto',
+                      onPressed: (_loading || _photoLocalPath == null)
+                          ? null
+                          : _clearPhoto,
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           if (_suppliersLoading)
@@ -577,7 +845,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             decoration: InputDecoration(
               labelText: 'Código de barras (EAN / UPC)',
               hintText:
-                  'Tocá el campo vacío o el ícono para abrir la cámara; podés escribir o pegar si ya hay código.',
+                  'Escribí/pegá el código o usá el ícono para escanear.',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.qr_code_scanner),
@@ -587,11 +855,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             keyboardType: TextInputType.text,
             enabled: !_loading,
-            onTap: () {
-              if (_loading || !BarcodeScannerScreen.isSupported) return;
-              if (_barcode.text.trim().isNotEmpty) return;
-              _scanBarcodeField();
-            },
           ),
           SwitchListTile(
             title: const Text('Permitir sin código de barras'),

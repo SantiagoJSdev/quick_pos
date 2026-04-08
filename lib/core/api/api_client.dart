@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
@@ -9,11 +10,12 @@ import 'api_error.dart';
 class ApiClient {
   ApiClient({http.Client? httpClient, String? baseUrl})
       : _client = httpClient ?? http.Client(),
-        _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
+        _baseUrlOverride = baseUrl;
 
   final http.Client _client;
-  final String _baseUrl;
+  final String? _baseUrlOverride;
   static const _uuid = Uuid();
+  static const _requestTimeout = Duration(seconds: 12);
 
   /// UUID v4 por petición si no se pasa uno explícito (`FRONTEND_INTEGRATION_CONTEXT.md`).
   String _effectiveRequestId(String? requestId) =>
@@ -29,7 +31,10 @@ class ApiClient {
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {
-    final base = _baseUrl.endsWith('/') ? _baseUrl.substring(0, _baseUrl.length - 1) : _baseUrl;
+    final configured = _baseUrlOverride ?? AppConfig.effectiveApiBaseUrl;
+    final base = configured.endsWith('/')
+        ? configured.substring(0, configured.length - 1)
+        : configured;
     final p = path.startsWith('/') ? path : '/$path';
     return Uri.parse('$base$p').replace(queryParameters: query);
   }
@@ -40,9 +45,11 @@ class ApiClient {
     Map<String, String>? query,
     String? requestId,
   }) async {
-    final res = await _client.get(
-      _uri(path, query),
-      headers: _headers(storeId, requestId: requestId),
+    final res = await _withTimeout(
+      _client.get(
+        _uri(path, query),
+        headers: _headers(storeId, requestId: requestId),
+      ),
     );
     return _decodeSuccess(res);
   }
@@ -56,9 +63,11 @@ class ApiClient {
     Map<String, String>? query,
     String? requestId,
   }) async {
-    final res = await _client.get(
-      _uri(path, query),
-      headers: _headers(storeId, requestId: requestId),
+    final res = await _withTimeout(
+      _client.get(
+        _uri(path, query),
+        headers: _headers(storeId, requestId: requestId),
+      ),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
       if (res.body.isEmpty) return [];
@@ -109,11 +118,41 @@ class ApiClient {
     if (ik != null && ik.isNotEmpty) {
       headers['Idempotency-Key'] = ik;
     }
-    final res = await _client.post(
-      _uri(path),
-      headers: headers,
-      body: body == null ? null : jsonEncode(body),
+    final res = await _withTimeout(
+      _client.post(
+        _uri(path),
+        headers: headers,
+        body: body == null ? null : jsonEncode(body),
+      ),
     );
+    return _decodeSuccess(res);
+  }
+
+  Future<Map<String, dynamic>> postMultipartFile(
+    String path,
+    String storeId, {
+    required String fileFieldName,
+    required String filePath,
+    String? requestId,
+  }) async {
+    final req = http.MultipartRequest('POST', _uri(path));
+    req.headers.addAll({
+      'Accept': 'application/json',
+      'X-Store-Id': storeId,
+      'X-Request-Id': _effectiveRequestId(requestId),
+    });
+    req.files.add(await http.MultipartFile.fromPath(fileFieldName, filePath));
+    http.StreamedResponse streamed;
+    try {
+      streamed = await req.send().timeout(_requestTimeout);
+    } on TimeoutException {
+      throw ApiError(
+        statusCode: 408,
+        error: 'Request Timeout',
+        messages: ['Tiempo de espera agotado. Verificá conexión y backend.'],
+      );
+    }
+    final res = await http.Response.fromStream(streamed);
     return _decodeSuccess(res);
   }
 
@@ -123,10 +162,12 @@ class ApiClient {
     Object? body, {
     String? requestId,
   }) async {
-    final res = await _client.put(
-      _uri(path),
-      headers: _headers(storeId, requestId: requestId),
-      body: body == null ? null : jsonEncode(body),
+    final res = await _withTimeout(
+      _client.put(
+        _uri(path),
+        headers: _headers(storeId, requestId: requestId),
+        body: body == null ? null : jsonEncode(body),
+      ),
     );
     return _decodeSuccess(res);
   }
@@ -137,10 +178,12 @@ class ApiClient {
     Object? body, {
     String? requestId,
   }) async {
-    final res = await _client.patch(
-      _uri(path),
-      headers: _headers(storeId, requestId: requestId),
-      body: body == null ? null : jsonEncode(body),
+    final res = await _withTimeout(
+      _client.patch(
+        _uri(path),
+        headers: _headers(storeId, requestId: requestId),
+        body: body == null ? null : jsonEncode(body),
+      ),
     );
     return _decodeSuccess(res);
   }
@@ -151,9 +194,11 @@ class ApiClient {
     String storeId, {
     String? requestId,
   }) async {
-    final res = await _client.delete(
-      _uri(path),
-      headers: _headers(storeId, requestId: requestId),
+    final res = await _withTimeout(
+      _client.delete(
+        _uri(path),
+        headers: _headers(storeId, requestId: requestId),
+      ),
     );
     return _decodeSuccess(res);
   }
@@ -164,9 +209,11 @@ class ApiClient {
     String storeId, {
     String? requestId,
   }) async {
-    final res = await _client.delete(
-      _uri(path),
-      headers: _headers(storeId, requestId: requestId),
+    final res = await _withTimeout(
+      _client.delete(
+        _uri(path),
+        headers: _headers(storeId, requestId: requestId),
+      ),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) return;
     final parsed = ApiError.tryParse(res.statusCode, res.body);
@@ -199,4 +246,16 @@ class ApiClient {
   }
 
   void close() => _client.close();
+
+  Future<http.Response> _withTimeout(Future<http.Response> request) async {
+    try {
+      return await request.timeout(_requestTimeout);
+    } on TimeoutException {
+      throw ApiError(
+        statusCode: 408,
+        error: 'Request Timeout',
+        messages: ['Tiempo de espera agotado. Verificá conexión y backend.'],
+      );
+    }
+  }
 }

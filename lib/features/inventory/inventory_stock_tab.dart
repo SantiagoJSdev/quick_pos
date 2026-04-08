@@ -58,6 +58,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   String? _error;
   _StockListFilter _stockFilter = _StockListFilter.all;
   String? _storeDefaultMarginPercent;
+  bool _usingCachedData = false;
 
   @override
   void initState() {
@@ -115,15 +116,18 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     });
     try {
       final list = await widget.inventoryApi.listInventory(widget.storeId);
+      await widget.localPrefs.saveInventoryCache(widget.storeId, list);
       List<CatalogProduct> catalog = const [];
       try {
         final raw = await widget.productsApi.listProducts(
           widget.storeId,
           includeInactive: false,
         );
+        await widget.localPrefs.saveCatalogProductsCache(raw);
         catalog = raw.where((p) => p.active).toList();
       } catch (_) {
-        // Sin catálogo: solo filas de inventario (p. ej. fallo de red secundario).
+        final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
+        catalog = cachedCatalog.where((p) => p.active).toList();
       }
       final inInventory = list.map((l) => l.productId).toSet();
       final synthetic = <InventoryLine>[];
@@ -148,26 +152,80 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       setState(() {
         _all = merged;
         _loading = false;
+        _usingCachedData = false;
       });
       widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
+      final cachedInv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
+      final merged = _mergeInventoryWithCatalog(cachedInv, cachedCatalog);
       if (!mounted) return;
-      final msg = e.userMessageForSupport;
-      setState(() {
-        _all = [];
-        _error = msg;
-        _loading = false;
-      });
-      widget.onLoadedCount?.call(0);
+      if (merged.isNotEmpty) {
+        setState(() {
+          _all = merged;
+          _error = null;
+          _loading = false;
+          _usingCachedData = true;
+        });
+        widget.onLoadedCount?.call(_all.length);
+      } else {
+        final msg = e.userMessageForSupport;
+        setState(() {
+          _all = [];
+          _error = msg;
+          _loading = false;
+        });
+        widget.onLoadedCount?.call(0);
+      }
     } catch (e) {
+      final cachedInv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
+      final merged = _mergeInventoryWithCatalog(cachedInv, cachedCatalog);
       if (!mounted) return;
-      setState(() {
-        _all = [];
-        _error = e.toString();
-        _loading = false;
-      });
-      widget.onLoadedCount?.call(0);
+      if (merged.isNotEmpty) {
+        setState(() {
+          _all = merged;
+          _error = null;
+          _loading = false;
+          _usingCachedData = true;
+        });
+        widget.onLoadedCount?.call(_all.length);
+      } else {
+        setState(() {
+          _all = [];
+          _error = e.toString();
+          _loading = false;
+        });
+        widget.onLoadedCount?.call(0);
+      }
     }
+  }
+
+  List<InventoryLine> _mergeInventoryWithCatalog(
+    List<InventoryLine> list,
+    List<CatalogProduct> catalogRaw,
+  ) {
+    final catalog = catalogRaw.where((p) => p.active).toList();
+    final inInventory = list.map((l) => l.productId).toSet();
+    final synthetic = <InventoryLine>[];
+    for (final p in catalog) {
+      if (!inInventory.contains(p.id)) {
+        synthetic.add(
+          InventoryLine.syntheticZeroStock(
+            productId: p.id,
+            sku: p.sku,
+            name: p.name,
+            barcode: p.barcode,
+          ),
+        );
+      }
+    }
+    return [...list, ...synthetic]
+      ..sort(
+        (a, b) => a.displayName
+            .toLowerCase()
+            .compareTo(b.displayName.toLowerCase()),
+      );
   }
 
   bool _anyLineExactBarcode(String raw) {
@@ -187,6 +245,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           storeId: widget.storeId,
           productsApi: widget.productsApi,
           suppliersApi: widget.suppliersApi,
+          localPrefs: widget.localPrefs,
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
           initialBarcode: code,
@@ -328,6 +387,14 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                 ),
           ),
         ),
+        if (_usingCachedData)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              'Mostrando inventario cacheado (modo offline).',
+              style: TextStyle(color: Colors.orange, fontSize: 12),
+            ),
+          ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _load,

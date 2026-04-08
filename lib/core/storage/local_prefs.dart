@@ -6,6 +6,14 @@ import 'package:uuid/uuid.dart';
 import '../models/held_ticket.dart';
 import '../models/local_supplier.dart';
 import '../models/recent_sale_ticket.dart';
+import '../models/catalog_product.dart';
+import '../models/business_settings.dart';
+import '../models/inventory_line.dart';
+import '../models/latest_exchange_rate.dart';
+import '../models/sales_list_page.dart';
+import '../photos/pending_product_photo_upload_entry.dart';
+import '../pos/sale_checkout_payload.dart';
+import '../catalog/pending_catalog_mutation_entry.dart';
 import '../sync/pending_inventory_adjust_entry.dart';
 import '../sync/pending_purchase_receive_entry.dart';
 import '../sync/pending_sale_entry.dart';
@@ -21,6 +29,15 @@ const _kPendingSaleReturnV1 = 'pending_sale_return_v1';
 const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 const _kRecentSalesV1 = 'recent_sales_v1';
 const _kHeldTicketsV1 = 'held_tickets_v1';
+const _kCatalogProductsCacheV1 = 'catalog_products_cache_v1';
+const _kPendingCatalogMutationsV1 = 'pending_catalog_mutations_v1';
+const _kBusinessSettingsCachePrefix = 'business_settings_cache_v1_';
+const _kPosFxPairCachePrefix = 'pos_fx_pair_cache_v1_';
+const _kInventoryCachePrefix = 'inventory_cache_v1_';
+const _kSalesGeneralCachePrefix = 'sales_general_cache_v1_';
+const _kLatestRateCachePrefix = 'latest_rate_cache_v1_';
+const _kApiBaseUrlOverrideV1 = 'api_base_url_override_v1';
+const _kPendingProductPhotoUploadsV1 = 'pending_product_photo_uploads_v1';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -34,6 +51,56 @@ class LocalPrefs {
       _prefs.setString(_kStoreId, storeId.trim());
 
   Future<void> clearStoreId() => _prefs.remove(_kStoreId);
+
+  Future<String?> getApiBaseUrlOverride() async {
+    final raw = _prefs.getString(_kApiBaseUrlOverrideV1);
+    final trimmed = raw?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed;
+  }
+
+  Future<void> setApiBaseUrlOverride(String url) async {
+    await _prefs.setString(_kApiBaseUrlOverrideV1, url.trim());
+  }
+
+  Future<void> clearApiBaseUrlOverride() async {
+    await _prefs.remove(_kApiBaseUrlOverrideV1);
+  }
+
+  Future<List<PendingProductPhotoUploadEntry>> loadPendingProductPhotoUploads() async {
+    final raw = _prefs.getString(_kPendingProductPhotoUploadsV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <PendingProductPhotoUploadEntry>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final x = PendingProductPhotoUploadEntry.tryFromJson(
+          Map<String, dynamic>.from(e),
+        );
+        if (x != null) out.add(x);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> savePendingProductPhotoUploads(
+    List<PendingProductPhotoUploadEntry> items,
+  ) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kPendingProductPhotoUploadsV1, encoded);
+  }
+
+  Future<void> appendPendingProductPhotoUpload(
+    PendingProductPhotoUploadEntry entry,
+  ) async {
+    final list = await loadPendingProductPhotoUploads();
+    list.add(entry);
+    await savePendingProductPhotoUploads(list);
+  }
 
   /// UUID v4 estable por instalación (sync / ventas).
   Future<String> getOrCreateDeviceId() async {
@@ -236,7 +303,331 @@ class LocalPrefs {
     final b = await countPendingInventoryAdjustsForStore(storeId);
     final c = await countPendingPurchaseReceivesForStore(storeId);
     final d = await countPendingSaleReturnsForStore(storeId);
-    return a + b + c + d;
+    final e = await countPendingCatalogMutationsForStore(storeId);
+    return a + b + c + d + e;
+  }
+
+  Future<List<CatalogProduct>> loadCatalogProductsCache() async {
+    final raw = _prefs.getString(_kCatalogProductsCacheV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <CatalogProduct>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        out.add(CatalogProduct.fromJson(Map<String, dynamic>.from(e)));
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveCatalogProductsCache(List<CatalogProduct> items) async {
+    final encoded = jsonEncode(items
+        .map((e) => {
+              'id': e.id,
+              'sku': e.sku,
+              'name': e.name,
+              'barcode': e.barcode,
+              'description': e.description,
+              'type': e.type,
+              'price': e.price,
+              'cost': e.cost,
+              'currency': e.currency,
+              'active': e.active,
+              'unit': e.unit,
+              'supplierId': e.supplierId,
+              'pricingMode': e.pricingMode,
+              'marginPercentOverride': e.marginPercentOverride,
+              'effectiveMarginPercent': e.effectiveMarginPercent,
+              'marginComputedPercent': e.marginComputedPercent,
+              'suggestedPrice': e.suggestedPrice,
+              'imageUrl': e.imageUrl,
+            })
+        .toList());
+    await _prefs.setString(_kCatalogProductsCacheV1, encoded);
+  }
+
+  Future<List<PendingCatalogMutationEntry>> loadPendingCatalogMutations() async {
+    final raw = _prefs.getString(_kPendingCatalogMutationsV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <PendingCatalogMutationEntry>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final x = PendingCatalogMutationEntry.tryFromJson(
+          Map<String, dynamic>.from(e),
+        );
+        if (x != null) out.add(x);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> savePendingCatalogMutations(
+    List<PendingCatalogMutationEntry> items,
+  ) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kPendingCatalogMutationsV1, encoded);
+  }
+
+  Future<void> appendPendingCatalogMutation(
+    PendingCatalogMutationEntry entry,
+  ) async {
+    final list = await loadPendingCatalogMutations();
+    list.add(entry);
+    await savePendingCatalogMutations(list);
+  }
+
+  Future<int> countPendingCatalogMutationsForStore(String storeId) async {
+    final list = await loadPendingCatalogMutations();
+    return list.where((e) => e.storeId == storeId).length;
+  }
+
+  Future<void> saveBusinessSettingsCache(
+    String storeId,
+    Map<String, dynamic> raw,
+  ) async {
+    await _prefs.setString(
+      '$_kBusinessSettingsCachePrefix${storeId.trim()}',
+      jsonEncode(raw),
+    );
+  }
+
+  Future<BusinessSettings?> loadBusinessSettingsCache(String storeId) async {
+    final raw = _prefs.getString('$_kBusinessSettingsCachePrefix${storeId.trim()}');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return BusinessSettings.fromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> savePosFxPairCache({
+    required String storeId,
+    required String functionalCode,
+    required String documentCode,
+    required SaleFxPair pair,
+  }) async {
+    final key =
+        '$_kPosFxPairCachePrefix${storeId.trim()}_${functionalCode.toUpperCase()}_${documentCode.toUpperCase()}';
+    final encoded = jsonEncode({
+      'inverted': pair.inverted,
+      'rate': {
+        'id': pair.rate.id,
+        'storeId': pair.rate.storeId,
+        'baseCurrencyCode': pair.rate.baseCurrencyCode,
+        'quoteCurrencyCode': pair.rate.quoteCurrencyCode,
+        'rateQuotePerBase': pair.rate.rateQuotePerBase,
+        'effectiveDate': pair.rate.effectiveDate,
+        'source': pair.rate.source,
+        'notes': pair.rate.notes,
+        'createdAt': pair.rate.createdAt,
+        'convention': pair.rate.convention,
+      },
+    });
+    await _prefs.setString(key, encoded);
+  }
+
+  Future<SaleFxPair?> loadPosFxPairCache({
+    required String storeId,
+    required String functionalCode,
+    required String documentCode,
+  }) async {
+    final key =
+        '$_kPosFxPairCachePrefix${storeId.trim()}_${functionalCode.toUpperCase()}_${documentCode.toUpperCase()}';
+    final raw = _prefs.getString(key);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final rateRaw = decoded['rate'];
+      if (rateRaw is! Map) return null;
+      final rate = LatestExchangeRate.fromJson(Map<String, dynamic>.from(rateRaw));
+      final inverted = decoded['inverted'] == true;
+      return SaleFxPair(rate: rate, inverted: inverted);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveInventoryCache(
+    String storeId,
+    List<InventoryLine> items,
+  ) async {
+    final encoded = jsonEncode(
+      items.map((e) {
+        return {
+          'id': e.id,
+          'productId': e.productId,
+          'quantity': e.quantity,
+          'reserved': e.reserved,
+          'minStock': e.minStock,
+          'averageUnitCostFunctional': e.averageUnitCostFunctional,
+          'totalCostFunctional': e.totalCostFunctional,
+          'product': e.product == null
+              ? null
+              : {
+                  'id': e.product!.id,
+                  'sku': e.product!.sku,
+                  'name': e.product!.name,
+                  'barcode': e.product!.barcode,
+                },
+        };
+      }).toList(),
+    );
+    await _prefs.setString('$_kInventoryCachePrefix${storeId.trim()}', encoded);
+  }
+
+  Future<List<InventoryLine>> loadInventoryCache(String storeId) async {
+    final raw = _prefs.getString('$_kInventoryCachePrefix${storeId.trim()}');
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <InventoryLine>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        out.add(InventoryLine.fromJson(Map<String, dynamic>.from(e)));
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveSalesGeneralCache(
+    String storeId, {
+    required List<SalesListItem> rows,
+    SalesListMeta? meta,
+    required String dateFrom,
+    required String dateTo,
+    required bool onlyThisDevice,
+  }) async {
+    final encoded = jsonEncode({
+      'dateFrom': dateFrom,
+      'dateTo': dateTo,
+      'onlyThisDevice': onlyThisDevice,
+      'rows': rows
+          .map((r) => {
+                'id': r.id,
+                'createdAt': r.createdAt,
+                'documentCurrencyCode': r.documentCurrencyCode,
+                'totalDocument': r.totalDocument,
+                'totalFunctional': r.totalFunctional,
+                'deviceId': r.deviceId,
+                'status': r.status,
+              })
+          .toList(),
+      'meta': meta == null
+          ? null
+          : {
+              'timezone': meta.timezone,
+              'dateFrom': meta.dateFrom,
+              'dateTo': meta.dateTo,
+              'rangeInterpretation': meta.rangeInterpretation,
+              'limit': meta.limit,
+              'hasMore': meta.hasMore,
+              'deviceIdFilter': meta.deviceIdFilter,
+            },
+    });
+    await _prefs.setString(
+      '$_kSalesGeneralCachePrefix${storeId.trim()}',
+      encoded,
+    );
+  }
+
+  Future<({
+    List<SalesListItem> rows,
+    SalesListMeta? meta,
+    String? dateFrom,
+    String? dateTo,
+    bool? onlyThisDevice
+  })?> loadSalesGeneralCache(String storeId) async {
+    final raw = _prefs.getString('$_kSalesGeneralCachePrefix${storeId.trim()}');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final map = Map<String, dynamic>.from(decoded);
+      final rowsRaw = map['rows'];
+      final rows = <SalesListItem>[];
+      if (rowsRaw is List) {
+        for (final e in rowsRaw) {
+          if (e is! Map) continue;
+          final it = SalesListItem.tryFromJson(Map<String, dynamic>.from(e));
+          if (it != null) rows.add(it);
+        }
+      }
+      SalesListMeta? meta;
+      final metaRaw = map['meta'];
+      if (metaRaw is Map) {
+        meta = SalesListMeta.tryFromJson(Map<String, dynamic>.from(metaRaw));
+      }
+      return (
+        rows: rows,
+        meta: meta,
+        dateFrom: map['dateFrom']?.toString(),
+        dateTo: map['dateTo']?.toString(),
+        onlyThisDevice: map['onlyThisDevice'] is bool
+            ? map['onlyThisDevice'] as bool
+            : null,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveLatestRateCache({
+    required String storeId,
+    required String baseCurrencyCode,
+    required String quoteCurrencyCode,
+    String? effectiveOn,
+    required LatestExchangeRate rate,
+  }) async {
+    final key =
+        '$_kLatestRateCachePrefix${storeId.trim()}_${baseCurrencyCode.toUpperCase()}_${quoteCurrencyCode.toUpperCase()}_${(effectiveOn ?? '').trim()}';
+    final encoded = jsonEncode({
+      'id': rate.id,
+      'storeId': rate.storeId,
+      'baseCurrencyCode': rate.baseCurrencyCode,
+      'quoteCurrencyCode': rate.quoteCurrencyCode,
+      'rateQuotePerBase': rate.rateQuotePerBase,
+      'effectiveDate': rate.effectiveDate,
+      'source': rate.source,
+      'notes': rate.notes,
+      'createdAt': rate.createdAt,
+      'convention': rate.convention,
+    });
+    await _prefs.setString(key, encoded);
+  }
+
+  Future<LatestExchangeRate?> loadLatestRateCache({
+    required String storeId,
+    required String baseCurrencyCode,
+    required String quoteCurrencyCode,
+    String? effectiveOn,
+  }) async {
+    final key =
+        '$_kLatestRateCachePrefix${storeId.trim()}_${baseCurrencyCode.toUpperCase()}_${quoteCurrencyCode.toUpperCase()}_${(effectiveOn ?? '').trim()}';
+    final raw = _prefs.getString(key);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return LatestExchangeRate.fromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Tickets en espera (ON_HOLD) — **no** van a `pending_sales` ni sync hasta cobrar.

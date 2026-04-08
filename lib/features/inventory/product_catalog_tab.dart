@@ -7,7 +7,11 @@ import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/config/app_config.dart';
+import '../../core/catalog/pending_catalog_mutation_entry.dart';
+import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/storage/local_prefs.dart';
 import '../sale/barcode_scanner_screen.dart';
 import 'product_form_screen.dart';
 
@@ -20,6 +24,7 @@ class ProductCatalogTab extends StatefulWidget {
     required this.suppliersApi,
     required this.storesApi,
     required this.catalogInvalidationBus,
+    required this.localPrefs,
     this.onLoadedCount,
   });
 
@@ -28,6 +33,7 @@ class ProductCatalogTab extends StatefulWidget {
   final SuppliersApi suppliersApi;
   final StoresApi storesApi;
   final CatalogInvalidationBus catalogInvalidationBus;
+  final LocalPrefs localPrefs;
   final ValueChanged<int>? onLoadedCount;
 
   @override
@@ -66,6 +72,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     });
     try {
       final list = await widget.productsApi.listProducts(widget.storeId);
+      await widget.localPrefs.saveCatalogProductsCache(list);
       if (!mounted) return;
       setState(() {
         _all = list;
@@ -73,22 +80,24 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       });
       widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
       final msg = e.userMessageForSupport;
       setState(() {
-        _all = [];
-        _error = msg;
+        _all = cached;
+        _error = cached.isEmpty ? msg : null;
         _loading = false;
       });
-      widget.onLoadedCount?.call(0);
+      widget.onLoadedCount?.call(_all.length);
     } catch (e) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
       setState(() {
-        _all = [];
-        _error = e.toString();
+        _all = cached;
+        _error = cached.isEmpty ? e.toString() : null;
         _loading = false;
       });
-      widget.onLoadedCount?.call(0);
+      widget.onLoadedCount?.call(_all.length);
     }
   }
 
@@ -114,6 +123,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           suppliersApi: widget.suppliersApi,
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
+          localPrefs: widget.localPrefs,
           existing: existing,
           initialBarcode:
               existing == null ? prefilledBarcode : null,
@@ -184,16 +194,62 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     try {
       await widget.productsApi.deactivateProduct(widget.storeId, p.id);
       if (!mounted) return;
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
+      cached.removeWhere((x) => x.id == p.id);
+      await widget.localPrefs.saveCatalogProductsCache(cached);
+      if (!mounted) return;
+      setState(() => _all = cached);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Producto desactivado')),
       );
-      await _load();
+      unawaited(_load());
     } on ApiError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.userMessageForSupport)),
-      );
+      final msg = e.userMessageForSupport.toLowerCase();
+      if (msg.contains('socket') ||
+          msg.contains('connection') ||
+          msg.contains('timeout') ||
+          msg.contains('network')) {
+        final pending = await widget.localPrefs.loadPendingCatalogMutations();
+        pending.add(
+          PendingCatalogMutationEntry(
+            opId: ClientMutationId.newId(),
+            storeId: widget.storeId,
+            type: PendingCatalogMutationEntry.typeDeactivate,
+            createdAtIso: DateTime.now().toUtc().toIso8601String(),
+            productId: p.id,
+          ),
+        );
+        await widget.localPrefs.savePendingCatalogMutations(pending);
+        final cached = await widget.localPrefs.loadCatalogProductsCache();
+        cached.removeWhere((x) => x.id == p.id);
+        await widget.localPrefs.saveCatalogProductsCache(cached);
+        if (!mounted) return;
+        setState(() => _all = cached);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sin conexión: desactivación en cola para sincronizar.'),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.userMessageForSupport)),
+        );
+      }
     }
+  }
+
+  String? _resolvedImageUrl(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.isEmpty) return null;
+    final u = Uri.tryParse(s);
+    if (u != null && u.hasScheme) return s;
+    final base = AppConfig.effectiveApiBaseUrl;
+    if (s.startsWith('/')) {
+      final root = Uri.parse(base).origin;
+      return '$root$s';
+    }
+    return '$base/$s';
   }
 
   @override
@@ -343,6 +399,26 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           );
         }
         return ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 44,
+              height: 44,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: () {
+                final img = _resolvedImageUrl(p.imageUrl);
+                if (img == null) {
+                  return const Icon(Icons.inventory_2_outlined, size: 20);
+                }
+                return Image.network(
+                  img,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      const Icon(Icons.broken_image_outlined, size: 20),
+                );
+              }(),
+            ),
+          ),
           title: Text(p.name),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

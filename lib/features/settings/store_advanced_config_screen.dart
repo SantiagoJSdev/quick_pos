@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/api/api_error.dart';
+import '../../core/api/api_client.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/config/app_config.dart';
 import '../../core/models/business_settings.dart';
+import '../../core/storage/local_prefs.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 
 final _marginDecimal = RegExp(r'^\d+(\.\d+)?$');
@@ -127,10 +129,12 @@ class StoreAdvancedConfigScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.storesApi,
+    required this.localPrefs,
   });
 
   final String storeId;
   final StoresApi storesApi;
+  final LocalPrefs localPrefs;
 
   @override
   State<StoreAdvancedConfigScreen> createState() =>
@@ -140,13 +144,22 @@ class StoreAdvancedConfigScreen extends StatefulWidget {
 class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   late Future<BusinessSettings> _future;
   final _marginCtrl = TextEditingController();
+  final _apiUrlCtrl = TextEditingController();
   bool _marginDirty = false;
   bool _savingMargin = false;
+  bool _savingApiUrl = false;
+  bool _testingApiUrl = false;
+  String? _apiConnectionStatus;
+  bool _apiConnectionOk = false;
+  String _selectedProfile = '';
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    final initial = AppConfig.effectiveApiBaseUrl;
+    _apiUrlCtrl.text = initial;
+    _selectedProfile = _detectProfile(initial);
   }
 
   Future<BusinessSettings> _load() async {
@@ -160,6 +173,7 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   @override
   void dispose() {
     _marginCtrl.dispose();
+    _apiUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -204,6 +218,170 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
       );
     } finally {
       if (mounted) setState(() => _savingMargin = false);
+    }
+  }
+
+  bool _looksLikeApiUrl(String raw) {
+    final normalized = AppConfig.normalizeApiBaseUrl(raw);
+    if (normalized.isEmpty) return false;
+    final uri = Uri.tryParse(normalized);
+    if (uri == null) return false;
+    final s = uri.scheme.toLowerCase();
+    if (s != 'http' && s != 'https') return false;
+    if (uri.host.trim().isEmpty) return false;
+    return true;
+  }
+
+  String _detectProfile(String rawUrl) {
+    final normalized = AppConfig.normalizeApiBaseUrl(rawUrl);
+    final uri = Uri.tryParse(normalized);
+    final host = (uri?.host ?? '').toLowerCase().trim();
+    if (host == 'localhost' || host == '127.0.0.1' || host == '10.0.2.2') {
+      return 'LOCAL';
+    }
+    if (_isPrivateLanHost(host)) return 'LAN';
+    return 'PROD';
+  }
+
+  bool _isPrivateLanHost(String host) {
+    final parts = host.split('.');
+    if (parts.length != 4) return false;
+    final nums = parts.map(int.tryParse).toList();
+    if (nums.any((n) => n == null)) return false;
+    final a = nums[0]!;
+    final b = nums[1]!;
+    if (a == 10) return true;
+    if (a == 172 && b >= 16 && b <= 31) return true;
+    if (a == 192 && b == 168) return true;
+    return false;
+  }
+
+  String _buildProfileUrl(String profile) {
+    final current = Uri.tryParse(AppConfig.normalizeApiBaseUrl(_apiUrlCtrl.text));
+    final pathRaw = (current?.path ?? '/api/v1').trim();
+    final currentPath = pathRaw.isEmpty
+        ? '/api/v1'
+        : (pathRaw.startsWith('/') ? pathRaw : '/$pathRaw');
+    final portSuffix = (current?.hasPort ?? false) ? ':${current!.port}' : ':3002';
+    switch (profile) {
+      case 'LOCAL':
+        return 'http://10.0.2.2$portSuffix$currentPath';
+      case 'LAN':
+        return 'http://192.168.0.190$portSuffix$currentPath';
+      case 'PROD':
+      default:
+        return AppConfig.normalizeApiBaseUrl(AppConfig.apiBaseUrl);
+    }
+  }
+
+  void _applyProfile(String profile) {
+    final next = _buildProfileUrl(profile);
+    setState(() {
+      _selectedProfile = profile;
+      _apiUrlCtrl.text = next;
+      _apiConnectionStatus = null;
+      _apiConnectionOk = false;
+    });
+  }
+
+  Future<void> _saveApiUrl() async {
+    final raw = _apiUrlCtrl.text.trim();
+    if (!_looksLikeApiUrl(raw)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'URL inválida. Usá http(s)://host[:puerto]/api/v1',
+          ),
+        ),
+      );
+      return;
+    }
+    final normalized = AppConfig.normalizeApiBaseUrl(raw);
+    setState(() => _savingApiUrl = true);
+    try {
+      await widget.localPrefs.setApiBaseUrlOverride(normalized);
+      AppConfig.setRuntimeApiBaseUrlOverride(normalized);
+      if (!mounted) return;
+      _apiUrlCtrl.text = normalized;
+      _selectedProfile = _detectProfile(normalized);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('URL de backend guardada. Se usa en próximas llamadas.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _savingApiUrl = false);
+    }
+  }
+
+  Future<void> _testApiUrl() async {
+    final raw = _apiUrlCtrl.text.trim();
+    if (!_looksLikeApiUrl(raw)) {
+      setState(() {
+        _apiConnectionOk = false;
+        _apiConnectionStatus =
+            'URL inválida. Usá http(s)://host[:puerto]/api/v1';
+      });
+      return;
+    }
+    final normalized = AppConfig.normalizeApiBaseUrl(raw);
+    setState(() {
+      _testingApiUrl = true;
+      _apiConnectionStatus = null;
+      _apiConnectionOk = false;
+    });
+    final testClient = ApiClient(baseUrl: normalized);
+    try {
+      final testStoresApi = StoresApi(testClient);
+      await testStoresApi.getBusinessSettings(widget.storeId);
+      if (!mounted) return;
+      setState(() {
+        _apiConnectionOk = true;
+        _apiConnectionStatus = 'Conexión OK. Se pudo leer business-settings.';
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _apiConnectionOk = false;
+        _apiConnectionStatus = e.userMessageForSupport;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _apiConnectionOk = false;
+        _apiConnectionStatus = e.toString();
+      });
+    } finally {
+      testClient.close();
+      if (mounted) setState(() => _testingApiUrl = false);
+    }
+  }
+
+  Future<void> _resetApiUrlDefault() async {
+    setState(() => _savingApiUrl = true);
+    try {
+      await widget.localPrefs.clearApiBaseUrlOverride();
+      AppConfig.setRuntimeApiBaseUrlOverride(null);
+      if (!mounted) return;
+      _apiUrlCtrl.text = AppConfig.effectiveApiBaseUrl;
+      _selectedProfile = _detectProfile(_apiUrlCtrl.text);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('URL restablecida al valor por defecto de compilación.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _savingApiUrl = false);
     }
   }
 
@@ -345,6 +523,120 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                         )
                       : const Text('Guardar margen'),
                 ),
+                const SizedBox(height: 24),
+                Text(
+                  'Conexión backend',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: PosSaleUi.text,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Cambiá la URL base del API para este dispositivo sin recompilar '
+                  '(ej. red LAN para APK en móvil).',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: PosSaleUi.textMuted,
+                        height: 1.35,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _apiUrlCtrl,
+                  onChanged: (v) {
+                    setState(() => _selectedProfile = _detectProfile(v));
+                  },
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Base URL API',
+                    hintText: 'http://192.168.0.190:3002/api/v1',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                  ),
+                  keyboardType: TextInputType.url,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Producción'),
+                      selected: _selectedProfile == 'PROD',
+                      onSelected: (_savingApiUrl || _testingApiUrl)
+                          ? null
+                          : (_) => _applyProfile('PROD'),
+                    ),
+                    ChoiceChip(
+                      label: const Text('LAN'),
+                      selected: _selectedProfile == 'LAN',
+                      onSelected: (_savingApiUrl || _testingApiUrl)
+                          ? null
+                          : (_) => _applyProfile('LAN'),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Local (emulador)'),
+                      selected: _selectedProfile == 'LOCAL',
+                      onSelected: (_savingApiUrl || _testingApiUrl)
+                          ? null
+                          : (_) => _applyProfile('LOCAL'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: (_savingApiUrl || _testingApiUrl)
+                            ? null
+                            : _testApiUrl,
+                        child: _testingApiUrl
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Probar conexión'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: (_savingApiUrl || _testingApiUrl)
+                            ? null
+                            : _saveApiUrl,
+                        child: _savingApiUrl
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Guardar URL'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: (_savingApiUrl || _testingApiUrl)
+                            ? null
+                            : _resetApiUrlDefault,
+                        child: const Text('Usar default'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_apiConnectionStatus != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _apiConnectionStatus!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _apiConnectionOk ? Colors.green : Colors.orange,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 Text(
                   'Tienda: ${s.storeName}',

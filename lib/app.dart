@@ -10,7 +10,9 @@ import 'core/api/sales_api.dart';
 import 'core/api/stores_api.dart';
 import 'core/api/suppliers_api.dart';
 import 'core/api/sync_api.dart';
+import 'core/api/uploads_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
+import 'core/config/app_config.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/quickmarket_shell_theme.dart';
@@ -37,6 +39,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
   late final SaleReturnsApi _saleReturnsApi;
   late final SuppliersApi _suppliersApi;
   late final SyncApi _syncApi;
+  late final UploadsApi _uploadsApi;
   late final CatalogInvalidationBus _catalogInvalidationBus;
   String? _storeId;
   bool _booting = true;
@@ -55,11 +58,14 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _saleReturnsApi = SaleReturnsApi(_apiClient);
     _suppliersApi = SuppliersApi(_apiClient);
     _syncApi = SyncApi(_apiClient);
+    _uploadsApi = UploadsApi(_apiClient);
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
     await widget.localPrefs.getOrCreateDeviceId();
+    final apiOverride = await widget.localPrefs.getApiBaseUrlOverride();
+    AppConfig.setRuntimeApiBaseUrlOverride(apiOverride);
     final id = await widget.localPrefs.getStoreId();
     final trimmed = id?.trim();
     if (!mounted) return;
@@ -116,6 +122,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
                   saleReturnsApi: _saleReturnsApi,
                   suppliersApi: _suppliersApi,
                   syncApi: _syncApi,
+                  uploadsApi: _uploadsApi,
                   catalogInvalidationBus: _catalogInvalidationBus,
                   onChangeStore: _onChangeStore,
                   localPrefs: widget.localPrefs,

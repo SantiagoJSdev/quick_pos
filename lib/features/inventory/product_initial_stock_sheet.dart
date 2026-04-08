@@ -4,8 +4,10 @@ import 'package:uuid/uuid.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/storage/local_prefs.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
 
@@ -15,12 +17,14 @@ class ProductInitialStockBottomSheet extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.productsApi,
+    required this.localPrefs,
     required this.productDraft,
     this.catalogInvalidationBus,
   });
 
   final String storeId;
   final ProductsApi productsApi;
+  final LocalPrefs localPrefs;
   final CatalogProduct productDraft;
   final CatalogInvalidationBus? catalogInvalidationBus;
 
@@ -145,6 +149,55 @@ class _ProductInitialStockBottomSheetState
           _sentCanon = null;
           _initialStockOpId = null;
         });
+        return;
+      }
+      final msg = e.userMessageForSupport.toLowerCase();
+      if (msg.contains('socket') ||
+          msg.contains('connection') ||
+          msg.contains('timeout') ||
+          msg.contains('network')) {
+        final localId = 'local_${ClientMutationId.newId()}';
+        final pending = await widget.localPrefs.loadPendingCatalogMutations();
+        pending.add(
+          PendingCatalogMutationEntry(
+            opId: ClientMutationId.newId(),
+            storeId: widget.storeId,
+            type: PendingCatalogMutationEntry.typeCreateWithStock,
+            createdAtIso: DateTime.now().toUtc().toIso8601String(),
+            localTempId: localId,
+            idempotencyKey: _idempotencyKey,
+            body: body,
+          ),
+        );
+        await widget.localPrefs.savePendingCatalogMutations(pending);
+        final cached = await widget.localPrefs.loadCatalogProductsCache();
+        cached.add(
+          CatalogProduct(
+            id: localId,
+            sku: widget.productDraft.sku.isEmpty ? 'PENDIENTE' : widget.productDraft.sku,
+            name: widget.productDraft.name,
+            barcode: widget.productDraft.barcode,
+            description: widget.productDraft.description,
+            type: widget.productDraft.type,
+            price: widget.productDraft.price,
+            cost: widget.productDraft.cost,
+            currency: widget.productDraft.currency,
+            active: true,
+            unit: widget.productDraft.unit,
+            supplierId: widget.productDraft.supplierId,
+            pricingMode: widget.productDraft.pricingMode,
+            marginPercentOverride: widget.productDraft.marginPercentOverride,
+              imageUrl: widget.productDraft.imageUrl,
+          ),
+        );
+        await widget.localPrefs.saveCatalogProductsCache(cached);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sin conexión: producto+stock guardado en cola.'),
+          ),
+        );
+        Navigator.of(context).pop(true);
         return;
       }
       setState(() => _error = e.userMessageForSupport);

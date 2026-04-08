@@ -37,6 +37,7 @@ class StoreDashboardScreen extends StatefulWidget {
 
 class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
   late Future<BusinessSettings> _future;
+  bool _settingsFromCache = false;
   bool _terminalLoading = true;
   String? _deviceId;
   String? _appVersion;
@@ -44,8 +45,45 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _future = widget.storesApi.getBusinessSettings(widget.storeId);
+    _future = _loadSettingsWithCache();
     unawaited(_loadTerminal());
+  }
+
+  Future<BusinessSettings> _loadSettingsWithCache() async {
+    try {
+      final s = await widget.storesApi.getBusinessSettings(widget.storeId);
+      await widget.localPrefs.saveBusinessSettingsCache(
+        widget.storeId,
+        {
+          'id': s.id,
+          'storeId': s.storeId,
+          'defaultMarginPercent': s.defaultMarginPercent,
+          'functionalCurrency': {
+            'code': s.functionalCurrency.code,
+            'name': s.functionalCurrency.name,
+          },
+          'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
+              ? null
+              : {
+                  'code': s.defaultSaleDocCurrency!.code,
+                  'name': s.defaultSaleDocCurrency!.name,
+                },
+          'store': {
+            'name': s.storeName,
+            'type': s.storeType,
+          },
+        },
+      );
+      _settingsFromCache = false;
+      return s;
+    } catch (_) {
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      if (cached != null) {
+        _settingsFromCache = true;
+        return cached;
+      }
+      rethrow;
+    }
   }
 
   Future<void> _loadTerminal() async {
@@ -60,7 +98,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
 
   Future<void> _refresh() async {
     setState(() {
-      _future = widget.storesApi.getBusinessSettings(widget.storeId);
+      _future = _loadSettingsWithCache();
     });
     await _future;
   }
@@ -76,6 +114,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
         builder: (ctx) => StoreAdvancedConfigScreen(
           storeId: widget.storeId,
           storesApi: widget.storesApi,
+          localPrefs: widget.localPrefs,
         ),
       ),
     );
@@ -320,6 +359,24 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 const SizedBox(height: 16),
                 _terminalInfoCard(context),
                 const SizedBox(height: 16),
+                if (_settingsFromCache) ...[
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: const Text(
+                      'Mostrando configuración cacheada (modo offline).',
+                      style: TextStyle(fontSize: 12, color: Colors.orange),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 _functionalCurrencyCard(context, s),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
@@ -349,6 +406,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                         builder: (ctx) => ExchangeRateTodayScreen(
                           storeId: widget.storeId,
                           exchangeRatesApi: widget.exchangeRatesApi,
+                          localPrefs: widget.localPrefs,
                           initialBase: s.functionalCurrency.code,
                           initialQuote: doc?.code,
                         ),

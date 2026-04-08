@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/storage/local_prefs.dart';
 import 'barcode_scanner_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 
@@ -12,10 +13,12 @@ class ProductPriceLookupScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.productsApi,
+    required this.localPrefs,
   });
 
   final String storeId;
   final ProductsApi productsApi;
+  final LocalPrefs localPrefs;
 
   @override
   State<ProductPriceLookupScreen> createState() =>
@@ -66,23 +69,42 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
         widget.storeId,
         includeInactive: false,
       );
+      await widget.localPrefs.saveCatalogProductsCache(list);
       if (!mounted) return;
       setState(() {
         _all = list.where((p) => p.active).toList();
         _loading = false;
       });
     } on ApiError catch (e) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
-      setState(() {
-        _error = e.userMessageForSupport;
-        _loading = false;
-      });
+      if (cached.isNotEmpty) {
+        setState(() {
+          _all = cached.where((p) => p.active).toList();
+          _error = null;
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _error = e.userMessageForSupport;
+          _loading = false;
+        });
+      }
     } catch (e) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (cached.isNotEmpty) {
+        setState(() {
+          _all = cached.where((p) => p.active).toList();
+          _error = null;
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 

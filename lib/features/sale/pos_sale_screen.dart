@@ -10,6 +10,7 @@ import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/config/app_config.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
@@ -78,6 +79,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
+  final _paymentFunctionalCtrl = TextEditingController();
+  final _paymentDocumentCtrl = TextEditingController();
   List<CatalogProduct> _all = [];
   final List<PosCartLine> _cart = [];
   bool _loading = true;
@@ -95,6 +98,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   int _pendingSyncCount = 0;
   bool _flushBusy = false;
+  String? _pendingSyncStatusText;
+  bool _pendingSyncStatusIsError = false;
 
   String? _cartFeedback;
   bool _cartFeedbackIsError = false;
@@ -108,6 +113,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     super.initState();
     _search.addListener(() => setState(() {}));
     _searchFocus.addListener(() => setState(() {}));
+    _paymentFunctionalCtrl.addListener(() => setState(() {}));
+    _paymentDocumentCtrl.addListener(() => setState(() {}));
     _load();
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (!mounted) return;
@@ -159,6 +166,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
 
     if (!silent && cycle.pullError != null) {
+      setState(() {
+        _pendingSyncStatusText = 'Sync pull: ${cycle.pullError}';
+        _pendingSyncStatusIsError = true;
+      });
       _showCheckoutPanelMessage(
         'Sync pull: ${cycle.pullError}',
         error: true,
@@ -167,15 +178,29 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
     final r = cycle.flush;
     if (r.removedCount > 0) {
+      final msg = r.removedCount == 1
+          ? '1 operación de la cola sincronizada.'
+          : '${r.removedCount} operaciones de la cola sincronizadas.';
+      setState(() {
+        _pendingSyncStatusText = msg;
+        _pendingSyncStatusIsError = false;
+      });
       if (!silent) {
         _showCheckoutPanelMessage(
-          r.removedCount == 1
-              ? '1 operación de la cola sincronizada.'
-              : '${r.removedCount} operaciones de la cola sincronizadas.',
+          msg,
         );
       }
     } else if (!silent && r.apiMessage != null && pendingN > 0) {
-      _showCheckoutPanelMessage(r.apiMessage!, error: true);
+      final suffix = r.hadManualReviewFailure
+          ? '\nRequiere revisión manual (error de validación/negocio).'
+          : (r.hadRetryableFailure
+              ? '\nSe reintentará automáticamente.'
+              : '');
+      setState(() {
+        _pendingSyncStatusText = '${r.apiMessage!}$suffix';
+        _pendingSyncStatusIsError = true;
+      });
+      _showCheckoutPanelMessage('${r.apiMessage!}$suffix', error: true);
     }
   }
 
@@ -223,6 +248,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _search.dispose();
     _searchFocus.dispose();
+    _paymentFunctionalCtrl.dispose();
+    _paymentDocumentCtrl.dispose();
     super.dispose();
   }
 
@@ -291,18 +318,50 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
               'No hay tasa $func → $doc. Registrá la tasa en Inicio o usá moneda documento = funcional.';
         }
       });
+      if (pair != null) {
+        await widget.localPrefs.savePosFxPairCache(
+          storeId: widget.storeId,
+          functionalCode: func,
+          documentCode: doc,
+          pair: pair,
+        );
+      }
     } on ApiError catch (e) {
+      final cached = await widget.localPrefs.loadPosFxPairCache(
+        storeId: widget.storeId,
+        functionalCode: func,
+        documentCode: doc,
+      );
       if (!mounted) return;
-      setState(() {
-        _fxPair = null;
-        _fxLoadError = e.userMessageForSupport;
-      });
+      if (cached != null) {
+        setState(() {
+          _fxPair = cached;
+          _fxLoadError = null;
+        });
+      } else {
+        setState(() {
+          _fxPair = null;
+          _fxLoadError = e.userMessageForSupport;
+        });
+      }
     } catch (e) {
+      final cached = await widget.localPrefs.loadPosFxPairCache(
+        storeId: widget.storeId,
+        functionalCode: func,
+        documentCode: doc,
+      );
       if (!mounted) return;
-      setState(() {
-        _fxPair = null;
-        _fxLoadError = e.toString();
-      });
+      if (cached != null) {
+        setState(() {
+          _fxPair = cached;
+          _fxLoadError = null;
+        });
+      } else {
+        setState(() {
+          _fxPair = null;
+          _fxLoadError = e.toString();
+        });
+      }
     }
     if (rebuildDocumentLinePrices) {
       _rebuildCartDocumentPrices();
@@ -567,28 +626,41 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         widget.storeId,
         includeInactive: false,
       );
+      await widget.localPrefs.saveCatalogProductsCache(list);
       if (!mounted) return;
       setState(() => _all = list);
     } on ApiError catch (e) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
-      setState(() {
-        _all = [];
-        _error = e.userMessageForSupport;
-        _loading = false;
-      });
-      return;
+      if (cached.isEmpty) {
+        setState(() {
+          _all = [];
+          _error = e.userMessageForSupport;
+          _loading = false;
+        });
+        return;
+      }
+      setState(() => _all = cached);
     } catch (e) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
-      setState(() {
-        _all = [];
-        _error = e.toString();
-        _loading = false;
-      });
-      return;
+      if (cached.isEmpty) {
+        setState(() {
+          _all = [];
+          _error = e.toString();
+          _loading = false;
+        });
+        return;
+      }
+      setState(() => _all = cached);
     }
 
     try {
       final settings = await widget.storesApi.getBusinessSettings(widget.storeId);
+      await widget.localPrefs.saveBusinessSettingsCache(
+        widget.storeId,
+        _businessSettingsToCacheMap(settings),
+      );
       if (!mounted) return;
       final doc = settings.defaultSaleDocCurrency?.code ??
           settings.functionalCurrency.code;
@@ -599,27 +671,77 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       });
       await _reloadFxForDocumentCurrency();
     } on ApiError catch (e) {
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (!mounted) return;
-      setState(() {
-        _settings = null;
-        _contextError = e.userMessageForSupport;
-        _fxPair = null;
-        _selectedDocumentCurrency = null;
-      });
+      if (cached != null) {
+        final doc = cached.defaultSaleDocCurrency?.code ??
+            cached.functionalCurrency.code;
+        setState(() {
+          _settings = cached;
+          _contextError = null;
+          _selectedDocumentCurrency = doc;
+        });
+        await _reloadFxForDocumentCurrency();
+      } else {
+        setState(() {
+          _settings = null;
+          _contextError = e.userMessageForSupport;
+          _fxPair = null;
+          _selectedDocumentCurrency = null;
+        });
+      }
     } catch (e) {
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (!mounted) return;
-      setState(() {
-        _settings = null;
-        _contextError = e.toString();
-        _fxPair = null;
-        _selectedDocumentCurrency = null;
-      });
+      if (cached != null) {
+        final doc = cached.defaultSaleDocCurrency?.code ??
+            cached.functionalCurrency.code;
+        setState(() {
+          _settings = cached;
+          _contextError = null;
+          _selectedDocumentCurrency = doc;
+        });
+        await _reloadFxForDocumentCurrency();
+      } else {
+        setState(() {
+          _settings = null;
+          _contextError = e.toString();
+          _fxPair = null;
+          _selectedDocumentCurrency = null;
+        });
+      }
     }
 
     if (!mounted) return;
     setState(() => _loading = false);
     await _refreshPendingCount();
     await _refreshHeldCount();
+  }
+
+  Map<String, dynamic> _businessSettingsToCacheMap(BusinessSettings s) {
+    return {
+      'id': s.id,
+      'storeId': s.storeId,
+      'defaultMarginPercent': s.defaultMarginPercent,
+      'functionalCurrency': {
+        'code': s.functionalCurrency.code,
+        'name': s.functionalCurrency.name,
+      },
+      'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
+          ? null
+          : {
+              'code': s.defaultSaleDocCurrency!.code,
+              'name': s.defaultSaleDocCurrency!.name,
+            },
+      'store': {
+        'name': s.storeName,
+        'type': s.storeType,
+      },
+    };
   }
 
   String? _documentPriceLabel(CatalogProduct p) {
@@ -801,6 +923,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       );
       return;
     }
+    if (!_canChargeWithMixedPayments) {
+      _showCheckoutPanelMessage(_remainingDocumentLabel, error: true);
+      return;
+    }
 
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
     if (!mounted) return;
@@ -814,6 +940,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       fxPair: _fxPair,
       deviceId: _terminal!.deviceId,
       appVersion: _terminal!.appVersion,
+      payments: _buildPaymentsForPayload(
+        functionalCode: func,
+        documentCode: doc,
+      ),
       clientSaleId: _pendingSaleId,
     );
     try {
@@ -844,6 +974,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         _checkoutBusy = false;
         _activeHeldTicketId = null;
       });
+      _clearMixedPaymentInputs();
       if (heldId != null) {
         await widget.localPrefs.deleteHeldTicket(heldId);
         await _refreshHeldCount();
@@ -897,6 +1028,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           _checkoutBusy = false;
           _activeHeldTicketId = null;
         });
+        _clearMixedPaymentInputs();
         if (heldId != null) {
           await widget.localPrefs.deleteHeldTicket(heldId);
           await _refreshHeldCount();
@@ -933,6 +1065,104 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final td = _cartTotalDocument;
     if (td == null) return null;
     return _functionalFromDocument(td);
+  }
+
+  double _parseAmountInput(String raw) {
+    final normalized = raw.trim().replaceAll(',', '.');
+    if (normalized.isEmpty) return 0;
+    return double.tryParse(normalized) ?? 0;
+  }
+
+  String _fmt2(double value) {
+    if (value.isNaN || value.isInfinite) return '0.00';
+    return value.toStringAsFixed(2);
+  }
+
+  double get _paymentFunctionalAmount =>
+      _parseAmountInput(_paymentFunctionalCtrl.text);
+
+  double get _paymentDocumentAmount =>
+      _parseAmountInput(_paymentDocumentCtrl.text);
+
+  double get _cartTotalDocumentAmount =>
+      _parseAmountInput(_cartTotalDocument ?? '0');
+
+  double get _functionalToDocumentRate {
+    final func = _functionalCode;
+    final doc = _selectedDocumentCurrency ?? '';
+    if (func.isEmpty || doc.isEmpty) return 1;
+    return _parseAmountInput(
+      SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
+        functionalCode: func,
+        documentCode: doc,
+        pair: _fxPair,
+      ),
+    );
+  }
+
+  double get _paymentFunctionalInDocument =>
+      _paymentFunctionalAmount * _functionalToDocumentRate;
+
+  double get _paymentTotalInDocument =>
+      _paymentFunctionalInDocument + _paymentDocumentAmount;
+
+  bool get _hasAnyMixedPaymentInput =>
+      _paymentFunctionalAmount > 0 || _paymentDocumentAmount > 0;
+
+  bool get _canChargeWithMixedPayments {
+    if (!_hasAnyMixedPaymentInput) return true;
+    return _paymentTotalInDocument + 0.009 >= _cartTotalDocumentAmount;
+  }
+
+  String get _remainingDocumentLabel {
+    final doc = _selectedDocumentCurrency ?? '';
+    final remaining = _cartTotalDocumentAmount - _paymentTotalInDocument;
+    if (remaining <= 0) {
+      return 'Resta en $doc: ${_fmt2(0)}';
+    }
+    return 'Falta por cobrar en $doc: ${_fmt2(remaining)}';
+  }
+
+  String get _paymentEquivalentLabel {
+    final doc = _selectedDocumentCurrency ?? '';
+    final func = _functionalCode;
+    return 'Equivale a: ${_fmt2(_paymentFunctionalInDocument)} $doc @ '
+        '${_fmt2(_functionalToDocumentRate)} ($func->$doc)';
+  }
+
+  List<Map<String, dynamic>>? _buildPaymentsForPayload({
+    required String functionalCode,
+    required String documentCode,
+  }) {
+    final payments = <Map<String, dynamic>>[];
+    if (_paymentFunctionalAmount > 0) {
+      final fx = <String, dynamic>{
+        'baseCurrencyCode': functionalCode,
+        'quoteCurrencyCode': documentCode,
+        'rateQuotePerBase': _fmt2(_functionalToDocumentRate),
+        'effectiveDate': DateTime.now().toUtc().toIso8601String().substring(0, 10),
+      };
+      payments.add({
+        'method': 'CASH_${functionalCode.toUpperCase()}',
+        'amount': _fmt2(_paymentFunctionalAmount),
+        'currencyCode': functionalCode.toUpperCase(),
+        if (functionalCode.toUpperCase() != documentCode.toUpperCase())
+          'fxSnapshot': fx,
+      });
+    }
+    if (_paymentDocumentAmount > 0) {
+      payments.add({
+        'method': 'CASH_${documentCode.toUpperCase()}',
+        'amount': _fmt2(_paymentDocumentAmount),
+        'currencyCode': documentCode.toUpperCase(),
+      });
+    }
+    return payments.isEmpty ? null : payments;
+  }
+
+  void _clearMixedPaymentInputs() {
+    _paymentFunctionalCtrl.clear();
+    _paymentDocumentCtrl.clear();
   }
 
   String _functionalFromDocument(String documentAmount) {
@@ -1012,6 +1242,26 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return found;
   }
 
+  String? _resolvedImageUrl(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.isEmpty) return null;
+    final u = Uri.tryParse(s);
+    if (u != null && u.hasScheme) return s;
+    final base = AppConfig.effectiveApiBaseUrl;
+    if (s.startsWith('/')) {
+      final root = Uri.parse(base).origin;
+      return '$root$s';
+    }
+    return '$base/$s';
+  }
+
+  String? _cartImageUrlForProductId(String productId) {
+    for (final p in _all) {
+      if (p.id == productId) return _resolvedImageUrl(p.imageUrl);
+    }
+    return null;
+  }
+
   void _bumpLine(int index, double delta) {
     _invalidateCheckoutIdempotency();
     final cur = PosCartQuantity.parse(_cart[index].quantity);
@@ -1054,6 +1304,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _cart.clear();
       _activeHeldTicketId = null;
     });
+    _clearMixedPaymentInputs();
   }
 
   void _simulateRandomScan() {
@@ -1104,19 +1355,39 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
               Material(
                 color: PosSaleUi.primaryDim,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Icon(Icons.cloud_upload_outlined,
                           color: PosSaleUi.primary, size: 20),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          '$_pendingSyncCount en cola (sync/push).',
-                          style: const TextStyle(
-                            color: PosSaleUi.text,
-                            fontSize: 13,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$_pendingSyncCount en cola (sync/push).',
+                              style: const TextStyle(
+                                color: PosSaleUi.text,
+                                fontSize: 13,
+                              ),
+                            ),
+                            if (_pendingSyncStatusText != null) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                _pendingSyncStatusText!,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: _pendingSyncStatusIsError
+                                      ? Colors.orangeAccent
+                                      : PosSaleUi.textMuted,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                       if (_flushBusy)
@@ -1205,6 +1476,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                 'SKU ${p.sku}',
                                 if (bc != null && bc.isNotEmpty) bc,
                               ].join(' · '),
+                              imageUrl: _resolvedImageUrl(p.imageUrl),
                               onTap: () => _addProductToCart(p),
                             );
                           },
@@ -1326,6 +1598,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                           );
                                           return PosSaleCartLineTile(
                                             line: l,
+                                            imageUrl:
+                                                _cartImageUrlForProductId(
+                                              l.productId,
+                                            ),
                                             unitFunctional: uf,
                                             lineTotalFunctional: lf,
                                             functionalCode: func,
@@ -1360,6 +1636,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 cartFeedback: _cartFeedback,
                 cartFeedbackIsError: _cartFeedbackIsError,
                 chargeInlineHint: cartEmpty ? '' : '$tf $func',
+                paymentFunctionalLabel: 'Pago en $func',
+                paymentDocumentLabel: 'Pago en $doc',
+                paymentFunctionalController: _paymentFunctionalCtrl,
+                paymentDocumentController: _paymentDocumentCtrl,
+                paymentFunctionalEquivalentInDocument: _paymentEquivalentLabel,
+                remainingDocumentAmount: _remainingDocumentLabel,
+                canChargeWithPayments: _canChargeWithMixedPayments,
                 onClear: _clearCart,
                 onCharge: _onCheckout,
                 chargeBusy: _checkoutBusy,

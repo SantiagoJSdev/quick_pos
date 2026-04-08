@@ -305,12 +305,14 @@ class PosSaleSearchResultTile extends StatelessWidget {
     required this.product,
     required this.primaryLine,
     required this.secondaryLine,
+    this.imageUrl,
     required this.onTap,
   });
 
   final CatalogProduct product;
   final String primaryLine;
   final String secondaryLine;
+  final String? imageUrl;
   final VoidCallback onTap;
 
   @override
@@ -331,13 +333,37 @@ class PosSaleSearchResultTile extends StatelessWidget {
                   color: PosSaleUi.surface4,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  _posLeadingInitial(product.name),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: PosSaleUi.text,
-                  ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: () {
+                    final img = imageUrl?.trim();
+                    if (img == null || img.isEmpty) {
+                      return Center(
+                        child: Text(
+                          _posLeadingInitial(product.name),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: PosSaleUi.text,
+                          ),
+                        ),
+                      );
+                    }
+                    return Image.network(
+                      img,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Center(
+                        child: Text(
+                          _posLeadingInitial(product.name),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: PosSaleUi.text,
+                          ),
+                        ),
+                      ),
+                    );
+                  }(),
                 ),
               ),
               const SizedBox(width: 12),
@@ -390,6 +416,7 @@ class PosSaleCartLineTile extends StatelessWidget {
   const PosSaleCartLineTile({
     super.key,
     required this.line,
+    this.imageUrl,
     required this.unitFunctional,
     required this.lineTotalFunctional,
     required this.functionalCode,
@@ -401,6 +428,7 @@ class PosSaleCartLineTile extends StatelessWidget {
   });
 
   final PosCartLine line;
+  final String? imageUrl;
   final String unitFunctional;
   final String lineTotalFunctional;
   final String functionalCode;
@@ -435,13 +463,37 @@ class PosSaleCartLineTile extends StatelessWidget {
                 color: PosSaleUi.surface3,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(
-                _posLeadingInitial(line.name),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: PosSaleUi.text,
-                ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: () {
+                  final img = imageUrl?.trim();
+                  if (img == null || img.isEmpty) {
+                    return Center(
+                      child: Text(
+                        _posLeadingInitial(line.name),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: PosSaleUi.text,
+                        ),
+                      ),
+                    );
+                  }
+                  return Image.network(
+                    img,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Center(
+                      child: Text(
+                        _posLeadingInitial(line.name),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: PosSaleUi.text,
+                        ),
+                      ),
+                    ),
+                  );
+                }(),
               ),
             ),
             const SizedBox(width: 12),
@@ -623,6 +675,13 @@ class PosSaleCheckoutPanel extends StatelessWidget {
     this.onPutOnHold,
     this.onOpenHeldTickets,
     this.heldTicketsCount = 0,
+    this.paymentFunctionalLabel,
+    this.paymentDocumentLabel,
+    this.paymentFunctionalController,
+    this.paymentDocumentController,
+    this.paymentFunctionalEquivalentInDocument,
+    this.remainingDocumentAmount,
+    this.canChargeWithPayments = true,
   });
 
   final String functionalCode;
@@ -655,6 +714,13 @@ class PosSaleCheckoutPanel extends StatelessWidget {
 
   /// Cantidad de tickets guardados en este dispositivo / tienda.
   final int heldTicketsCount;
+  final String? paymentFunctionalLabel;
+  final String? paymentDocumentLabel;
+  final TextEditingController? paymentFunctionalController;
+  final TextEditingController? paymentDocumentController;
+  final String? paymentFunctionalEquivalentInDocument;
+  final String? remainingDocumentAmount;
+  final bool canChargeWithPayments;
 
   @override
   Widget build(BuildContext context) {
@@ -810,6 +876,79 @@ class PosSaleCheckoutPanel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            if (paymentFunctionalLabel != null &&
+                paymentDocumentLabel != null &&
+                paymentFunctionalController != null &&
+                paymentDocumentController != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: PosSaleUi.surface3,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: PosSaleUi.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pago mixto',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: PosSaleUi.text,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: paymentFunctionalController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        labelText: paymentFunctionalLabel,
+                        hintText: '0.00',
+                      ),
+                    ),
+                    if (paymentFunctionalEquivalentInDocument != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        paymentFunctionalEquivalentInDocument!,
+                        style: const TextStyle(
+                          color: PosSaleUi.textMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: paymentDocumentController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        labelText: paymentDocumentLabel,
+                        hintText: '0.00',
+                      ),
+                    ),
+                    if (remainingDocumentAmount != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        remainingDocumentAmount!,
+                        style: TextStyle(
+                          color: canChargeWithPayments
+                              ? PosSaleUi.success
+                              : PosSaleUi.error,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             Row(
               children: [
                 IconButton.filledTonal(
@@ -846,7 +985,11 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
-                    onPressed: (cartNotEmpty && !chargeBusy) ? onCharge : null,
+                    onPressed: (cartNotEmpty &&
+                            canChargeWithPayments &&
+                            !chargeBusy)
+                        ? onCharge
+                        : null,
                     style: FilledButton.styleFrom(
                       backgroundColor: PosSaleUi.primary,
                       foregroundColor: Colors.white,

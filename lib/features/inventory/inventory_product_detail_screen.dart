@@ -10,6 +10,7 @@ import '../../core/api/suppliers_api.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/inventory_line.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/config/app_config.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
@@ -152,6 +153,7 @@ class _InventoryProductDetailScreenState
           storeId: widget.storeId,
           productsApi: widget.productsApi,
           suppliersApi: widget.suppliersApi,
+          localPrefs: widget.localPrefs,
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
           existing: product,
@@ -169,6 +171,19 @@ class _InventoryProductDetailScreenState
     final h =
         '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
     return '$d $h';
+  }
+
+  String? _resolvedImageUrl(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.isEmpty) return null;
+    final u = Uri.tryParse(s);
+    if (u != null && u.hasScheme) return s;
+    final base = AppConfig.effectiveApiBaseUrl;
+    if (s.startsWith('/')) {
+      final root = Uri.parse(base).origin;
+      return '$root$s';
+    }
+    return '$base/$s';
   }
 
   @override
@@ -251,6 +266,33 @@ class _InventoryProductDetailScreenState
                         const SizedBox(height: 16),
                       ],
                       if (cat != null) ...[
+                        if (_resolvedImageUrl(cat.imageUrl) != null) ...[
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: Image.network(
+                                    _resolvedImageUrl(cat.imageUrl)!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) =>
+                                        Container(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHighest,
+                                      child: const Center(
+                                        child: Icon(Icons.broken_image_outlined),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         Text(
                           'Precio y margen (catálogo)',
                           style: Theme.of(context).textTheme.titleMedium,

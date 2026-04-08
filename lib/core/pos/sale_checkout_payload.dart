@@ -38,6 +38,7 @@ class SaleCheckoutPayload {
     required SaleFxPair? fxPair,
     required String deviceId,
     required String appVersion,
+    List<Map<String, dynamic>>? payments,
     String? clientSaleId,
     String? fxSource,
   }) {
@@ -80,6 +81,7 @@ class SaleCheckoutPayload {
           )
           .toList(),
       'fxSnapshot': fxSnapshot,
+      if (payments != null && payments.isNotEmpty) 'payments': payments,
     };
   }
 
@@ -102,6 +104,7 @@ class SaleCheckoutPayload {
       'deviceId': restBody['deviceId'],
       'lines': restBody['lines'],
       'fxSnapshot': fx,
+      if (restBody['payments'] is List) 'payments': restBody['payments'],
     };
   }
 

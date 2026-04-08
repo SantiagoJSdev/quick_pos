@@ -13,7 +13,8 @@ class AppConfig {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.0.190:3002/api/v1',
+    defaultValue: 'http://10.0.2.2:3002/api/v1',
+    // defaultValue: 'http://192.168.0.190:3002/api/v1',
   );
   //  defaultValue: 'http://10.0.2.2:3002/api/v1',
 
@@ -25,6 +26,28 @@ class AppConfig {
     'CONFIG_ADMIN_PIN',
     defaultValue: '',
   );
+
+  static String? _runtimeApiBaseUrlOverride;
+
+  static String normalizeApiBaseUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return '';
+    final noTrailingSlash = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+    return noTrailingSlash;
+  }
+
+  static void setRuntimeApiBaseUrlOverride(String? raw) {
+    final normalized = normalizeApiBaseUrl(raw ?? '');
+    _runtimeApiBaseUrlOverride = normalized.isEmpty ? null : normalized;
+  }
+
+  static String get effectiveApiBaseUrl {
+    final runtime = _runtimeApiBaseUrlOverride;
+    if (runtime != null && runtime.isNotEmpty) return runtime;
+    return normalizeApiBaseUrl(apiBaseUrl);
+  }
 
   /// Clave que usa el diálogo de configuración.
   static String get effectiveConfigAdminPin {

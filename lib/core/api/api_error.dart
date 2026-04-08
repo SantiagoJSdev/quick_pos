@@ -24,6 +24,19 @@ class ApiError implements Exception {
     return '$base\n(requestId: $requestId)';
   }
 
+  bool get isClientError => statusCode >= 400 && statusCode < 500;
+  bool get isServerError => statusCode >= 500 && statusCode < 600;
+
+  /// Errores que conviene reintentar automáticamente en sync.
+  bool get isRetryableSyncFailure {
+    return statusCode == 408 || statusCode == 429 || isServerError;
+  }
+
+  /// Errores de negocio/validación que requieren revisión manual.
+  bool get isManualReviewSyncFailure {
+    return isClientError && !isRetryableSyncFailure;
+  }
+
   static ApiError? tryParse(int httpStatus, String body) {
     try {
       final map = jsonDecode(body) as Map<String, dynamic>;
