@@ -26,6 +26,21 @@ import 'supplier_form_screen.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
 
+/// Línea agregada a la recepción (varios productos por documento).
+class _PurchaseLineDraft {
+  _PurchaseLineDraft({
+    required this.lineKey,
+    required this.product,
+    required this.quantity,
+    required this.unitCost,
+  });
+
+  final String lineKey;
+  final CatalogProduct product;
+  final String quantity;
+  final String unitCost;
+}
+
 /// Recepción de mercancía: `POST /purchases` o cola `PURCHASE_RECEIVE` si no hay red.
 class PurchaseReceiveScreen extends StatefulWidget {
   const PurchaseReceiveScreen({
@@ -72,6 +87,9 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   final _productFocus = FocusNode();
   final _supplierField = TextEditingController();
   final _supplierFocus = FocusNode();
+  final _invoiceRef = TextEditingController();
+  final _purchaseNotes = TextEditingController();
+  final List<_PurchaseLineDraft> _lines = [];
   bool _loading = true;
   bool _submitting = false;
   String? _formError;
@@ -96,6 +114,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     _productFocus.dispose();
     _supplierField.dispose();
     _supplierFocus.dispose();
+    _invoiceRef.dispose();
+    _purchaseNotes.dispose();
     super.dispose();
   }
 
@@ -269,9 +289,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _supplierField.text = _selectedSupplier != null
             ? _supplierDisplay(_selectedSupplier!)
             : '';
-        _selectedProduct = active.isNotEmpty ? active.first : null;
-        _productField.text =
-            _selectedProduct != null ? _productDisplay(_selectedProduct!) : '';
+        _selectedProduct = null;
+        _productField.text = '';
       });
       await _reloadFxForDocumentCurrency();
       if (mounted) setState(() => _loading = false);
@@ -297,6 +316,61 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     if (mounted) setState(() {});
   }
 
+  void _addLineToReceipt() {
+    setState(() => _formError = null);
+    if (_productField.text.trim().isEmpty) {
+      setState(() => _formError = 'Elegí un producto para agregar.');
+      return;
+    }
+    final prod = _effectiveProduct();
+    if (prod == null) {
+      setState(() {
+        _formError = 'Producto no identificado: tocá una opción de la lista o '
+            'dejá una sola coincidencia al filtrar.';
+      });
+      return;
+    }
+    setState(() => _selectedProduct = prod);
+    final qty = _quantity.text.trim();
+    final cost = _unitCost.text.trim();
+    if (!_decimalPositive.hasMatch(qty)) {
+      setState(() => _formError = 'Cantidad: número decimal > 0.');
+      return;
+    }
+    final qtyVal = double.tryParse(qty);
+    if (qtyVal == null || qtyVal <= 0) {
+      setState(() => _formError = 'Cantidad debe ser mayor que 0.');
+      return;
+    }
+    if (!_decimalPositive.hasMatch(cost)) {
+      setState(
+        () => _formError = 'Costo unitario (moneda documento): decimal válido.',
+      );
+      return;
+    }
+    final costVal = double.tryParse(cost);
+    if (costVal == null || costVal <= 0) {
+      setState(() => _formError = 'Costo unitario debe ser mayor que 0.');
+      return;
+    }
+    setState(() {
+      _lines.add(
+        _PurchaseLineDraft(
+          lineKey: ClientMutationId.newId(),
+          product: prod,
+          quantity: qty,
+          unitCost: cost,
+        ),
+      );
+      _quantity.clear();
+      _unitCost.clear();
+    });
+  }
+
+  void _removeLineByKey(String lineKey) {
+    setState(() => _lines.removeWhere((e) => e.lineKey == lineKey));
+  }
+
   Future<void> _submit() async {
     setState(() => _formError = null);
     final s = _settings;
@@ -318,46 +392,16 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return;
     }
     setState(() => _selectedSupplier = sup);
-    if (_productField.text.trim().isEmpty) {
-      setState(() => _formError = 'Buscá y elegí un producto.');
+    if (_lines.isEmpty) {
+      setState(() => _formError = 'Agregá al menos una línea (producto, cantidad y costo).');
       return;
     }
-    final prod = _effectiveProduct();
-    if (prod == null) {
-      setState(() {
-        _formError = 'Producto no identificado: tocá una opción de la lista o '
-            'dejá una sola coincidencia al filtrar.';
-      });
-      return;
-    }
-    setState(() => _selectedProduct = prod);
     final func = s.functionalCurrency.code;
     if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
       setState(() {
         _formError =
             _fxLoadError ?? 'Definí la tasa del día antes de registrar la compra.';
       });
-      return;
-    }
-
-    final qty = _quantity.text.trim();
-    final cost = _unitCost.text.trim();
-    if (!_decimalPositive.hasMatch(qty)) {
-      setState(() => _formError = 'Cantidad: número decimal > 0.');
-      return;
-    }
-    final qtyVal = double.tryParse(qty);
-    if (qtyVal == null || qtyVal <= 0) {
-      setState(() => _formError = 'Cantidad debe ser mayor que 0.');
-      return;
-    }
-    if (!_decimalPositive.hasMatch(cost)) {
-      setState(() => _formError = 'Costo unitario (moneda documento): decimal válido.');
-      return;
-    }
-    final costVal = double.tryParse(cost);
-    if (costVal == null || costVal <= 0) {
-      setState(() => _formError = 'Costo unitario debe ser mayor que 0.');
       return;
     }
 
@@ -370,19 +414,25 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       functionalCurrencyCode: func,
       fxPair: _fxPair,
     );
-    final lines = [
-      PurchaseReceivePayload.line(
-        productId: prod.id,
-        quantity: qty,
-        unitCost: cost,
-      ),
-    ];
+    final lines = _lines
+        .map(
+          (e) => PurchaseReceivePayload.line(
+            productId: e.product.id,
+            quantity: e.quantity,
+            unitCost: e.unitCost,
+          ),
+        )
+        .toList();
+    final ref = _invoiceRef.text.trim();
+    final notes = _purchaseNotes.text.trim();
     final restBody = PurchaseReceivePayload.toRestBody(
       supplierId: sup.id,
       documentCurrencyCode: doc,
       lines: lines,
       fxSnapshot: Map<String, dynamic>.from(fxSnap)..remove('fxSource'),
       clientPurchaseId: _purchaseClientId,
+      reference: ref.isEmpty ? null : ref,
+      notes: notes.isEmpty ? null : notes,
     );
 
     setState(() => _submitting = true);
@@ -390,7 +440,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       await widget.purchasesApi.createPurchase(widget.storeId, restBody);
       if (!mounted) return;
       widget.catalogInvalidationBus.invalidateFromLocalMutation(
-        productIds: {prod.id},
+        productIds: _lines.map((e) => e.product.id).toSet(),
       );
       unawaited(
         runSyncCycle(
@@ -434,6 +484,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           fxSnapshot: fxSnap,
           clientPurchaseId: _purchaseClientId,
           fxSource: 'POS_OFFLINE',
+          reference: ref.isEmpty ? null : ref,
+          notes: notes.isEmpty ? null : notes,
         );
         await widget.localPrefs.appendPendingPurchaseReceive(
           PendingPurchaseReceiveEntry(
@@ -445,7 +497,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         );
         if (!mounted) return;
         widget.catalogInvalidationBus.invalidateFromLocalMutation(
-          productIds: {prod.id},
+          productIds: _lines.map((e) => e.product.id).toSet(),
         );
         unawaited(
           runSyncCycle(
@@ -623,12 +675,108 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                         },
                       ),
                     ],
+                    if (_suppliers.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _invoiceRef,
+                        enabled: !_submitting,
+                        decoration: const InputDecoration(
+                          labelText: 'Nº factura o referencia del proveedor',
+                          hintText: 'Opcional',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _purchaseNotes,
+                        enabled: !_submitting,
+                        decoration: const InputDecoration(
+                          labelText: 'Notas del documento',
+                          hintText: 'Opcional',
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 2,
+                      ),
+                    ],
                     const SizedBox(height: 16),
+                    if (_documentCurrencyOptions.length > 1) ...[
+                      Text(
+                        'Moneda del documento',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButton<String>(
+                        value: _selectedDocumentCurrency,
+                        items: _documentCurrencyOptions
+                            .map(
+                              (c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(c),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: _submitting ? null : _onDocumentCurrencyChanged,
+                      ),
+                    ],
+                    if (_functionalCode.isNotEmpty &&
+                        _selectedDocumentCurrency != null &&
+                        _functionalCode.toUpperCase() !=
+                            _selectedDocumentCurrency!.toUpperCase()) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _fxPair == null
+                            ? (_fxLoadError ?? 'Sin tasa de cambio.')
+                            : 'Ref.: 1 $_functionalCode = ${SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(functionalCode: _functionalCode, documentCode: _selectedDocumentCurrency!, pair: _fxPair)} ${_selectedDocumentCurrency!}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text(
+                      'Líneas de la recepción',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Como en el POS: buscá cada producto, cantidad y costo unitario '
+                      '(moneda del documento), tocá «Agregar línea». Un solo registro envía '
+                      'todas las líneas al servidor.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_lines.isNotEmpty) ...[
+                      ..._lines.map(
+                        (L) => Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            title: Text(
+                              L.product.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              '${L.quantity} u. × ${L.unitCost} ${_selectedDocumentCurrency ?? ''}',
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: _submitting
+                                  ? null
+                                  : () => _removeLineByKey(L.lineKey),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     if (_products.isEmpty)
                       const Text('No hay productos activos en catálogo.')
                     else ...[
                       Text(
-                        'Producto',
+                        'Agregar producto',
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       const SizedBox(height: 8),
@@ -659,9 +807,10 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                           return TextField(
                             controller: controller,
                             focusNode: focusNode,
+                            enabled: !_submitting,
                             decoration: const InputDecoration(
                               hintText:
-                                  'Escribí nombre, SKU o código de barras',
+                                  'Nombre, SKU o código de barras',
                               border: OutlineInputBorder(),
                               isDense: true,
                             ),
@@ -708,62 +857,38 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                           );
                         },
                       ),
-                    ],
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _quantity,
-                      decoration: const InputDecoration(
-                        labelText: 'Cantidad',
-                        hintText: 'ej. 24',
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _quantity,
+                        enabled: !_submitting,
+                        decoration: const InputDecoration(
+                          labelText: 'Cantidad',
+                          hintText: 'ej. 24',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                       ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _unitCost,
+                        enabled: !_submitting,
+                        decoration: InputDecoration(
+                          labelText:
+                              'Costo unitario (${_selectedDocumentCurrency ?? "—"})',
+                          hintText: 'ej. 85.00',
+                          border: const OutlineInputBorder(),
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _unitCost,
-                      decoration: InputDecoration(
-                        labelText:
-                            'Costo unitario (${_selectedDocumentCurrency ?? "—"})',
-                        hintText: 'ej. 85.00',
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (_documentCurrencyOptions.length > 1) ...[
-                      Text(
-                        'Moneda del documento',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButton<String>(
-                        value: _selectedDocumentCurrency,
-                        items: _documentCurrencyOptions
-                            .map(
-                              (c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(c),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _onDocumentCurrencyChanged,
-                      ),
-                    ],
-                    if (_functionalCode.isNotEmpty &&
-                        _selectedDocumentCurrency != null &&
-                        _functionalCode.toUpperCase() !=
-                            _selectedDocumentCurrency!.toUpperCase()) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _fxPair == null
-                            ? (_fxLoadError ?? 'Sin tasa de cambio.')
-                            : 'Ref.: 1 $_functionalCode = ${SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(functionalCode: _functionalCode, documentCode: _selectedDocumentCurrency!, pair: _fxPair)} ${_selectedDocumentCurrency!}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _submitting ? null : _addLineToReceipt,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Agregar línea'),
                       ),
                     ],
                     if (_formError != null) ...[
@@ -779,6 +904,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     FilledButton(
                       onPressed: _suppliers.isEmpty ||
                               _products.isEmpty ||
+                              _lines.isEmpty ||
                               _submitting
                           ? null
                           : _submit,
@@ -788,7 +914,11 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                               height: 22,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('Registrar compra'),
+                          : Text(
+                              _lines.isEmpty
+                                  ? 'Registrar compra'
+                                  : 'Registrar compra (${_lines.length} ${_lines.length == 1 ? 'línea' : 'líneas'})',
+                            ),
                     ),
                   ],
                 ),

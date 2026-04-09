@@ -11,6 +11,7 @@ import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/business_settings.dart';
+import '../../core/models/recent_sale_ticket.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/pos/sale_checkout_payload.dart';
@@ -265,10 +266,35 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
   }
 
   Future<void> _loadSale() async {
-    final id = _saleIdController.text.trim();
+    var id = _saleIdController.text.trim();
     if (id.isEmpty) {
-      setState(() => _error = 'Ingresá el UUID de la venta.');
+      setState(() => _error =
+          'Ingresá el número de ticket (historial de hoy) o el UUID de la venta.');
       return;
+    }
+    if (RegExp(r'^\d{1,5}$').hasMatch(id)) {
+      final hit = await widget.localPrefs.findRecentSaleTicketByDisplayCode(
+        widget.storeId,
+        id,
+      );
+      if (!mounted) return;
+      if (hit == null) {
+        setState(() {
+          _error =
+              'No hay ticket con ese número en «Este dispositivo» para hoy. '
+              'Revisá Ventas → Historial o usá el UUID desde la pestaña General.';
+        });
+        return;
+      }
+      if (hit.status == RecentSaleTicket.statusQueued) {
+        setState(() {
+          _error =
+              'Ese ticket aún no llegó al servidor. Esperá la sincronización automática '
+              'y volvé a intentar, o usá el UUID si ya figura en General.';
+        });
+        return;
+      }
+      id = hit.saleId;
     }
     setState(() {
       _loadingSale = true;
@@ -489,8 +515,9 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           Text(
-            'Cargá una venta por UUID, indicá cantidades a devolver por línea. '
-            'Por defecto se hereda el FX de la venta; opcional: tasa al momento (SPOT).',
+            'Podés usar el número corto del ticket (Ventas → Historial → Este dispositivo, '
+            'ventas de hoy) o pegar el UUID del servidor (pestaña General del historial o detalle). '
+            'Luego indicá cantidades a devolver. FX: por defecto se hereda de la venta; opcional SPOT.',
             style: TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 16),
@@ -498,7 +525,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
             controller: _saleIdController,
             style: const TextStyle(color: PosSaleUi.text),
             decoration: const InputDecoration(
-              labelText: 'UUID venta original',
+              labelText: 'Nº ticket (hoy) o UUID de la venta',
               border: OutlineInputBorder(),
             ),
           ),

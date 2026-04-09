@@ -55,7 +55,11 @@ class PurchaseReceivePayload {
     required List<Map<String, dynamic>> lines,
     required Map<String, dynamic> fxSnapshot,
     String? clientPurchaseId,
+    String? reference,
+    String? notes,
   }) {
+    final ref = reference?.trim() ?? '';
+    final n = notes?.trim() ?? '';
     return <String, dynamic>{
       if (clientPurchaseId != null && clientPurchaseId.isNotEmpty)
         'id': clientPurchaseId,
@@ -63,6 +67,8 @@ class PurchaseReceivePayload {
       'documentCurrencyCode': documentCurrencyCode.trim(),
       'lines': lines,
       'fxSnapshot': fxSnapshot,
+      if (ref.isNotEmpty) 'reference': ref,
+      if (n.isNotEmpty) 'notes': n,
     };
   }
 
@@ -75,11 +81,15 @@ class PurchaseReceivePayload {
     required Map<String, dynamic> fxSnapshot,
     String? clientPurchaseId,
     String? fxSource,
+    String? reference,
+    String? notes,
   }) {
     final fx = Map<String, dynamic>.from(fxSnapshot);
     if (fxSource != null && fxSource.isNotEmpty) {
       fx['fxSource'] = fxSource;
     }
+    final ref = reference?.trim() ?? '';
+    final n = notes?.trim() ?? '';
     return <String, dynamic>{
       if (clientPurchaseId != null && clientPurchaseId.isNotEmpty)
         'id': clientPurchaseId,
@@ -88,6 +98,8 @@ class PurchaseReceivePayload {
       'documentCurrencyCode': documentCurrencyCode.trim(),
       'lines': lines,
       'fxSnapshot': fx,
+      if (ref.isNotEmpty) 'reference': ref,
+      if (n.isNotEmpty) 'notes': n,
     };
   }
 

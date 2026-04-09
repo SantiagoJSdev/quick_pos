@@ -148,6 +148,14 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     await prefs.savePendingPurchaseReceives(remainingPurchases);
     await prefs.savePendingSaleReturns(remainingReturns);
 
+    for (final e in saleQueue) {
+      if (!remove.contains(e.opId)) continue;
+      final cid = e.sale['id']?.toString();
+      if (cid != null && cid.isNotEmpty) {
+        await prefs.markRecentSaleTicketSyncedByClientId(cid);
+      }
+    }
+
     return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: remove.toList(),

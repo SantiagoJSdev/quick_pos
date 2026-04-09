@@ -7,6 +7,7 @@ import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
+import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/catalog_product.dart';
@@ -31,6 +32,7 @@ class InventoryStockTab extends StatefulWidget {
     required this.productsApi,
     required this.suppliersApi,
     required this.storesApi,
+    this.uploadsApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
     this.onLoadedCount,
@@ -41,6 +43,7 @@ class InventoryStockTab extends StatefulWidget {
   final ProductsApi productsApi;
   final SuppliersApi suppliersApi;
   final StoresApi storesApi;
+  final UploadsApi? uploadsApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
 
@@ -248,6 +251,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           localPrefs: widget.localPrefs,
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
+          uploadsApi: widget.uploadsApi,
           initialBarcode: code,
         ),
       ),
@@ -506,6 +510,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                   initialLine: line,
                   storeDefaultMarginPercent: _storeDefaultMarginPercent,
                   storesApi: widget.storesApi,
+                  uploadsApi: widget.uploadsApi,
                 ),
               ),
             );

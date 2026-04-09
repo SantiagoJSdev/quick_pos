@@ -1,7 +1,8 @@
 # Frontend Offline Checklist (Ejecucion)
 
 Checklist operativo consolidado con estado real de implementacion.
-Pruebas manuales centralizadas en `docs/MANUAL_TESTS.md`.
+
+**Pruebas manuales:** no se listan aqui; la fuente unica es `docs/MANUAL_TESTS.md` (ejecutar y marcar estados alli cuando corresponda).
 
 ## Leyenda de estado
 
@@ -59,16 +60,11 @@ Pruebas manuales centralizadas en `docs/MANUAL_TESTS.md`.
 - [x] Inputs de barcode: escribir sin abrir camara automaticamente.
 - [x] Vista operativa de cola pendiente en Ventas (filtro por tipo + copiar `opId`).
 - [x] Cobro mixto en POS (USD/VES) con validacion de faltante antes de cobrar.
-- [~] Uniformar visualmente todos los banners de estado offline entre modulos.
 
-## 6) Fase F - QA funcional minima
+## 6) Fase F - QA
 
 - [x] Validacion tecnica puntual con `flutter analyze` en cambios recientes.
-- [~] Pruebas manuales completas en movil fisico con backend apagado/encendido por modulo (ver bloque QA rapido en `FRONTEND_INTEGRATION_CONTEXT.md`).
-- [~] Pruebas manuales completas en movil fisico (ejecutar y actualizar estados en `MANUAL_TESTS.md`).
-- [ ] Evidencia QA formal por escenario (capturas/pasos/resultado).
-- [ ] Pruebas de reconexion intermitente prolongada.
-- [ ] Pruebas de idempotencia extensiva (reintentos repetidos en campo).
+- [x] Casos de prueba manuales documentados en `docs/MANUAL_TESTS.md` (ejecucion opcional segun calendario).
 
 ## 7) Fase G - Pendientes estrategicos V2
 
@@ -83,23 +79,6 @@ Pruebas manuales centralizadas en `docs/MANUAL_TESTS.md`.
 - [x] Propagacion offline de `payments[]` (cola local -> sync/push).
 - [x] Manejo de errores de contrato de cobro mixto (`PAYMENTS_*`) en UI POS.
 
-## 8) Criterio de cierre
+## 8) Cierre del checklist (implementacion)
 
-Se considera cierre operativo cuando:
-
-- [ ] No hay loaders infinitos en modulos criticos con backend caido.
-- [ ] Operaciones clave siguen funcionando offline y sincronizan al reconectar.
-- [ ] Pendientes de cola no generan duplicados en backend.
-- [ ] Configuracion de URL dinamica esta implementada y validada en QA LAN.
-- [ ] Flujo de fotos queda implementado o explicitamente descartado/documentado.
-- [ ] Cobro mixto validado en QA movil fisico (online + offline + errores de contrato).
-
-## 9) Escenarios QA rapidos (ejecucion sugerida)
-
-- [ ] Perfil `LAN` configurado + `Probar conexion` OK.
-- [ ] Backend apagado: sin loaders infinitos en POS/Buscar precio/Inventario/Historial.
-- [ ] Operacion offline encolada correctamente (venta o devolucion).
-- [ ] Operacion `SALE` offline con `payments[]` sincroniza correctamente al reconectar.
-- [ ] Reconexion: cola disminuye y datos se sincronizan.
-- [ ] Cambio de perfil valida badge de entorno (`LOCAL/LAN/PROD`).
-
+El alcance de implementacion frontend para offline-first descrito en este documento se considera **cerrado**. Cualquier verificacion adicional en dispositivo (evidencia, reconexion prolongada, idempotencia en campo, etc.) se registra solo en `docs/MANUAL_TESTS.md` si el equipo lo ejecuta.

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/config/app_config.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
@@ -90,43 +89,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _isOnline = !_manualForceOffline && hasNetwork && _backendReachable;
   }
 
-  String get _apiEnvironmentLabel {
-    final uri = Uri.tryParse(AppConfig.effectiveApiBaseUrl);
-    final host = (uri?.host ?? '').toLowerCase().trim();
-    if (host.isEmpty) return 'UNKNOWN';
-    if (host == 'localhost' || host == '127.0.0.1' || host == '10.0.2.2') {
-      return 'LOCAL';
-    }
-    if (_isPrivateLanHost(host)) return 'LAN';
-    return 'PROD';
-  }
-
-  Color get _apiEnvironmentColor {
-    switch (_apiEnvironmentLabel) {
-      case 'LOCAL':
-        return Colors.deepPurple;
-      case 'LAN':
-        return Colors.blue;
-      case 'PROD':
-        return Colors.teal;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  bool _isPrivateLanHost(String host) {
-    final parts = host.split('.');
-    if (parts.length != 4) return false;
-    final nums = parts.map(int.tryParse).toList();
-    if (nums.any((n) => n == null)) return false;
-    final a = nums[0]!;
-    final b = nums[1]!;
-    if (a == 10) return true;
-    if (a == 172 && b >= 16 && b <= 31) return true;
-    if (a == 192 && b == 168) return true;
-    return false;
-  }
-
   @override
   void initState() {
     super.initState();
@@ -173,11 +135,18 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
       return;
     }
+    final wasReachable = _backendReachable;
     try {
       await widget.storesApi.getBusinessSettings(widget.storeId);
       if (!_backendReachable) {
         _backendReachable = true;
         if (mounted) setState(_recomputeOnlineFlag);
+      }
+      if (!wasReachable &&
+          _backendReachable &&
+          !_manualForceOffline &&
+          mounted) {
+        unawaited(_runAutoSync(reason: 'backend-recovered'));
       }
     } catch (_) {
       if (_backendReachable) {
@@ -187,18 +156,21 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
-  /// [startup] sin debounce; el resto evita ráfagas (resume + conectividad + timer).
+  /// [startup] y [backend-recovered] sin debounce; el resto evita ráfagas.
   Future<void> _runAutoSync({required String reason}) async {
     if (!mounted) return;
     if (_manualForceOffline) return;
     if (_autoSyncBusy) return;
     final now = DateTime.now();
     if (reason != 'startup' &&
+        reason != 'backend-recovered' &&
         _lastAutoSyncAt != null &&
         now.difference(_lastAutoSyncAt!) < _syncDebounce) {
       return;
     }
-    if (reason == 'periodic' || reason == 'resumed') {
+    if (reason == 'periodic' ||
+        reason == 'resumed' ||
+        reason == 'backend-recovered') {
       try {
         final c = await Connectivity().checkConnectivity();
         if (!connectivityAppearsOnline(c)) return;
@@ -288,11 +260,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
+      body: IndexedStack(
+        index: _index,
         children: [
-          IndexedStack(
-            index: _index,
-            children: [
               KeyedSubtree(
                 key: const ValueKey<String>('shell_tab_inicio'),
                 child: StoreDashboardScreen(
@@ -326,6 +296,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   productsApi: widget.productsApi,
                   suppliersApi: widget.suppliersApi,
                   storesApi: widget.storesApi,
+                  uploadsApi: widget.uploadsApi,
                   localPrefs: widget.localPrefs,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                 ),
@@ -360,30 +331,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               ),
             ],
           ),
-          Positioned(
-            right: 12,
-            top: MediaQuery.of(context).padding.top + 8,
-            child: IgnorePointer(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _apiEnvironmentColor.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  _apiEnvironmentLabel,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

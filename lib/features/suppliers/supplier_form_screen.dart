@@ -4,6 +4,9 @@ import '../../core/api/api_error.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/models/supplier.dart';
 
+/// Letras habituales de RIF en Venezuela (personas jurídicas suelen **J**).
+const _kRifPrefixChoices = ['J', 'G', 'V', 'E', 'P', 'C'];
+
 /// Alta `POST /suppliers` o edición `PATCH /suppliers/:id` (incl. reactivar con `active`).
 class SupplierFormScreen extends StatefulWidget {
   const SupplierFormScreen({
@@ -28,8 +31,9 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
   late final TextEditingController _phone;
   late final TextEditingController _email;
   late final TextEditingController _address;
-  late final TextEditingController _taxId;
+  late final TextEditingController _rifNumber;
   late final TextEditingController _notes;
+  String _rifPrefix = 'J';
   bool _active = true;
   bool _saving = false;
   String? _error;
@@ -42,9 +46,22 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
     _phone = TextEditingController(text: e?.phone ?? '');
     _email = TextEditingController(text: e?.email ?? '');
     _address = TextEditingController(text: e?.address ?? '');
-    _taxId = TextEditingController(text: e?.taxId ?? '');
+    _rifNumber = TextEditingController();
     _notes = TextEditingController(text: e?.notes ?? '');
     _active = e?.active ?? true;
+    final tid = e?.taxId?.trim();
+    if (tid != null && tid.isNotEmpty) {
+      final m = RegExp(r'^([A-Za-z])\s*[-]?\s*(.+)$').firstMatch(tid);
+      if (m != null) {
+        final letter = m.group(1)!.toUpperCase();
+        if (_kRifPrefixChoices.contains(letter)) {
+          _rifPrefix = letter;
+        }
+        _rifNumber.text = m.group(2)!.trim();
+      } else {
+        _rifNumber.text = tid;
+      }
+    }
   }
 
   @override
@@ -53,7 +70,7 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
     _phone.dispose();
     _email.dispose();
     _address.dispose();
-    _taxId.dispose();
+    _rifNumber.dispose();
     _notes.dispose();
     super.dispose();
   }
@@ -63,12 +80,19 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
     return t.isEmpty ? null : t;
   }
 
+  /// `taxId` en API: `J-12345678-9` (tipo + guion + cuerpo numérico).
+  String? _composeTaxId() {
+    final n = _rifNumber.text.trim();
+    if (n.isEmpty) return null;
+    return '$_rifPrefix-$n';
+  }
+
   Map<String, dynamic> _createBody() {
     final body = <String, dynamic>{'name': _name.text.trim()};
     final p = _optOrNull(_phone);
     final em = _optOrNull(_email);
     final ad = _optOrNull(_address);
-    final tx = _optOrNull(_taxId);
+    final tx = _composeTaxId();
     final no = _optOrNull(_notes);
     if (p != null) body['phone'] = p;
     if (em != null) body['email'] = em;
@@ -84,7 +108,7 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
       'phone': _optOrNull(_phone),
       'email': _optOrNull(_email),
       'address': _optOrNull(_address),
-      'taxId': _optOrNull(_taxId),
+      'taxId': _composeTaxId(),
       'notes': _optOrNull(_notes),
       'active': _active,
     };
@@ -127,6 +151,7 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final hint = Theme.of(context).colorScheme.onSurfaceVariant;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isEdit ? 'Editar proveedor' : 'Nuevo proveedor'),
@@ -174,13 +199,54 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
             enabled: !_saving,
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _taxId,
-            decoration: const InputDecoration(
-              labelText: 'Identificador fiscal (taxId)',
-              border: OutlineInputBorder(),
-            ),
-            enabled: !_saving,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 100,
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'RIF',
+                    border: OutlineInputBorder(),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _rifPrefix,
+                      isExpanded: true,
+                      items: _kRifPrefixChoices
+                          .map(
+                            (e) => DropdownMenuItem<String>(
+                              value: e,
+                              child: Text(e),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _saving
+                          ? null
+                          : (v) => setState(() => _rifPrefix = v ?? 'J'),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _rifNumber,
+                  enabled: !_saving,
+                  decoration: const InputDecoration(
+                    labelText: 'Número',
+                    hintText: '12345678-9',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.text,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Identificador fiscal (RIF): tipo + guion + número, p. ej. J-12345678-9.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
           ),
           const SizedBox(height: 12),
           TextField(

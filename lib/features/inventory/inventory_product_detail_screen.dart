@@ -10,7 +10,8 @@ import '../../core/api/suppliers_api.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/inventory_line.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/config/app_config.dart';
+import '../../core/api/uploads_api.dart';
+import '../../core/network/product_image_url.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
@@ -30,6 +31,7 @@ class InventoryProductDetailScreen extends StatefulWidget {
     required this.catalogInvalidationBus,
     required this.initialLine,
     this.storeDefaultMarginPercent,
+    this.uploadsApi,
   });
 
   final String storeId;
@@ -40,6 +42,7 @@ class InventoryProductDetailScreen extends StatefulWidget {
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
   final InventoryLine initialLine;
+  final UploadsApi? uploadsApi;
 
   /// Margen % de tienda si el producto usa `USE_STORE_DEFAULT` o aún no cargó la ficha.
   final String? storeDefaultMarginPercent;
@@ -156,6 +159,7 @@ class _InventoryProductDetailScreenState
           localPrefs: widget.localPrefs,
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
+          uploadsApi: widget.uploadsApi,
           existing: product,
         ),
       ),
@@ -173,18 +177,7 @@ class _InventoryProductDetailScreenState
     return '$d $h';
   }
 
-  String? _resolvedImageUrl(String? raw) {
-    final s = raw?.trim() ?? '';
-    if (s.isEmpty) return null;
-    final u = Uri.tryParse(s);
-    if (u != null && u.hasScheme) return s;
-    final base = AppConfig.effectiveApiBaseUrl;
-    if (s.startsWith('/')) {
-      final root = Uri.parse(base).origin;
-      return '$root$s';
-    }
-    return '$base/$s';
-  }
+  String? _resolvedImageUrl(String? raw) => resolveProductImageUrl(raw);
 
   @override
   Widget build(BuildContext context) {

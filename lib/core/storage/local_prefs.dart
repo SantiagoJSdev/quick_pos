@@ -28,6 +28,7 @@ const _kPendingPurchaseReceiveV1 = 'pending_purchase_receive_v1';
 const _kPendingSaleReturnV1 = 'pending_sale_return_v1';
 const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 const _kRecentSalesV1 = 'recent_sales_v1';
+const _kTicketDisplaySeqStateV1 = 'ticket_display_seq_state_v1';
 const _kHeldTicketsV1 = 'held_tickets_v1';
 const _kCatalogProductsCacheV1 = 'catalog_products_cache_v1';
 const _kPendingCatalogMutationsV1 = 'pending_catalog_mutations_v1';
@@ -751,6 +752,96 @@ class LocalPrefs {
   }
 
   static const _kMaxRecentSalesSameDay = 80;
+
+  /// Número de ticket local del día (5 dígitos, reinicia cada día calendario local).
+  Future<String> allocateLocalTicketDisplayCode() async {
+    final now = DateTime.now();
+    final ymd =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    Map<String, dynamic> state = {};
+    final raw = _prefs.getString(_kTicketDisplaySeqStateV1);
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final d = jsonDecode(raw);
+        if (d is Map) state = Map<String, dynamic>.from(d);
+      } catch (_) {}
+    }
+    var seq = 1;
+    if (state['ymd']?.toString() == ymd) {
+      final n = state['next'];
+      if (n is int) {
+        seq = n;
+      } else if (n is num) {
+        seq = n.toInt();
+      }
+    }
+    if (seq < 1 || seq > 99999) seq = 1;
+    final code = seq.toString().padLeft(5, '0');
+    final nextSeq = seq >= 99999 ? 1 : seq + 1;
+    await _prefs.setString(
+      _kTicketDisplaySeqStateV1,
+      jsonEncode({'ymd': ymd, 'next': nextSeq}),
+    );
+    return code;
+  }
+
+  /// Si ya no hay venta en cola local con ese [clientSaleId], el ticket no debería seguir como "pendiente".
+  Future<void> reconcileRecentQueuedTicketsWithPendingSales(String storeId) async {
+    final pending = await loadPendingSales();
+    final pendingSaleIds = <String>{};
+    for (final e in pending) {
+      if (e.storeId != storeId) continue;
+      final id = e.sale['id']?.toString();
+      if (id != null && id.isNotEmpty) pendingSaleIds.add(id);
+    }
+    final list = await loadRecentSaleTickets();
+    var changed = false;
+    final out = <RecentSaleTicket>[];
+    for (final t in list) {
+      if (t.storeId == storeId &&
+          t.status == RecentSaleTicket.statusQueued &&
+          !pendingSaleIds.contains(t.saleId)) {
+        changed = true;
+        out.add(t.copyWith(status: RecentSaleTicket.statusSynced));
+      } else {
+        out.add(t);
+      }
+    }
+    if (changed) await saveRecentSaleTickets(out);
+  }
+
+  /// Tras `sync/push` con ack de una venta offline: dejar de mostrar "pendiente" en historial local.
+  Future<void> markRecentSaleTicketSyncedByClientId(String clientSaleId) async {
+    if (clientSaleId.isEmpty) return;
+    final list = await loadRecentSaleTickets();
+    var changed = false;
+    final out = <RecentSaleTicket>[];
+    for (final t in list) {
+      if (t.saleId == clientSaleId &&
+          t.status == RecentSaleTicket.statusQueued) {
+        changed = true;
+        out.add(t.copyWith(status: RecentSaleTicket.statusSynced));
+      } else {
+        out.add(t);
+      }
+    }
+    if (changed) await saveRecentSaleTickets(out);
+  }
+
+  /// Busca en historial **de hoy** de este dispositivo por número corto (4–5 dígitos con o sin ceros).
+  Future<RecentSaleTicket?> findRecentSaleTicketByDisplayCode(
+    String storeId,
+    String userCode,
+  ) async {
+    final list = await loadRecentSaleTickets();
+    for (final t in list) {
+      if (t.storeId != storeId) continue;
+      if (RecentSaleTicket.displayCodeMatches(t.displayCode, userCode)) {
+        return t;
+      }
+    }
+    return null;
+  }
 
   /// Inserta al frente; solo entradas del **día actual** local; evita duplicar [saleId].
   Future<void> prependRecentSaleTicket(RecentSaleTicket entry) async {

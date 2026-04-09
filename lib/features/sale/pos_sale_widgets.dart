@@ -245,6 +245,13 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
                             hintStyle: TextStyle(color: PosSaleUi.textFaint),
                           ),
                           autocorrect: false,
+                          enableSuggestions: false,
+                          smartDashesType: SmartDashesType.disabled,
+                          smartQuotesType: SmartQuotesType.disabled,
+                          spellCheckConfiguration:
+                              SpellCheckConfiguration.disabled(),
+                          /// En Android suele ocultar la franja de sugerencias encima del teclado.
+                          keyboardType: TextInputType.visiblePassword,
                           textInputAction: TextInputAction.search,
                         ),
                       ),

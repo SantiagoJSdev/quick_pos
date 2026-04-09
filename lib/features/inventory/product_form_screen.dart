@@ -8,6 +8,7 @@ import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
+import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
@@ -41,6 +42,7 @@ class ProductFormScreen extends StatefulWidget {
     required this.localPrefs,
     this.storesApi,
     this.catalogInvalidationBus,
+    this.uploadsApi,
     this.existing,
     this.initialBarcode,
   });
@@ -53,6 +55,7 @@ class ProductFormScreen extends StatefulWidget {
   /// Opcional: margen de tienda para calcular precio de lista vacío al editar (`USE_STORE_DEFAULT`).
   final StoresApi? storesApi;
   final CatalogInvalidationBus? catalogInvalidationBus;
+  final UploadsApi? uploadsApi;
 
   final CatalogProduct? existing;
 
@@ -269,6 +272,41 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     );
   }
 
+  /// Tras guardar la ficha online: sube e asocia la foto de inmediato si hay [uploadsApi].
+  Future<CatalogProduct> _applyPhotoAfterSaveIfNeeded(
+    CatalogProduct baseline,
+    String productId,
+  ) async {
+    final path = _photoLocalPath?.trim();
+    if (path == null || path.isEmpty) return baseline;
+    final pid = productId.trim();
+    if (pid.isEmpty) return baseline;
+    final upApi = widget.uploadsApi;
+    if (upApi != null) {
+      try {
+        final upload =
+            await upApi.uploadProductImage(widget.storeId, filePath: path);
+        final url = upload.url.trim();
+        if (url.isEmpty) {
+          await _queuePhotoUploadIfAny(pid);
+          return baseline;
+        }
+        final withImg = await widget.productsApi.associateProductImage(
+          widget.storeId,
+          pid,
+          imageUrl: url,
+        );
+        if (mounted) setState(() => _photoLocalPath = null);
+        return withImg;
+      } catch (_) {
+        await _queuePhotoUploadIfAny(pid);
+        return baseline;
+      }
+    }
+    await _queuePhotoUploadIfAny(pid);
+    return baseline;
+  }
+
   @override
   void dispose() {
     _sku.dispose();
@@ -444,51 +482,53 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (widget.isEdit) {
       setState(() => _loading = true);
       try {
-        await widget.productsApi.updateProduct(
+        final hadLocalPhotoPick =
+            _photoLocalPath != null && _photoLocalPath!.trim().isNotEmpty;
+        final updated = await widget.productsApi.updateProduct(
           widget.storeId,
           widget.existing!.id,
           product.toPatchBody(),
+        );
+        final forCache = await _applyPhotoAfterSaveIfNeeded(
+          updated,
+          widget.existing!.id,
         );
         if (!mounted) return;
         final cached = await widget.localPrefs.loadCatalogProductsCache();
         final i = cached.indexWhere((x) => x.id == widget.existing!.id);
         if (i >= 0) {
-          cached[i] = CatalogProduct(
-            id: widget.existing!.id,
-            sku: product.sku,
-            name: product.name,
-            barcode: product.barcode,
-            description: product.description,
-            type: product.type,
-            price: product.price,
-            cost: product.cost,
-            currency: product.currency,
-            active: true,
-            unit: product.unit,
-            supplierId: product.supplierId,
-            pricingMode: product.pricingMode,
-            marginPercentOverride: product.marginPercentOverride,
-            effectiveMarginPercent: product.effectiveMarginPercent,
-            marginComputedPercent: product.marginComputedPercent,
-            suggestedPrice: product.suggestedPrice,
-            imageUrl: product.imageUrl,
-          );
+          cached[i] = forCache;
           await widget.localPrefs.saveCatalogProductsCache(cached);
         }
-        await _queuePhotoUploadIfAny(widget.existing!.id);
+        widget.catalogInvalidationBus?.invalidateFromLocalMutation(
+          productIds: {widget.existing!.id},
+        );
         if (!mounted) return;
+        final photoSaved = hadLocalPhotoPick &&
+            (forCache.imageUrl?.trim().isNotEmpty ?? false);
+        final photoQueued = hadLocalPhotoPick && !photoSaved;
         if (priceRaw.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
                 'Producto actualizado · precio de lista calculado: '
-                '$listPriceForModel $_currency',
+                '$listPriceForModel $_currency'
+                '${photoSaved ? ' · foto guardada' : ''}'
+                '${photoQueued ? ' · foto en cola' : ''}',
               ),
             ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Producto actualizado')),
+            SnackBar(
+              content: Text(
+                photoSaved
+                    ? 'Producto actualizado · foto guardada'
+                    : photoQueued
+                        ? 'Producto actualizado · foto en cola'
+                        : 'Producto actualizado',
+              ),
+            ),
           );
         }
         Navigator.of(context).pop(true);
@@ -591,10 +631,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (choice == _NewProductStockChoice.soloProducto) {
       setState(() => _loading = true);
       try {
-        final created = await widget.productsApi.createProduct(
+        var created = await widget.productsApi.createProduct(
           widget.storeId,
           product.toCreateBody(),
         );
+        created = await _applyPhotoAfterSaveIfNeeded(created, created.id);
         if (!mounted) return;
         final cached = await widget.localPrefs.loadCatalogProductsCache();
         cached.removeWhere((x) => x.id == created.id);
@@ -603,14 +644,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         widget.catalogInvalidationBus?.invalidateFromLocalMutation(
           productIds: {created.id},
         );
-        await _queuePhotoUploadIfAny(created.id);
         if (!mounted) return;
+        final photoSaved = created.imageUrl?.trim().isNotEmpty ?? false;
+        final stillQueued =
+            _photoLocalPath != null && _photoLocalPath!.trim().isNotEmpty;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              _photoLocalPath == null
-                  ? 'Producto creado · SKU ${created.sku}'
-                  : 'Producto creado · SKU ${created.sku} · foto en cola',
+              photoSaved
+                  ? 'Producto creado · SKU ${created.sku} · foto guardada'
+                  : stillQueued
+                      ? 'Producto creado · SKU ${created.sku} · foto en cola'
+                      : 'Producto creado · SKU ${created.sku}',
             ),
           ),
         );

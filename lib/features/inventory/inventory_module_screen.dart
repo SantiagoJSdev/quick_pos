@@ -4,6 +4,7 @@ import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
+import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
@@ -20,6 +21,7 @@ class InventoryModuleScreen extends StatefulWidget {
     required this.productsApi,
     required this.suppliersApi,
     required this.storesApi,
+    this.uploadsApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
   });
@@ -29,6 +31,7 @@ class InventoryModuleScreen extends StatefulWidget {
   final ProductsApi productsApi;
   final SuppliersApi suppliersApi;
   final StoresApi storesApi;
+  final UploadsApi? uploadsApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
 
@@ -120,6 +123,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   productsApi: widget.productsApi,
                   suppliersApi: widget.suppliersApi,
                   storesApi: widget.storesApi,
+                  uploadsApi: widget.uploadsApi,
                   localPrefs: widget.localPrefs,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                   onLoadedCount: (n) {
@@ -133,6 +137,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   storesApi: widget.storesApi,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                   localPrefs: widget.localPrefs,
+                  uploadsApi: widget.uploadsApi,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _catalogProductCount = n);
                   },

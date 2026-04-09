@@ -7,6 +7,7 @@ class RecentSaleTicket {
     required this.documentCurrencyCode,
     required this.recordedAtIso,
     required this.status,
+    this.displayCode,
   });
 
   static const statusSynced = 'synced';
@@ -21,6 +22,9 @@ class RecentSaleTicket {
   /// [statusSynced] = respuesta `POST /sales`; [statusQueued] = cola offline.
   final String status;
 
+  /// Número corto del día (ej. `00042`) para copiar / devoluciones; opcional en datos viejos.
+  final String? displayCode;
+
   Map<String, dynamic> toJson() => {
         'storeId': storeId,
         'saleId': saleId,
@@ -28,6 +32,7 @@ class RecentSaleTicket {
         'documentCurrencyCode': documentCurrencyCode,
         'recordedAtIso': recordedAtIso,
         'status': status,
+        if (displayCode != null && displayCode!.isNotEmpty) 'displayCode': displayCode,
       };
 
   static RecentSaleTicket? tryFromJson(Map<String, dynamic> json) {
@@ -37,6 +42,7 @@ class RecentSaleTicket {
     final doc = json['documentCurrencyCode'] as String?;
     final at = json['recordedAtIso'] as String?;
     final st = json['status'] as String?;
+    final dc = json['displayCode'] as String?;
     if (storeId == null ||
         storeId.isEmpty ||
         saleId == null ||
@@ -54,7 +60,32 @@ class RecentSaleTicket {
       documentCurrencyCode: doc,
       recordedAtIso: at,
       status: st,
+      displayCode: (dc != null && dc.isNotEmpty) ? dc : null,
     );
+  }
+
+  RecentSaleTicket copyWith({
+    String? status,
+    String? saleId,
+    String? displayCode,
+  }) {
+    return RecentSaleTicket(
+      storeId: storeId,
+      saleId: saleId ?? this.saleId,
+      totalDocument: totalDocument,
+      documentCurrencyCode: documentCurrencyCode,
+      recordedAtIso: recordedAtIso,
+      status: status ?? this.status,
+      displayCode: displayCode ?? this.displayCode,
+    );
+  }
+
+  /// Compara códigos con o sin ceros a la izquierda (ej. `42` == `00042`).
+  static bool displayCodeMatches(String? stored, String userInput) {
+    final a = int.tryParse((stored ?? '').trim());
+    final b = int.tryParse(userInput.trim());
+    if (a == null || b == null) return false;
+    return a == b;
   }
 
   /// Política app: historial **local** solo conserva ventas del **día calendario actual**

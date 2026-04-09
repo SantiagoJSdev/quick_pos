@@ -6,8 +6,9 @@ import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
+import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/config/app_config.dart';
+import '../../core/network/product_image_url.dart';
 import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
@@ -25,6 +26,7 @@ class ProductCatalogTab extends StatefulWidget {
     required this.storesApi,
     required this.catalogInvalidationBus,
     required this.localPrefs,
+    this.uploadsApi,
     this.onLoadedCount,
   });
 
@@ -34,6 +36,7 @@ class ProductCatalogTab extends StatefulWidget {
   final StoresApi storesApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
+  final UploadsApi? uploadsApi;
   final ValueChanged<int>? onLoadedCount;
 
   @override
@@ -124,6 +127,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
           localPrefs: widget.localPrefs,
+          uploadsApi: widget.uploadsApi,
           existing: existing,
           initialBarcode:
               existing == null ? prefilledBarcode : null,
@@ -239,18 +243,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     }
   }
 
-  String? _resolvedImageUrl(String? raw) {
-    final s = raw?.trim() ?? '';
-    if (s.isEmpty) return null;
-    final u = Uri.tryParse(s);
-    if (u != null && u.hasScheme) return s;
-    final base = AppConfig.effectiveApiBaseUrl;
-    if (s.startsWith('/')) {
-      final root = Uri.parse(base).origin;
-      return '$root$s';
-    }
-    return '$base/$s';
-  }
+  String? _resolvedImageUrl(String? raw) => resolveProductImageUrl(raw);
 
   @override
   Widget build(BuildContext context) {
