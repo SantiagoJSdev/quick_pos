@@ -282,7 +282,7 @@ class _WeightedAddSheet extends StatefulWidget {
 }
 
 class _WeightedAddSheetState extends State<_WeightedAddSheet> {
-  PosWeightInputMode _mode = PosWeightInputMode.grams;
+  PosWeightInputMode _mode = PosWeightInputMode.functionalAmount;
   final _gramsCtrl = TextEditingController();
   final _docCtrl = TextEditingController();
   final _funcCtrl = TextEditingController();
@@ -446,17 +446,17 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
             const SizedBox(height: 12),
             SegmentedButton<PosWeightInputMode>(
               segments: [
-                const ButtonSegment(
-                  value: PosWeightInputMode.grams,
-                  label: Text('Gramos'),
+                ButtonSegment(
+                  value: PosWeightInputMode.functionalAmount,
+                  label: Text(widget.functionalCode),
                 ),
                 ButtonSegment(
                   value: PosWeightInputMode.documentAmount,
                   label: Text(widget.documentCode),
                 ),
-                ButtonSegment(
-                  value: PosWeightInputMode.functionalAmount,
-                  label: Text(widget.functionalCode),
+                const ButtonSegment(
+                  value: PosWeightInputMode.grams,
+                  label: Text('Gramos'),
                 ),
               ],
               selected: {_mode},
