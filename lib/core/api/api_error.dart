@@ -27,6 +27,32 @@ class ApiError implements Exception {
   bool get isClientError => statusCode >= 400 && statusCode < 500;
   bool get isServerError => statusCode >= 500 && statusCode < 600;
 
+  /// Transporte / timeout (p. ej. sin red). Incluye mensajes en español del [ApiClient].
+  bool get isLikelyTransportFailure {
+    if (statusCode == 408) return true;
+    final blob =
+        '${error.toLowerCase()}\n${messages.join('\n').toLowerCase()}';
+    const keys = <String>[
+      'timeout',
+      'agotado',
+      'espera',
+      'connection',
+      'conexión',
+      'conexion',
+      'socket',
+      'network',
+      'host lookup',
+      'failed host',
+      'clientexception',
+      'socketexception',
+      'handshake',
+    ];
+    for (final k in keys) {
+      if (blob.contains(k)) return true;
+    }
+    return false;
+  }
+
   /// Errores que conviene reintentar automáticamente en sync.
   bool get isRetryableSyncFailure {
     return statusCode == 408 || statusCode == 429 || isServerError;

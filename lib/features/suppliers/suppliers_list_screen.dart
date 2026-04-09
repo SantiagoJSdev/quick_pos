@@ -31,6 +31,7 @@ class SuppliersListScreen extends StatefulWidget {
     required this.suppliersApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -42,6 +43,9 @@ class SuppliersListScreen extends StatefulWidget {
   final SuppliersApi suppliersApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
+
+  /// Desde [MainShell]: lista desde caché local sin esperar red.
+  final bool shellOnline;
 
   @override
   State<SuppliersListScreen> createState() => _SuppliersListScreenState();
@@ -62,6 +66,14 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
     super.initState();
     _search.addListener(_onSearchChanged);
     _load(reset: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant SuppliersListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_load(reset: true));
+    }
   }
 
   @override
@@ -91,6 +103,40 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
     } else {
       if (_nextCursor == null || _loadingMore) return;
       setState(() => _loadingMore = true);
+    }
+    if (!widget.shellOnline) {
+      if (!reset) {
+        if (mounted) setState(() => _loadingMore = false);
+        return;
+      }
+      final local = await widget.localPrefs.getLocalSuppliers();
+      if (!mounted) return;
+      final q = _search.text.trim().toLowerCase();
+      var mapped = local
+          .map(
+            (x) => Supplier(
+              id: x.id,
+              storeId: widget.storeId,
+              name: x.name,
+              active: true,
+            ),
+          )
+          .toList();
+      if (q.isNotEmpty) {
+        mapped = mapped
+            .where((s) => s.name.toLowerCase().contains(q))
+            .toList();
+      }
+      setState(() {
+        _list = mapped;
+        _error = local.isEmpty
+            ? 'Sin proveedores en caché. Conectate para sincronizar.'
+            : null;
+        _loading = false;
+        _loadingMore = false;
+        _nextCursor = null;
+      });
+      return;
     }
     try {
       final page = await widget.suppliersApi.listSuppliers(
@@ -202,6 +248,7 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           suppliersApi: widget.suppliersApi,
           syncApi: widget.syncApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
+          shellOnline: widget.shellOnline,
         ),
       ),
     );

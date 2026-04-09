@@ -33,6 +33,7 @@ class SalesModuleScreen extends StatefulWidget {
     required this.syncApi,
     required this.catalogInvalidationBus,
     required this.localPrefs,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -44,6 +45,9 @@ class SalesModuleScreen extends StatefulWidget {
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
+
+  /// Alineado con [MainShell] (`_isOnline`): POS evita colgarse esperando red si es `false`.
+  final bool shellOnline;
 
   @override
   State<SalesModuleScreen> createState() => _SalesModuleScreenState();
@@ -74,6 +78,7 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                       syncApi: widget.syncApi,
                       catalogInvalidationBus: widget.catalogInvalidationBus,
                       localPrefs: widget.localPrefs,
+                      shellOnline: widget.shellOnline,
                       onRequestExit: () => Navigator.of(c).pop(),
                     ),
                   ),

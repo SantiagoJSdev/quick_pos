@@ -13,6 +13,7 @@ import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
+import '../../core/network/network_errors.dart';
 import '../../core/photos/pending_product_photo_upload_entry.dart';
 import '../../core/models/supplier.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
@@ -45,6 +46,7 @@ class ProductFormScreen extends StatefulWidget {
     this.uploadsApi,
     this.existing,
     this.initialBarcode,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -61,6 +63,9 @@ class ProductFormScreen extends StatefulWidget {
 
   /// Solo alta: precarga el campo código de barras (p. ej. escaneo desde Stock/Catálogo).
   final String? initialBarcode;
+
+  /// Desde [MainShell]: evita APIs al abrir el formulario y al confirmar stock inicial.
+  final bool shellOnline;
 
   bool get isEdit => existing != null;
 
@@ -122,16 +127,21 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_prefetchStoreDefaultMargin());
       unawaited(_loadSuppliers());
-      if (widget.storesApi != null) {
-        unawaited(_prefetchStoreDefaultMargin());
-      }
     });
   }
 
   Future<void> _prefetchStoreDefaultMargin() async {
+    final cached = await widget.localPrefs.loadBusinessSettingsCache(
+      widget.storeId,
+    );
+    final m0 = cached?.defaultMarginPercent?.trim();
+    if (m0 != null && m0.isNotEmpty && mounted) {
+      setState(() => _storeDefaultMarginPercent = m0);
+    }
     final api = widget.storesApi;
-    if (api == null) return;
+    if (api == null || !widget.shellOnline) return;
     try {
       final bs = await api.getBusinessSettings(widget.storeId);
       if (!mounted) return;
@@ -147,6 +157,30 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _suppliersLoading = true;
       _suppliersLoadError = null;
     });
+    if (!widget.shellOnline) {
+      final local = await widget.localPrefs.getLocalSuppliers();
+      if (!mounted) return;
+      final mapped = local
+          .map(
+            (x) => Supplier(
+              id: x.id,
+              storeId: widget.storeId,
+              name: x.name,
+              active: true,
+            ),
+          )
+          .toList()
+        ..sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+      setState(() {
+        _suppliers = mapped;
+        _suppliersLoading = false;
+        _suppliersLoadError =
+            mapped.isEmpty ? 'Sin proveedores en caché.' : null;
+      });
+      return;
+    }
     try {
       final all = <Supplier>[];
       String? cursor;
@@ -171,20 +205,33 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _suppliersLoading = false;
       });
     } on ApiError catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _suppliers = [];
-        _suppliersLoading = false;
-        _suppliersLoadError = e.userMessageForSupport;
-      });
+      await _applySuppliersFromLocalCache(e.userMessageForSupport);
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _suppliers = [];
-        _suppliersLoading = false;
-        _suppliersLoadError = e.toString();
-      });
+      await _applySuppliersFromLocalCache(e.toString());
     }
+  }
+
+  Future<void> _applySuppliersFromLocalCache(String remoteErr) async {
+    final local = await widget.localPrefs.getLocalSuppliers();
+    if (!mounted) return;
+    final mapped = local
+        .map(
+          (x) => Supplier(
+            id: x.id,
+            storeId: widget.storeId,
+            name: x.name,
+            active: true,
+          ),
+        )
+        .toList()
+      ..sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    setState(() {
+      _suppliers = mapped;
+      _suppliersLoading = false;
+      _suppliersLoadError = mapped.isEmpty ? remoteErr : null;
+    });
   }
 
   List<DropdownMenuItem<String?>> _supplierDropdownItems() {
@@ -270,6 +317,58 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         createdAtIso: DateTime.now().toUtc().toIso8601String(),
       ),
     );
+  }
+
+  Future<void> _finishSoloProductOfflineQueue(CatalogProduct product) async {
+    final localId = 'local_${ClientMutationId.newId()}';
+    final pending = await widget.localPrefs.loadPendingCatalogMutations();
+    pending.add(
+      PendingCatalogMutationEntry(
+        opId: ClientMutationId.newId(),
+        storeId: widget.storeId,
+        type: PendingCatalogMutationEntry.typeCreate,
+        createdAtIso: DateTime.now().toUtc().toIso8601String(),
+        localTempId: localId,
+        body: product.toCreateBody(),
+      ),
+    );
+    await widget.localPrefs.savePendingCatalogMutations(pending);
+    final cached = await widget.localPrefs.loadCatalogProductsCache();
+    cached.add(
+      CatalogProduct(
+        id: localId,
+        sku: product.sku.isEmpty ? 'PENDIENTE' : product.sku,
+        name: product.name,
+        barcode: product.barcode,
+        description: product.description,
+        type: product.type,
+        price: product.price,
+        cost: product.cost,
+        currency: product.currency,
+        active: true,
+        unit: product.unit,
+        supplierId: product.supplierId,
+        pricingMode: product.pricingMode,
+        marginPercentOverride: product.marginPercentOverride,
+        imageUrl: product.imageUrl,
+      ),
+    );
+    await widget.localPrefs.saveCatalogProductsCache(cached);
+    await _queuePhotoUploadIfAny(localId);
+    widget.catalogInvalidationBus?.invalidateFromLocalMutation(
+      productIds: {localId},
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _photoLocalPath == null
+              ? 'Sin conexión: producto guardado en cola.'
+              : 'Sin conexión: producto y foto guardados en cola.',
+        ),
+      ),
+    );
+    Navigator.of(context).pop(true);
   }
 
   /// Tras guardar la ficha online: sube e asocia la foto de inmediato si hay [uploadsApi].
@@ -381,21 +480,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       }
     }
 
-    if (priceRaw.isEmpty &&
-        _pricingMode == 'USE_STORE_DEFAULT' &&
-        widget.storesApi != null &&
-        (_storeDefaultMarginPercent == null ||
-            _storeDefaultMarginPercent!.trim().isEmpty)) {
-      try {
-        final bs = await widget.storesApi!.getBusinessSettings(widget.storeId);
-        if (!mounted) return;
-        final m = bs.defaultMarginPercent?.trim();
-        setState(() {
-          _storeDefaultMarginPercent = (m == null || m.isEmpty) ? null : m;
-        });
-      } catch (_) {}
-    }
-
     late final String listPriceForModel;
     if (priceRaw.isNotEmpty) {
       listPriceForModel = priceRaw;
@@ -422,25 +506,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     } else {
       final sm = _storeDefaultMarginPercent?.trim();
       if (sm == null || sm.isEmpty) {
-        setState(
-          () => _error =
-              'Precio vacío: en Inicio → Configuración (clave) definí el margen '
-              'de la tienda, elegí margen propio, o escribí el precio de lista.',
+        // Sin margen en caché: lista = costo hasta que el servidor recalcule al sincronizar.
+        listPriceForModel = cost;
+      } else {
+        final sug =
+            PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+          cost,
+          sm,
         );
-        return;
+        listPriceForModel = sug ?? cost;
       }
-      final sug = PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-        cost,
-        sm,
-      );
-      if (sug == null) {
-        setState(
-          () => _error =
-              'No se pudo calcular el precio desde costo y margen de tienda.',
-        );
-        return;
-      }
-      listPriceForModel = sug;
     }
 
     // Alta: SKU vacío → no se envía; backend asigna SKU-000xxx (`BACKEND_PRODUCT_SKU_BARCODE.md`).
@@ -534,11 +609,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         Navigator.of(context).pop(true);
       } on ApiError catch (e) {
         if (!mounted) return;
-        final msg = e.userMessageForSupport.toLowerCase();
-        if (msg.contains('socket') ||
-            msg.contains('connection') ||
-            msg.contains('timeout') ||
-            msg.contains('network')) {
+        if (e.isLikelyTransportFailure) {
           final pending = await widget.localPrefs.loadPendingCatalogMutations();
           pending.add(
             PendingCatalogMutationEntry(
@@ -589,7 +660,59 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         setState(() => _error = e.userMessageForSupport);
       } catch (e) {
         if (!mounted) return;
-        setState(() => _error = e.toString());
+        if (shouldTreatAsOfflineQueueable(e)) {
+          final pending = await widget.localPrefs.loadPendingCatalogMutations();
+          pending.add(
+            PendingCatalogMutationEntry(
+              opId: ClientMutationId.newId(),
+              storeId: widget.storeId,
+              type: PendingCatalogMutationEntry.typeUpdate,
+              createdAtIso: DateTime.now().toUtc().toIso8601String(),
+              productId: widget.existing!.id,
+              body: product.toPatchBody(),
+            ),
+          );
+          await widget.localPrefs.savePendingCatalogMutations(pending);
+          final cached = await widget.localPrefs.loadCatalogProductsCache();
+          final i = cached.indexWhere((x) => x.id == widget.existing!.id);
+          if (i >= 0) {
+            cached[i] = CatalogProduct(
+              id: widget.existing!.id,
+              sku: product.sku,
+              name: product.name,
+              barcode: product.barcode,
+              description: product.description,
+              type: product.type,
+              price: product.price,
+              cost: product.cost,
+              currency: product.currency,
+              active: true,
+              unit: product.unit,
+              supplierId: product.supplierId,
+              pricingMode: product.pricingMode,
+              marginPercentOverride: product.marginPercentOverride,
+              effectiveMarginPercent: product.effectiveMarginPercent,
+              marginComputedPercent: product.marginComputedPercent,
+              suggestedPrice: product.suggestedPrice,
+              imageUrl: product.imageUrl,
+            );
+          }
+          await widget.localPrefs.saveCatalogProductsCache(cached);
+          await _queuePhotoUploadIfAny(widget.existing!.id);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sin conexión: edición guardada en cola.'),
+            ),
+          );
+          Navigator.of(context).pop(true);
+          return;
+        }
+        setState(
+          () => _error = e is ApiError
+              ? e.userMessageForSupport
+              : 'No se pudo guardar. Verificá la conexión.',
+        );
       } finally {
         if (mounted) setState(() => _loading = false);
       }
@@ -629,6 +752,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (choice == null) return;
 
     if (choice == _NewProductStockChoice.soloProducto) {
+      if (!widget.shellOnline) {
+        setState(() => _loading = true);
+        try {
+          await _finishSoloProductOfflineQueue(product);
+        } finally {
+          if (mounted) setState(() => _loading = false);
+        }
+        return;
+      }
       setState(() => _loading = true);
       try {
         var created = await widget.productsApi.createProduct(
@@ -662,63 +794,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         Navigator.of(context).pop(true);
       } on ApiError catch (e) {
         if (!mounted) return;
-        final msg = e.userMessageForSupport.toLowerCase();
-        if (msg.contains('socket') ||
-            msg.contains('connection') ||
-            msg.contains('timeout') ||
-            msg.contains('network')) {
-          final localId = 'local_${ClientMutationId.newId()}';
-          final pending = await widget.localPrefs.loadPendingCatalogMutations();
-          pending.add(
-            PendingCatalogMutationEntry(
-              opId: ClientMutationId.newId(),
-              storeId: widget.storeId,
-              type: PendingCatalogMutationEntry.typeCreate,
-              createdAtIso: DateTime.now().toUtc().toIso8601String(),
-              localTempId: localId,
-              body: product.toCreateBody(),
-            ),
-          );
-          await widget.localPrefs.savePendingCatalogMutations(pending);
-          final cached = await widget.localPrefs.loadCatalogProductsCache();
-          cached.add(
-            CatalogProduct(
-              id: localId,
-              sku: product.sku.isEmpty ? 'PENDIENTE' : product.sku,
-              name: product.name,
-              barcode: product.barcode,
-              description: product.description,
-              type: product.type,
-              price: product.price,
-              cost: product.cost,
-              currency: product.currency,
-              active: true,
-              unit: product.unit,
-              supplierId: product.supplierId,
-              pricingMode: product.pricingMode,
-              marginPercentOverride: product.marginPercentOverride,
-              imageUrl: product.imageUrl,
-            ),
-          );
-          await widget.localPrefs.saveCatalogProductsCache(cached);
-          await _queuePhotoUploadIfAny(localId);
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                _photoLocalPath == null
-                    ? 'Sin conexión: producto guardado en cola.'
-                    : 'Sin conexión: producto y foto guardados en cola.',
-              ),
-            ),
-          );
-          Navigator.of(context).pop(true);
+        if (e.isLikelyTransportFailure) {
+          await _finishSoloProductOfflineQueue(product);
           return;
         }
         setState(() => _error = e.userMessageForSupport);
       } catch (e) {
         if (!mounted) return;
-        setState(() => _error = e.toString());
+        if (shouldTreatAsOfflineQueueable(e)) {
+          await _finishSoloProductOfflineQueue(product);
+          return;
+        }
+        setState(
+          () => _error = e is ApiError
+              ? e.userMessageForSupport
+              : 'No se pudo guardar. Verificá la conexión.',
+        );
       } finally {
         if (mounted) setState(() => _loading = false);
       }
@@ -736,6 +827,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         localPrefs: widget.localPrefs,
         productDraft: product,
         catalogInvalidationBus: widget.catalogInvalidationBus,
+        shellOnline: widget.shellOnline,
       ),
     );
     if (ok == true && _photoLocalPath != null && mounted) {
@@ -919,9 +1011,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   controller: _price,
                   decoration: const InputDecoration(
                     labelText: 'Precio lista',
-                    helperText:
-                        'Vacío: se calcula desde costo y margen (tienda o propio). '
-                        'En precio manual hay que escribirlo.',
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),

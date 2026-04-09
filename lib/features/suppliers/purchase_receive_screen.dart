@@ -54,6 +54,7 @@ class PurchaseReceiveScreen extends StatefulWidget {
     required this.suppliersApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -65,6 +66,9 @@ class PurchaseReceiveScreen extends StatefulWidget {
   final SuppliersApi suppliersApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
+
+  /// Desde [MainShell]: carga proveedores/productos/settings desde caché local.
+  final bool shellOnline;
 
   @override
   State<PurchaseReceiveScreen> createState() => _PurchaseReceiveScreenState();
@@ -104,6 +108,14 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       if (mounted) setState(() => _terminal = t);
     });
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant PurchaseReceiveScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_load());
+    }
   }
 
   @override
@@ -248,6 +260,18 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       _fxLoadError = null;
       return;
     }
+    if (!widget.shellOnline) {
+      final cached = await widget.localPrefs.loadPosFxPairCache(
+        storeId: widget.storeId,
+        functionalCode: func,
+        documentCode: doc,
+      );
+      _fxPair = cached;
+      _fxLoadError = cached == null
+          ? 'Sin tasa en caché. Conectate o cargá la tasa en Inicio.'
+          : null;
+      return;
+    }
     try {
       _fxPair = await _fetchFxPair(func, doc);
       _fxLoadError = _fxPair == null
@@ -259,11 +283,73 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     }
   }
 
+  Future<void> _bootstrapOfflineLoad() async {
+    final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
+    final active = cachedCatalog.where((p) => p.active).toList()
+      ..sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    final local = await widget.localPrefs.getLocalSuppliers();
+    final mapped = local
+        .map(
+          (x) => Supplier(
+            id: x.id,
+            storeId: widget.storeId,
+            name: x.name,
+            active: true,
+          ),
+        )
+        .toList()
+      ..sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    final cached = await widget.localPrefs.loadBusinessSettingsCache(
+      widget.storeId,
+    );
+    if (!mounted) return;
+    if (cached != null) {
+      setState(() {
+        _suppliers = mapped;
+        _settings = cached;
+        _products = active;
+        _contextError = null;
+        final opts = _documentCurrencyOptions;
+        _selectedDocumentCurrency =
+            opts.isNotEmpty ? opts.first : cached.functionalCurrency.code;
+        _selectedSupplier = mapped.isNotEmpty ? mapped.first : null;
+        _supplierField.text = _selectedSupplier != null
+            ? _supplierDisplay(_selectedSupplier!)
+            : '';
+        _selectedProduct = null;
+        _productField.text = '';
+      });
+      await _reloadFxForDocumentCurrency();
+    } else {
+      setState(() {
+        _products = active;
+        _suppliers = mapped;
+        _settings = null;
+        _contextError =
+            'Sin configuración en caché. Conectate para cargar la tienda.';
+        _selectedDocumentCurrency = null;
+        _selectedSupplier = null;
+        _supplierField.text = '';
+        _selectedProduct = null;
+        _productField.text = '';
+      });
+    }
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _contextError = null;
     });
+    if (!widget.shellOnline) {
+      await _bootstrapOfflineLoad();
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
     try {
       final settings =
           await widget.storesApi.getBusinessSettings(widget.storeId);
@@ -362,6 +448,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           unitCost: cost,
         ),
       );
+      _selectedProduct = null;
+      _productField.clear();
       _quantity.clear();
       _unitCost.clear();
     });

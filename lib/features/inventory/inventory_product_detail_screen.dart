@@ -32,6 +32,7 @@ class InventoryProductDetailScreen extends StatefulWidget {
     required this.initialLine,
     this.storeDefaultMarginPercent,
     this.uploadsApi,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -46,6 +47,9 @@ class InventoryProductDetailScreen extends StatefulWidget {
 
   /// Margen % de tienda si el producto usa `USE_STORE_DEFAULT` o aún no cargó la ficha.
   final String? storeDefaultMarginPercent;
+
+  /// Desde [MainShell]: sin llamadas HTTP al abrir el detalle.
+  final bool shellOnline;
 
   String get _productId {
     final fromLine = initialLine.productId.trim();
@@ -74,6 +78,14 @@ class _InventoryProductDetailScreenState
     _load();
   }
 
+  @override
+  void didUpdateWidget(covariant InventoryProductDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_load());
+    }
+  }
+
   void _onCatalogInvalidated() {
     if (mounted) unawaited(_load());
   }
@@ -98,6 +110,25 @@ class _InventoryProductDetailScreenState
       _loading = true;
       _error = null;
     });
+    if (!widget.shellOnline) {
+      final cachedProducts = await widget.localPrefs.loadCatalogProductsCache();
+      CatalogProduct? cp;
+      for (final p in cachedProducts) {
+        if (p.id == pid) {
+          cp = p;
+          break;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _catalogProduct = cp;
+        _line = widget.initialLine;
+        _movements = const [];
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
     try {
       final detailFuture = widget.inventoryApi.getInventoryLine(
         widget.storeId,
@@ -160,6 +191,7 @@ class _InventoryProductDetailScreenState
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
           uploadsApi: widget.uploadsApi,
+          shellOnline: widget.shellOnline,
           existing: product,
         ),
       ),

@@ -24,6 +24,7 @@ class InventoryModuleScreen extends StatefulWidget {
     this.uploadsApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -34,6 +35,9 @@ class InventoryModuleScreen extends StatefulWidget {
   final UploadsApi? uploadsApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
+
+  /// Desde [MainShell]: en offline se usa caché sin esperar timeouts de red.
+  final bool shellOnline;
 
   @override
   State<InventoryModuleScreen> createState() => _InventoryModuleScreenState();
@@ -126,6 +130,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   uploadsApi: widget.uploadsApi,
                   localPrefs: widget.localPrefs,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
+                  shellOnline: widget.shellOnline,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _stockLineCount = n);
                   },
@@ -138,6 +143,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                   localPrefs: widget.localPrefs,
                   uploadsApi: widget.uploadsApi,
+                  shellOnline: widget.shellOnline,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _catalogProductCount = n);
                   },

@@ -25,6 +25,9 @@ class PosSaleUi {
   static const Color primary = AppTheme.primaryOrange;
   static const Color primaryDim = Color(0x26FF6D00);
 
+  /// Fondo del desplegable de sugerencias de búsqueda (tinte naranja suave sobre tema oscuro).
+  static const Color searchSuggestionsSurface = Color(0xFF2E2618);
+
   static TextStyle titleCart(BuildContext context) => const TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w600,

@@ -299,6 +299,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   uploadsApi: widget.uploadsApi,
                   localPrefs: widget.localPrefs,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
+                  shellOnline: _isOnline,
                 ),
               ),
               KeyedSubtree(
@@ -313,6 +314,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   syncApi: widget.syncApi,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                   localPrefs: widget.localPrefs,
+                  shellOnline: _isOnline,
                 ),
               ),
               KeyedSubtree(
@@ -327,6 +329,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   suppliersApi: widget.suppliersApi,
                   syncApi: widget.syncApi,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
+                  shellOnline: _isOnline,
                 ),
               ),
             ],

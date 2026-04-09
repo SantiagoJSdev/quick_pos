@@ -27,6 +27,7 @@ class ProductCatalogTab extends StatefulWidget {
     required this.catalogInvalidationBus,
     required this.localPrefs,
     this.uploadsApi,
+    this.shellOnline = true,
     this.onLoadedCount,
   });
 
@@ -37,6 +38,7 @@ class ProductCatalogTab extends StatefulWidget {
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
   final UploadsApi? uploadsApi;
+  final bool shellOnline;
   final ValueChanged<int>? onLoadedCount;
 
   @override
@@ -58,6 +60,14 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
   }
 
   @override
+  void didUpdateWidget(covariant ProductCatalogTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_load());
+    }
+  }
+
+  @override
   void dispose() {
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _searchController.dispose();
@@ -73,6 +83,19 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       _loading = true;
       _error = null;
     });
+    if (!widget.shellOnline) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
+      if (!mounted) return;
+      setState(() {
+        _all = cached;
+        _error = cached.isEmpty
+            ? 'Sin catálogo en caché. Conectate para sincronizar.'
+            : null;
+        _loading = false;
+      });
+      widget.onLoadedCount?.call(_all.length);
+      return;
+    }
     try {
       final list = await widget.productsApi.listProducts(widget.storeId);
       await widget.localPrefs.saveCatalogProductsCache(list);
@@ -97,7 +120,9 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       if (!mounted) return;
       setState(() {
         _all = cached;
-        _error = cached.isEmpty ? e.toString() : null;
+        _error = cached.isEmpty
+            ? 'No se pudo cargar el catálogo. Verificá la conexión.'
+            : null;
         _loading = false;
       });
       widget.onLoadedCount?.call(_all.length);
@@ -128,6 +153,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           catalogInvalidationBus: widget.catalogInvalidationBus,
           localPrefs: widget.localPrefs,
           uploadsApi: widget.uploadsApi,
+          shellOnline: widget.shellOnline,
           existing: existing,
           initialBarcode:
               existing == null ? prefilledBarcode : null,
@@ -209,11 +235,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       unawaited(_load());
     } on ApiError catch (e) {
       if (!mounted) return;
-      final msg = e.userMessageForSupport.toLowerCase();
-      if (msg.contains('socket') ||
-          msg.contains('connection') ||
-          msg.contains('timeout') ||
-          msg.contains('network')) {
+      if (e.isLikelyTransportFailure) {
         final pending = await widget.localPrefs.loadPendingCatalogMutations();
         pending.add(
           PendingCatalogMutationEntry(

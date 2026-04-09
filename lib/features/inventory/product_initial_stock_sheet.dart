@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/network/network_errors.dart';
 import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
@@ -20,6 +21,7 @@ class ProductInitialStockBottomSheet extends StatefulWidget {
     required this.localPrefs,
     required this.productDraft,
     this.catalogInvalidationBus,
+    this.shellOnline = true,
   });
 
   final String storeId;
@@ -27,6 +29,9 @@ class ProductInitialStockBottomSheet extends StatefulWidget {
   final LocalPrefs localPrefs;
   final CatalogProduct productDraft;
   final CatalogInvalidationBus? catalogInvalidationBus;
+
+  /// Si es `false`, encola sin esperar timeout de red (mismo flujo que error de transporte).
+  final bool shellOnline;
 
   @override
   State<ProductInitialStockBottomSheet> createState() =>
@@ -121,6 +126,16 @@ class _ProductInitialStockBottomSheetState
 
     _sentCanon = canon;
 
+    if (!widget.shellOnline) {
+      setState(() => _loading = true);
+      try {
+        await _persistOfflineCreateWithStock(body);
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+      return;
+    }
+
     setState(() => _loading = true);
     try {
       final res = await widget.productsApi.createProductWithStock(
@@ -151,62 +166,73 @@ class _ProductInitialStockBottomSheetState
         });
         return;
       }
-      final msg = e.userMessageForSupport.toLowerCase();
-      if (msg.contains('socket') ||
-          msg.contains('connection') ||
-          msg.contains('timeout') ||
-          msg.contains('network')) {
-        final localId = 'local_${ClientMutationId.newId()}';
-        final pending = await widget.localPrefs.loadPendingCatalogMutations();
-        pending.add(
-          PendingCatalogMutationEntry(
-            opId: ClientMutationId.newId(),
-            storeId: widget.storeId,
-            type: PendingCatalogMutationEntry.typeCreateWithStock,
-            createdAtIso: DateTime.now().toUtc().toIso8601String(),
-            localTempId: localId,
-            idempotencyKey: _idempotencyKey,
-            body: body,
-          ),
-        );
-        await widget.localPrefs.savePendingCatalogMutations(pending);
-        final cached = await widget.localPrefs.loadCatalogProductsCache();
-        cached.add(
-          CatalogProduct(
-            id: localId,
-            sku: widget.productDraft.sku.isEmpty ? 'PENDIENTE' : widget.productDraft.sku,
-            name: widget.productDraft.name,
-            barcode: widget.productDraft.barcode,
-            description: widget.productDraft.description,
-            type: widget.productDraft.type,
-            price: widget.productDraft.price,
-            cost: widget.productDraft.cost,
-            currency: widget.productDraft.currency,
-            active: true,
-            unit: widget.productDraft.unit,
-            supplierId: widget.productDraft.supplierId,
-            pricingMode: widget.productDraft.pricingMode,
-            marginPercentOverride: widget.productDraft.marginPercentOverride,
-              imageUrl: widget.productDraft.imageUrl,
-          ),
-        );
-        await widget.localPrefs.saveCatalogProductsCache(cached);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sin conexión: producto+stock guardado en cola.'),
-          ),
-        );
-        Navigator.of(context).pop(true);
+      if (e.isLikelyTransportFailure) {
+        await _persistOfflineCreateWithStock(body);
         return;
       }
       setState(() => _error = e.userMessageForSupport);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      if (shouldTreatAsOfflineQueueable(e)) {
+        await _persistOfflineCreateWithStock(body);
+        return;
+      }
+      setState(
+        () => _error = e is ApiError
+            ? e.userMessageForSupport
+            : 'No se pudo guardar. Verificá la conexión e intentá de nuevo.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _persistOfflineCreateWithStock(Map<String, dynamic> body) async {
+    final localId = 'local_${ClientMutationId.newId()}';
+    final pending = await widget.localPrefs.loadPendingCatalogMutations();
+    pending.add(
+      PendingCatalogMutationEntry(
+        opId: ClientMutationId.newId(),
+        storeId: widget.storeId,
+        type: PendingCatalogMutationEntry.typeCreateWithStock,
+        createdAtIso: DateTime.now().toUtc().toIso8601String(),
+        localTempId: localId,
+        idempotencyKey: _idempotencyKey,
+        body: body,
+      ),
+    );
+    await widget.localPrefs.savePendingCatalogMutations(pending);
+    final cached = await widget.localPrefs.loadCatalogProductsCache();
+    cached.add(
+      CatalogProduct(
+        id: localId,
+        sku: widget.productDraft.sku.isEmpty ? 'PENDIENTE' : widget.productDraft.sku,
+        name: widget.productDraft.name,
+        barcode: widget.productDraft.barcode,
+        description: widget.productDraft.description,
+        type: widget.productDraft.type,
+        price: widget.productDraft.price,
+        cost: widget.productDraft.cost,
+        currency: widget.productDraft.currency,
+        active: true,
+        unit: widget.productDraft.unit,
+        supplierId: widget.productDraft.supplierId,
+        pricingMode: widget.productDraft.pricingMode,
+        marginPercentOverride: widget.productDraft.marginPercentOverride,
+        imageUrl: widget.productDraft.imageUrl,
+      ),
+    );
+    await widget.localPrefs.saveCatalogProductsCache(cached);
+    widget.catalogInvalidationBus?.invalidateFromLocalMutation(
+      productIds: {localId},
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Sin conexión: producto+stock guardado en cola.'),
+      ),
+    );
+    Navigator.of(context).pop(true);
   }
 
   @override

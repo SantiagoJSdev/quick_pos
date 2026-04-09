@@ -35,6 +35,7 @@ class InventoryStockTab extends StatefulWidget {
     this.uploadsApi,
     required this.localPrefs,
     required this.catalogInvalidationBus,
+    this.shellOnline = true,
     this.onLoadedCount,
   });
 
@@ -46,6 +47,9 @@ class InventoryStockTab extends StatefulWidget {
   final UploadsApi? uploadsApi;
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
+
+  /// Desde [MainShell]: evita llamadas HTTP que bloquean hasta timeout.
+  final bool shellOnline;
 
   /// Total de líneas tras cada carga (para contador en el módulo).
   final ValueChanged<int>? onLoadedCount;
@@ -72,7 +76,17 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     _load();
   }
 
+  @override
+  void didUpdateWidget(covariant InventoryStockTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_load());
+      unawaited(_loadStoreMargin());
+    }
+  }
+
   Future<void> _loadStoreMargin() async {
+    if (!widget.shellOnline) return;
     try {
       final bs =
           await widget.storesApi.getBusinessSettings(widget.storeId);
@@ -117,6 +131,23 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       _loading = true;
       _error = null;
     });
+    if (!widget.shellOnline) {
+      final cachedInv =
+          await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
+      final merged = _mergeInventoryWithCatalog(cachedInv, cachedCatalog);
+      if (!mounted) return;
+      setState(() {
+        _all = merged;
+        _error = merged.isEmpty
+            ? 'Sin inventario en caché. Conectate para sincronizar.'
+            : null;
+        _loading = false;
+        _usingCachedData = merged.isNotEmpty;
+      });
+      widget.onLoadedCount?.call(_all.length);
+      return;
+    }
     try {
       final list = await widget.inventoryApi.listInventory(widget.storeId);
       await widget.localPrefs.saveInventoryCache(widget.storeId, list);
@@ -252,6 +283,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           storesApi: widget.storesApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
           uploadsApi: widget.uploadsApi,
+          shellOnline: widget.shellOnline,
           initialBarcode: code,
         ),
       ),
@@ -511,6 +543,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                   storeDefaultMarginPercent: _storeDefaultMarginPercent,
                   storesApi: widget.storesApi,
                   uploadsApi: widget.uploadsApi,
+                  shellOnline: widget.shellOnline,
                 ),
               ),
             );
