@@ -12,28 +12,44 @@ class HeldTicketLine {
     required this.catalogUnitPrice,
     required this.catalogCurrency,
     this.discount = '0',
+    this.isByWeight = false,
+    this.displayGrams,
+    this.pricePerKgFunctional,
+    this.lineAmountFunctional,
+    this.lineAmountDocument,
   });
 
   final String productId;
   final String nameSnapshot;
   final String quantity;
+
   /// Precio unitario en moneda documento (como en `POST /sales`).
   final String price;
   final String currency;
   final String catalogUnitPrice;
   final String catalogCurrency;
   final String discount;
+  final bool isByWeight;
+  final String? displayGrams;
+  final String? pricePerKgFunctional;
+  final String? lineAmountFunctional;
+  final String? lineAmountDocument;
 
   Map<String, dynamic> toJson() => {
-        'productId': productId,
-        'name': nameSnapshot,
-        'quantity': quantity,
-        'price': price,
-        'currency': currency,
-        'catalogUnitPrice': catalogUnitPrice,
-        'catalogCurrency': catalogCurrency,
-        'discount': discount,
-      };
+    'productId': productId,
+    'name': nameSnapshot,
+    'quantity': quantity,
+    'price': price,
+    'currency': currency,
+    'catalogUnitPrice': catalogUnitPrice,
+    'catalogCurrency': catalogCurrency,
+    'discount': discount,
+    'isByWeight': isByWeight,
+    'displayGrams': displayGrams,
+    'pricePerKgFunctional': pricePerKgFunctional,
+    'lineAmountFunctional': lineAmountFunctional,
+    'lineAmountDocument': lineAmountDocument,
+  };
 
   static HeldTicketLine? tryFromJson(Map<String, dynamic> json) {
     final pid = json['productId']?.toString().trim();
@@ -49,13 +65,17 @@ class HeldTicketLine {
       quantity: qty,
       price: price,
       currency: cur,
-      catalogUnitPrice:
-          json['catalogUnitPrice']?.toString().trim() ?? price,
+      catalogUnitPrice: json['catalogUnitPrice']?.toString().trim() ?? price,
       catalogCurrency:
           json['catalogCurrency']?.toString().trim().isNotEmpty == true
-              ? json['catalogCurrency'].toString().trim()
-              : cur,
+          ? json['catalogCurrency'].toString().trim()
+          : cur,
       discount: json['discount']?.toString().trim() ?? '0',
+      isByWeight: json['isByWeight'] == true,
+      displayGrams: json['displayGrams']?.toString(),
+      pricePerKgFunctional: json['pricePerKgFunctional']?.toString(),
+      lineAmountFunctional: json['lineAmountFunctional']?.toString(),
+      lineAmountDocument: json['lineAmountDocument']?.toString(),
     );
   }
 
@@ -69,6 +89,11 @@ class HeldTicketLine {
       documentUnitPrice: price,
       documentCurrencyCode: currency,
       quantity: quantity,
+      isByWeight: isByWeight,
+      displayGrams: displayGrams,
+      pricePerKgFunctional: pricePerKgFunctional,
+      lineAmountFunctional: lineAmountFunctional,
+      lineAmountDocument: lineAmountDocument,
     );
   }
 }
@@ -120,20 +145,20 @@ class HeldTicket {
   int get lineCount => lines.length;
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'storeId': storeId,
-        'deviceId': deviceId,
-        'status': status,
-        'alias': alias,
-        'note': note,
-        'documentCurrencyCode': documentCurrencyCode,
-        'fxSnapshot': fxSnapshot,
-        'totals': totals,
-        'lines': lines.map((e) => e.toJson()).toList(),
-        'createdAt': createdAtIso,
-        'updatedAt': updatedAtIso,
-        'heldByUserId': heldByUserId,
-      };
+    'id': id,
+    'storeId': storeId,
+    'deviceId': deviceId,
+    'status': status,
+    'alias': alias,
+    'note': note,
+    'documentCurrencyCode': documentCurrencyCode,
+    'fxSnapshot': fxSnapshot,
+    'totals': totals,
+    'lines': lines.map((e) => e.toJson()).toList(),
+    'createdAt': createdAtIso,
+    'updatedAt': updatedAtIso,
+    'heldByUserId': heldByUserId,
+  };
 
   static HeldTicket? tryFromJson(Map<String, dynamic> json) {
     final id = json['id']?.toString().trim();
@@ -202,6 +227,11 @@ class HeldTicket {
             currency: l.documentCurrencyCode,
             catalogUnitPrice: l.catalogUnitPrice,
             catalogCurrency: l.catalogCurrency,
+            isByWeight: l.isByWeight,
+            displayGrams: l.displayGrams,
+            pricePerKgFunctional: l.pricePerKgFunctional,
+            lineAmountFunctional: l.lineAmountFunctional,
+            lineAmountDocument: l.lineAmountDocument,
           ),
         )
         .toList();

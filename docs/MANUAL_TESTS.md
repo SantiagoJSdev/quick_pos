@@ -320,6 +320,65 @@ Documento unico para registrar todas las pruebas manuales del frontend (actuales
   - UI muestra mensaje comprensible para soporte/caja.
   - No hay crash ni limpieza incorrecta del ticket.
 
+### MT-POS-008 - Charcuteria por gramaje (modo gramos)
+- Estado: `[ ]`
+- Precondicion: producto con `unit=KG` activo en catalogo.
+- Pasos:
+  1. En POS, buscar producto por peso y tocar para agregar.
+  2. En modal `Agregar por peso`, dejar modo `Gramos`.
+  3. Ingresar gramos (ej. `350`) y confirmar.
+- Resultado esperado:
+  - Se agrega linea con cantidad en kg (`0.35`) para backend.
+  - UI del ticket muestra referencia en gramos (ej. `350 g`) y precio por kg.
+  - Totales del ticket cuadran con el calculo del modal.
+
+### MT-POS-009 - Charcuteria por gramaje (modo monto VES)
+- Estado: `[ ]`
+- Precondicion: producto con `unit=KG` y tasa disponible en ticket.
+- Pasos:
+  1. Abrir modal `Agregar por peso`.
+  2. Cambiar a modo `Monto VES`.
+  3. Ingresar monto en VES y confirmar.
+- Resultado esperado:
+  - Modal recalcula gramos/kg y referencia USD correctamente.
+  - Se guarda linea con `quantity` en kg y precio por kg en moneda documento.
+  - Totales del ticket reflejan el monto ingresado.
+
+### MT-POS-010 - Charcuteria por gramaje (modo monto USD)
+- Estado: `[ ]`
+- Precondicion: producto con `unit=KG` y tasa disponible en ticket.
+- Pasos:
+  1. Abrir modal `Agregar por peso`.
+  2. Cambiar a modo `Monto USD`.
+  3. Ingresar monto en USD y confirmar.
+- Resultado esperado:
+  - Modal recalcula gramos/kg y monto en moneda documento correctamente.
+  - Se guarda linea en kg para payload de venta.
+  - Ticket visual muestra gramos + referencia por kg.
+
+### MT-POS-011 - Editar linea de gramaje en carrito
+- Estado: `[ ]`
+- Precondicion: existe una linea por peso en carrito.
+- Pasos:
+  1. Tocar cantidad de la linea por peso (o botones `+/-`).
+  2. Verificar que reabre modal `Agregar por peso`.
+  3. Cambiar valor y confirmar.
+- Resultado esperado:
+  - La linea se actualiza en gramos/kg sin crear duplicados.
+  - No usa incremento por unidad para productos `unit=KG`.
+
+### MT-POS-012 - Venta offline con linea por gramaje + sync
+- Estado: `[ ]`
+- Precondicion: backend apagado.
+- Pasos:
+  1. Crear ticket con al menos una linea por gramaje.
+  2. Cobrar offline (con o sin cobro mixto).
+  3. Encender backend y sincronizar.
+- Resultado esperado:
+  - Operacion `SALE` queda en cola con `quantity` en kg y `fxSnapshot` del ticket.
+  - En `sync/push` se confirma sin duplicados.
+  - Historial local/remoto queda consistente tras sincronizacion.
+
 ---
 
 ## 6) Historial y detalle

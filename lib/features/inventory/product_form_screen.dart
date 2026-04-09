@@ -97,6 +97,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _supplierId;
   String? _storeDefaultMarginPercent;
 
+  bool get _isByWeightUnit => _unit.text.trim().toUpperCase() == 'KG';
+
   @override
   void initState() {
     super.initState();
@@ -160,24 +162,26 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (!widget.shellOnline) {
       final local = await widget.localPrefs.getLocalSuppliers();
       if (!mounted) return;
-      final mapped = local
-          .map(
-            (x) => Supplier(
-              id: x.id,
-              storeId: widget.storeId,
-              name: x.name,
-              active: true,
-            ),
-          )
-          .toList()
-        ..sort(
-          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-        );
+      final mapped =
+          local
+              .map(
+                (x) => Supplier(
+                  id: x.id,
+                  storeId: widget.storeId,
+                  name: x.name,
+                  active: true,
+                ),
+              )
+              .toList()
+            ..sort(
+              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+            );
       setState(() {
         _suppliers = mapped;
         _suppliersLoading = false;
-        _suppliersLoadError =
-            mapped.isEmpty ? 'Sin proveedores en caché.' : null;
+        _suppliersLoadError = mapped.isEmpty
+            ? 'Sin proveedores en caché.'
+            : null;
       });
       return;
     }
@@ -196,9 +200,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         if (next == null || next.isEmpty) break;
         cursor = next;
       }
-      all.sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
+      all.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       if (!mounted) return;
       setState(() {
         _suppliers = all;
@@ -214,19 +216,20 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Future<void> _applySuppliersFromLocalCache(String remoteErr) async {
     final local = await widget.localPrefs.getLocalSuppliers();
     if (!mounted) return;
-    final mapped = local
-        .map(
-          (x) => Supplier(
-            id: x.id,
-            storeId: widget.storeId,
-            name: x.name,
-            active: true,
-          ),
-        )
-        .toList()
-      ..sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
+    final mapped =
+        local
+            .map(
+              (x) => Supplier(
+                id: x.id,
+                storeId: widget.storeId,
+                name: x.name,
+                active: true,
+              ),
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
     setState(() {
       _suppliers = mapped;
       _suppliersLoading = false;
@@ -255,10 +258,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       out.add(
         DropdownMenuItem<String?>(
           value: s.id,
-          child: Text(
-            s.name,
-            overflow: TextOverflow.ellipsis,
-          ),
+          child: Text(s.name, overflow: TextOverflow.ellipsis),
         ),
       );
     }
@@ -294,9 +294,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       setState(() => _photoLocalPath = x.path);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo cargar foto: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('No se pudo cargar foto: $e')));
     }
   }
 
@@ -383,8 +383,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     final upApi = widget.uploadsApi;
     if (upApi != null) {
       try {
-        final upload =
-            await upApi.uploadProductImage(widget.storeId, filePath: path);
+        final upload = await upApi.uploadProductImage(
+          widget.storeId,
+          filePath: path,
+        );
         final url = upload.url.trim();
         if (url.isEmpty) {
           await _queuePhotoUploadIfAny(pid);
@@ -459,7 +461,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       return;
     }
     if (!_decimal.hasMatch(cost)) {
-      setState(() => _error = 'El costo debe ser un número decimal válido (ej. 4.99).');
+      setState(
+        () => _error = 'El costo debe ser un número decimal válido (ej. 4.99).',
+      );
       return;
     }
     if (priceRaw.isNotEmpty && !_decimal.hasMatch(priceRaw)) {
@@ -473,8 +477,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       final mo = _marginPercentOverride.text.trim();
       if (!_marginPercentInRange(mo)) {
         setState(
-          () => _error =
-              'Margen propio: número entre 0 y 999 (ej. 25 o 12.5).',
+          () => _error = 'Margen propio: número entre 0 y 999 (ej. 25 o 12.5).',
         );
         return;
       }
@@ -485,16 +488,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       listPriceForModel = priceRaw;
     } else if (_pricingMode == 'MANUAL_PRICE') {
       setState(
-        () => _error =
-            'En precio manual debés indicar el precio de lista.',
+        () => _error = 'En precio manual debés indicar el precio de lista.',
       );
       return;
     } else if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
       final mo = _marginPercentOverride.text.trim();
-      final sug = PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-        cost,
-        mo,
-      );
+      final sug =
+          PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+            cost,
+            mo,
+          );
       if (sug == null) {
         setState(
           () => _error =
@@ -511,9 +514,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       } else {
         final sug =
             PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-          cost,
-          sm,
-        );
+              cost,
+              sm,
+            );
         listPriceForModel = sug ?? cost;
       }
     }
@@ -543,8 +546,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       active: widget.existing?.active ?? true,
       unit: _unit.text.trim().isEmpty ? null : _unit.text.trim(),
       supplierId: _supplierId,
-      pricingMode:
-          _pricingMode == 'USE_STORE_DEFAULT' ? null : _pricingMode,
+      pricingMode: _pricingMode == 'USE_STORE_DEFAULT' ? null : _pricingMode,
       marginPercentOverride: _pricingMode == 'USE_PRODUCT_OVERRIDE'
           ? _marginPercentOverride.text.trim()
           : null,
@@ -579,7 +581,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           productIds: {widget.existing!.id},
         );
         if (!mounted) return;
-        final photoSaved = hadLocalPhotoPick &&
+        final photoSaved =
+            hadLocalPhotoPick &&
             (forCache.imageUrl?.trim().isNotEmpty ?? false);
         final photoQueued = hadLocalPhotoPick && !photoSaved;
         if (priceRaw.isEmpty) {
@@ -600,8 +603,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 photoSaved
                     ? 'Producto actualizado · foto guardada'
                     : photoQueued
-                        ? 'Producto actualizado · foto en cola'
-                        : 'Producto actualizado',
+                    ? 'Producto actualizado · foto en cola'
+                    : 'Producto actualizado',
               ),
             ),
           );
@@ -786,8 +789,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               photoSaved
                   ? 'Producto creado · SKU ${created.sku} · foto guardada'
                   : stillQueued
-                      ? 'Producto creado · SKU ${created.sku} · foto en cola'
-                      : 'Producto creado · SKU ${created.sku}',
+                  ? 'Producto creado · SKU ${created.sku} · foto en cola'
+                  : 'Producto creado · SKU ${created.sku}',
             ),
           ),
         );
@@ -887,9 +890,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   height: 170,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: Theme.of(context).dividerColor,
-                    ),
+                    border: Border.all(color: Theme.of(context).dividerColor),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: _photoLocalPath == null
@@ -897,22 +898,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                           child: Text(
                             'Sin foto seleccionada',
                             style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         )
-                      : Image.file(
-                          File(_photoLocalPath!),
-                          fit: BoxFit.cover,
-                        ),
+                      : Image.file(File(_photoLocalPath!), fit: BoxFit.cover),
                 ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed:
-                            _loading ? null : () => _pickPhoto(ImageSource.gallery),
+                        onPressed: _loading
+                            ? null
+                            : () => _pickPhoto(ImageSource.gallery),
                         icon: const Icon(Icons.photo_library_outlined),
                         label: const Text('Galería'),
                       ),
@@ -920,8 +921,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed:
-                            _loading ? null : () => _pickPhoto(ImageSource.camera),
+                        onPressed: _loading
+                            ? null
+                            : () => _pickPhoto(ImageSource.camera),
                         icon: const Icon(Icons.photo_camera_outlined),
                         label: const Text('Cámara'),
                       ),
@@ -981,8 +983,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             controller: _barcode,
             decoration: InputDecoration(
               labelText: 'Código de barras (EAN / UPC)',
-              hintText:
-                  'Escribí/pegá el código o usá el ícono para escanear.',
+              hintText: 'Escribí/pegá el código o usá el ícono para escanear.',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.qr_code_scanner),
@@ -1013,7 +1014,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     labelText: 'Precio lista',
                     border: OutlineInputBorder(),
                   ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   enabled: !_loading,
                 ),
               ),
@@ -1025,7 +1028,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     labelText: 'Costo',
                     border: OutlineInputBorder(),
                   ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   enabled: !_loading,
                 ),
               ),
@@ -1097,7 +1102,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 hintText: 'ej. 25',
                 border: OutlineInputBorder(),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               enabled: !_loading,
             ),
           ],
@@ -1111,8 +1118,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   child: Text(
                     snap,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 );
               },
@@ -1141,11 +1148,33 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
           ),
           const SizedBox(height: 12),
+          SwitchListTile(
+            value: _isByWeightUnit,
+            onChanged: _loading
+                ? null
+                : (v) {
+                    setState(() {
+                      if (v) {
+                        _unit.text = 'KG';
+                        if (_type == 'SERVICE') {
+                          _type = 'GOODS';
+                        }
+                      } else if (_unit.text.trim().toUpperCase() == 'KG') {
+                        _unit.clear();
+                      }
+                    });
+                  },
+            title: const Text('Producto por peso (charcutería)'),
+            subtitle: const Text(
+              'Activa `unit = KG` para usar “Agregar por peso” en POS.',
+            ),
+          ),
+          const SizedBox(height: 8),
           TextField(
             controller: _unit,
             decoration: const InputDecoration(
               labelText: 'Unidad (opcional)',
-              hintText: 'unidad, kg, …',
+              hintText: 'unidad, KG, …',
               border: OutlineInputBorder(),
             ),
             enabled: !_loading,

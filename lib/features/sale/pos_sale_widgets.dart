@@ -65,14 +65,14 @@ class PosSaleTopBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: PosSaleUi.goldDim,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: const Color(0x33E8C34A),
-                    ),
+                    border: Border.all(color: const Color(0x33E8C34A)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -135,8 +135,10 @@ class PosSaleTopBar extends StatelessWidget {
                           color: PosSaleUi.primary,
                         ),
                       )
-                    : const Icon(Icons.cloud_sync_outlined,
-                        color: PosSaleUi.textMuted),
+                    : const Icon(
+                        Icons.cloud_sync_outlined,
+                        color: PosSaleUi.textMuted,
+                      ),
                 tooltip: 'Sincronizar',
               ),
               if (showSyncDot)
@@ -175,6 +177,7 @@ class PosSaleSearchBlock extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onScanTap;
+
   /// Demo / emulador: escaneo aleatorio sin cámara.
   final VoidCallback? onScanLongPress;
   final VoidCallback? onClear;
@@ -213,8 +216,10 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
               valueListenable: widget.controller,
               builder: (context, v, _) {
                 return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: PosSaleUi.surface3,
                     borderRadius: BorderRadius.circular(12),
@@ -226,8 +231,11 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.search,
-                          size: 18, color: PosSaleUi.textMuted),
+                      const Icon(
+                        Icons.search,
+                        size: 18,
+                        color: PosSaleUi.textMuted,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
@@ -250,6 +258,7 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
                           smartQuotesType: SmartQuotesType.disabled,
                           spellCheckConfiguration:
                               SpellCheckConfiguration.disabled(),
+
                           /// En Android suele ocultar la franja de sugerencias encima del teclado.
                           keyboardType: TextInputType.visiblePassword,
                           textInputAction: TextInputAction.search,
@@ -263,8 +272,11 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
                             minHeight: 28,
                           ),
                           onPressed: widget.onClear,
-                          icon: const Icon(Icons.close,
-                              size: 18, color: PosSaleUi.textMuted),
+                          icon: const Icon(
+                            Icons.close,
+                            size: 18,
+                            color: PosSaleUi.textMuted,
+                          ),
                         ),
                     ],
                   ),
@@ -294,8 +306,11 @@ class _PosSaleSearchBlockState extends State<PosSaleSearchBlock> {
                       color: PosSaleUi.primary.withValues(alpha: 0.35),
                     ),
                   ),
-                  child: const Icon(Icons.qr_code_scanner,
-                      color: PosSaleUi.primary, size: 22),
+                  child: const Icon(
+                    Icons.qr_code_scanner,
+                    color: PosSaleUi.primary,
+                    size: 22,
+                  ),
                 ),
               ),
             ),
@@ -526,6 +541,14 @@ class PosSaleCartLineTile extends StatelessWidget {
                         fontFeatures: [FontFeature.tabularFigures()],
                       ),
                       children: [
+                        if (line.isByWeight && line.displayGrams != null)
+                          TextSpan(
+                            text: '${line.displayGrams} g  ·  ',
+                            style: const TextStyle(
+                              color: PosSaleUi.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         TextSpan(
                           text: '$unitFunctional $functionalCode',
                           style: const TextStyle(
@@ -538,8 +561,7 @@ class PosSaleCartLineTile extends StatelessWidget {
                           style: TextStyle(color: PosSaleUi.textMuted),
                         ),
                         TextSpan(
-                          text:
-                              '${line.documentUnitPrice} $documentCode',
+                          text: '${line.documentUnitPrice} $documentCode',
                           style: const TextStyle(color: PosSaleUi.textMuted),
                         ),
                       ],
@@ -550,6 +572,9 @@ class PosSaleCartLineTile extends StatelessWidget {
             ),
             _QtyPill(
               quantity: line.quantity,
+              quantityDisplay: line.isByWeight && line.displayGrams != null
+                  ? '${line.displayGrams} g'
+                  : null,
               onMinus: onMinus,
               onPlus: onPlus,
               onQtyTap: onQtyTap,
@@ -587,12 +612,14 @@ class PosSaleCartLineTile extends StatelessWidget {
 class _QtyPill extends StatelessWidget {
   const _QtyPill({
     required this.quantity,
+    this.quantityDisplay,
     required this.onMinus,
     required this.onPlus,
     required this.onQtyTap,
   });
 
   final String quantity;
+  final String? quantityDisplay;
   final VoidCallback onMinus;
   final VoidCallback onPlus;
   final VoidCallback onQtyTap;
@@ -616,7 +643,7 @@ class _QtyPill extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: Text(
-                quantity,
+                quantityDisplay ?? quantity,
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -753,8 +780,10 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                   ),
                 ),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -790,8 +819,11 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: onOpenHeldTickets,
-                  icon: const Icon(Icons.inventory_2_outlined,
-                      size: 18, color: PosSaleUi.primary),
+                  icon: const Icon(
+                    Icons.inventory_2_outlined,
+                    size: 18,
+                    color: PosSaleUi.primary,
+                  ),
                   label: Text(
                     'Guardados ($heldTicketsCount)',
                     style: const TextStyle(
@@ -836,10 +868,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                   ),
                   Text(
                     itemsSummary,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: PosSaleUi.text,
-                    ),
+                    style: const TextStyle(fontSize: 11, color: PosSaleUi.text),
                   ),
                 ],
               ),
@@ -861,11 +890,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                       highlight: false,
                     ),
                   ),
-                  Container(
-                    width: 1,
-                    height: 48,
-                    color: PosSaleUi.divider,
-                  ),
+                  Container(width: 1, height: 48, color: PosSaleUi.divider),
                   Expanded(
                     child: _TotalBlock(
                       label: documentTotalLabel,
@@ -879,7 +904,10 @@ class PosSaleCheckoutPanel extends StatelessWidget {
             const SizedBox(height: 12),
             if (onOpenMixedPayment != null) ...[
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: PosSaleUi.surface3,
                   borderRadius: BorderRadius.circular(12),
@@ -906,16 +934,18 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                             const SizedBox(height: 2),
                             DecoratedBox(
                               decoration: BoxDecoration(
-                                color: (canChargeWithPayments
-                                        ? PosSaleUi.success
-                                        : PosSaleUi.error)
-                                    .withValues(alpha: 0.14),
+                                color:
+                                    (canChargeWithPayments
+                                            ? PosSaleUi.success
+                                            : PosSaleUi.error)
+                                        .withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: (canChargeWithPayments
-                                          ? PosSaleUi.success
-                                          : PosSaleUi.error)
-                                      .withValues(alpha: 0.5),
+                                  color:
+                                      (canChargeWithPayments
+                                              ? PosSaleUi.success
+                                              : PosSaleUi.error)
+                                          .withValues(alpha: 0.5),
                                 ),
                               ),
                               child: Padding(
@@ -1013,9 +1043,8 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
-                    onPressed: (cartNotEmpty &&
-                            canChargeWithPayments &&
-                            !chargeBusy)
+                    onPressed:
+                        (cartNotEmpty && canChargeWithPayments && !chargeBusy)
                         ? onCharge
                         : null,
                     style: FilledButton.styleFrom(

@@ -13,6 +13,11 @@ class PosCartLine {
     required this.documentUnitPrice,
     required this.documentCurrencyCode,
     this.quantity = '1',
+    this.isByWeight = false,
+    this.displayGrams,
+    this.pricePerKgFunctional,
+    this.lineAmountFunctional,
+    this.lineAmountDocument,
   });
 
   final String productId;
@@ -23,9 +28,12 @@ class PosCartLine {
   final String documentUnitPrice;
   final String documentCurrencyCode;
   String quantity;
+  final bool isByWeight;
+  final String? displayGrams;
+  final String? pricePerKgFunctional;
+  final String? lineAmountFunctional;
+  final String? lineAmountDocument;
 
-  String get lineTotalDocument => MoneyStringMath.multiply(
-        documentUnitPrice,
-        quantity,
-      );
+  String get lineTotalDocument =>
+      MoneyStringMath.multiply(documentUnitPrice, quantity);
 }

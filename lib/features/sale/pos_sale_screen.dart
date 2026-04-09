@@ -409,6 +409,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           documentUnitPrice: docPrice,
           documentCurrencyCode: doc,
           quantity: old.quantity,
+          isByWeight: old.isByWeight,
+          displayGrams: old.displayGrams,
+          pricePerKgFunctional: old.pricePerKgFunctional,
+          lineAmountFunctional: old.lineAmountFunctional,
+          lineAmountDocument: old.lineAmountDocument,
         ),
       );
     }
@@ -636,9 +641,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   Future<void> _bootstrapShellOfflineLoad() async {
     final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
     final active = cachedCatalog.where((p) => p.active).toList()
-      ..sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final cached = await widget.localPrefs.loadBusinessSettingsCache(
       widget.storeId,
     );
@@ -853,7 +856,115 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return '$unit $doc';
   }
 
-  void _addProductToCart(CatalogProduct p, {String addQty = '1'}) {
+  bool _isProductByWeight(CatalogProduct p) =>
+      (p.unit?.trim().toUpperCase() ?? '') == 'KG';
+
+  CatalogProduct? _catalogByProductId(String productId) {
+    for (final p in _all) {
+      if (p.id == productId) return p;
+    }
+    return null;
+  }
+
+  String _gramsFromQuantity(String qty) {
+    final q = PosCartQuantity.parse(qty);
+    if (q <= 0) return '0';
+    final grams = q * 1000;
+    return grams.toStringAsFixed(1);
+  }
+
+  Future<void> _openWeightedAddSheet(
+    CatalogProduct p, {
+    PosCartLine? existing,
+  }) async {
+    final s = _settings;
+    final doc = _selectedDocumentCurrency;
+    if (s == null || doc == null) return;
+    final func = s.functionalCurrency.code;
+    final docPrice = PosSalePricing.documentUnitPrice(
+      catalogPrice: p.price,
+      catalogCurrency: p.currency,
+      documentCurrencyCode: doc,
+      functionalCurrencyCode: func,
+      pair: _fxPair,
+    );
+    String? funcPrice;
+    final pc = p.currency.toUpperCase();
+    if (pc == func.toUpperCase()) {
+      funcPrice = p.price;
+    } else if (pc == doc.toUpperCase()) {
+      if (func.toUpperCase() == doc.toUpperCase()) {
+        funcPrice = p.price;
+      } else if (_fxPair != null) {
+        final rate = _fxPair!.rate.rateQuotePerBase;
+        funcPrice = _fxPair!.inverted
+            ? MoneyStringMath.multiply(p.price, rate)
+            : MoneyStringMath.divide(p.price, rate, fractionDigits: 2);
+      }
+    }
+    if (docPrice == null || funcPrice == null) {
+      _showCheckoutPanelMessage(
+        'No se puede abrir modo peso: revisá moneda del ticket y tasa.',
+        error: true,
+      );
+      return;
+    }
+    if (PosCartQuantity.parse(funcPrice) <= 0) {
+      _showCheckoutPanelMessage(
+        'Precio por kg no válido para este producto.',
+        error: true,
+      );
+      return;
+    }
+    final fxDocPerFunc = func.toUpperCase() == doc.toUpperCase()
+        ? '1'
+        : MoneyStringMath.divide(docPrice, funcPrice, fractionDigits: 6);
+    final res = await showPosWeightedAddSheet(
+      context,
+      productName: p.name,
+      functionalCode: func,
+      documentCode: doc,
+      pricePerKgFunctional: funcPrice,
+      pricePerKgDocument: docPrice,
+      fxRateDocumentPerFunctional: fxDocPerFunc,
+      initialGrams:
+          existing?.displayGrams ??
+          _gramsFromQuantity(existing?.quantity ?? '0'),
+    );
+    if (!mounted || res == null) return;
+    _invalidateCheckoutIdempotency();
+    final i = _cart.indexWhere((l) => l.productId == p.id);
+    setState(() {
+      final line = PosCartLine(
+        productId: p.id,
+        name: p.name,
+        sku: p.sku,
+        catalogUnitPrice: p.price,
+        catalogCurrency: p.currency,
+        documentUnitPrice: docPrice,
+        documentCurrencyCode: doc,
+        quantity: PosCartQuantity.normalize(res.quantityKg),
+        isByWeight: true,
+        displayGrams: res.displayGrams,
+        pricePerKgFunctional: funcPrice,
+        lineAmountFunctional: res.lineAmountFunctional,
+        lineAmountDocument: res.lineAmountDocument,
+      );
+      if (i >= 0) {
+        _cart[i] = line;
+      } else {
+        _cart.add(line);
+      }
+    });
+    _search.clear();
+    _searchFocus.unfocus();
+    _showCartFeedback('${p.name} · ${res.displayGrams} g en el ticket');
+  }
+
+  Future<void> _addProductToCart(
+    CatalogProduct p, {
+    String addQty = '1',
+  }) async {
     _invalidateCheckoutIdempotency();
     final s = _settings;
     final doc = _selectedDocumentCurrency;
@@ -885,6 +996,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         'o en $func con tasa cargada.',
         error: true,
       );
+      return;
+    }
+    if (_isProductByWeight(p)) {
+      await _openWeightedAddSheet(p);
       return;
     }
 
@@ -927,6 +1042,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
     final p = _findByBarcode(_all, code);
     if (p != null) {
+      if (_isProductByWeight(p)) {
+        await _addProductToCart(p);
+        return;
+      }
       await showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
@@ -969,7 +1088,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                     FilledButton(
                       onPressed: () {
                         Navigator.pop(ctx);
-                        _addProductToCart(p, addQty: '$q');
+                        unawaited(_addProductToCart(p, addQty: '$q'));
                       },
                       child: const Text('Agregar al ticket'),
                     ),
@@ -1499,6 +1618,14 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   void _bumpLine(int index, double delta) {
+    final line = _cart[index];
+    if (line.isByWeight) {
+      final p = _catalogByProductId(line.productId);
+      if (p != null) {
+        unawaited(_openWeightedAddSheet(p, existing: line));
+      }
+      return;
+    }
     _invalidateCheckoutIdempotency();
     final cur = PosCartQuantity.parse(_cart[index].quantity);
     final next = cur + delta;
@@ -1513,6 +1640,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   Future<void> _onLineQtyTap(int index) async {
     final line = _cart[index];
+    if (line.isByWeight) {
+      final p = _catalogByProductId(line.productId);
+      if (p != null) {
+        await _openWeightedAddSheet(p, existing: line);
+      }
+      return;
+    }
     final res = await showPosQuantityNumpadSheet(
       context,
       productName: line.name,
@@ -1550,7 +1684,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       return;
     }
     final p = active[Random().nextInt(active.length)];
-    _addProductToCart(p, addQty: '1');
+    unawaited(_addProductToCart(p, addQty: '1'));
   }
 
   @override
@@ -1730,7 +1864,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                           imageUrl: _resolvedImageUrl(
                                             p.imageUrl,
                                           ),
-                                          onTap: () => _addProductToCart(p),
+                                          onTap: () =>
+                                              unawaited(_addProductToCart(p)),
                                         );
                                       },
                                     ),
