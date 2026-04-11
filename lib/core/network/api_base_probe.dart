@@ -7,7 +7,7 @@ import 'ngrok_headers.dart';
 /// Comprueba que la base `/api/v1` responde HTTP (p. ej. antes de enlazar tienda).
 Future<bool> probeApiV1Reachable(
   String apiV1Base, {
-  Duration timeout = const Duration(seconds: 25),
+  Duration timeout = const Duration(seconds: 8),
 }) async {
   final client = http.Client();
   try {

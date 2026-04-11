@@ -5,6 +5,7 @@ import '../../core/api/api_error.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/config/app_config.dart';
+import '../../core/config/resolved_api_base_url.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/storage/local_prefs.dart';
 import '../sale/pos_sale_ui_tokens.dart';
@@ -149,6 +150,8 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   String? _apiConnectionStatus;
   bool _apiConnectionOk = false;
   String _selectedProfile = '';
+  /// `true` si [BusinessSettings] vino de caché (sin red / offline).
+  bool _settingsFromCache = false;
 
   @override
   void initState() {
@@ -160,11 +163,26 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   }
 
   Future<BusinessSettings> _load() async {
-    final s = await widget.storesApi.getBusinessSettings(widget.storeId);
-    if (mounted && !_marginDirty) {
-      _marginCtrl.text = s.defaultMarginPercent?.trim() ?? '';
+    try {
+      final s = await widget.storesApi.getBusinessSettings(widget.storeId);
+      _settingsFromCache = false;
+      if (mounted && !_marginDirty) {
+        _marginCtrl.text = s.defaultMarginPercent?.trim() ?? '';
+      }
+      return s;
+    } catch (_) {
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
+      if (cached != null) {
+        _settingsFromCache = true;
+        if (mounted && !_marginDirty) {
+          _marginCtrl.text = cached.defaultMarginPercent?.trim() ?? '';
+        }
+        return cached;
+      }
+      rethrow;
     }
-    return s;
   }
 
   @override
@@ -368,7 +386,7 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     setState(() => _savingApiUrl = true);
     try {
       await widget.localPrefs.clearApiBaseUrlOverride();
-      AppConfig.setRuntimeApiBaseUrlOverride(null);
+      await loadResolvedApiBaseUrl(widget.localPrefs);
       if (!mounted) return;
       _apiUrlCtrl.text = AppConfig.effectiveApiBaseUrl;
       _selectedProfile = _detectProfile(_apiUrlCtrl.text);
@@ -434,6 +452,27 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
               children: [
+                if (_settingsFromCache) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: const Text(
+                      'Sin conexión al servidor: datos de configuración desde '
+                      'caché. Guardar margen requiere estar online.',
+                      style: TextStyle(fontSize: 12, color: Colors.orange),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Text(
                   'ID de la tienda',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -520,7 +559,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                 ),
                 const SizedBox(height: 12),
                 FilledButton(
-                  onPressed: _savingMargin ? null : _saveMargin,
+                  onPressed: (_savingMargin || _settingsFromCache)
+                      ? null
+                      : _saveMargin,
                   child: _savingMargin
                       ? const SizedBox(
                           width: 22,

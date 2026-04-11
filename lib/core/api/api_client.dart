@@ -17,8 +17,7 @@ class ApiClient {
   final String? _baseUrlOverride;
   static const _uuid = Uuid();
 
-  /// Emulador + túnel ngrok suelen superar 12s en el primer round-trip; 408 en probe = agotó esto.
-  static const _requestTimeout = Duration(seconds: 30);
+  static const _requestTimeout = Duration(seconds: 12);
 
   /// UUID v4 por petición si no se pasa uno explícito (`FRONTEND_INTEGRATION_CONTEXT.md`).
   String _effectiveRequestId(String? requestId) =>

@@ -12,7 +12,7 @@ import 'core/api/suppliers_api.dart';
 import 'core/api/sync_api.dart';
 import 'core/api/uploads_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
-import 'core/config/app_config.dart';
+import 'core/config/resolved_api_base_url.dart';
 import 'core/network/api_connectivity_debug.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
@@ -65,16 +65,8 @@ class _QuickPosAppState extends State<QuickPosApp> {
 
   Future<void> _bootstrap() async {
     await widget.localPrefs.getOrCreateDeviceId();
-    final apiOverride = await widget.localPrefs.getApiBaseUrlOverride();
-    if (apiOverride != null && apiOverride.isNotEmpty) {
-      AppConfig.setRuntimeApiBaseUrlOverride(apiOverride);
-      traceApiConnectivity('API base (prefs): $apiOverride');
-    } else {
-      AppConfig.setRuntimeApiBaseUrlOverride(null);
-      traceApiConnectivity(
-        'API base (default): ${AppConfig.effectiveApiBaseUrl}',
-      );
-    }
+    final apiBase = await loadResolvedApiBaseUrl(widget.localPrefs);
+    traceApiConnectivity('API base: $apiBase');
     final id = await widget.localPrefs.getStoreId();
     final trimmed = id?.trim();
     if (!mounted) return;
