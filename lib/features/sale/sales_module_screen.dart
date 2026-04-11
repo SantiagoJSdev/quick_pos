@@ -6,6 +6,7 @@ import '../../core/api/sale_returns_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
+import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
@@ -31,6 +32,7 @@ class SalesModuleScreen extends StatefulWidget {
     required this.salesApi,
     required this.saleReturnsApi,
     required this.syncApi,
+    required this.uploadsApi,
     required this.catalogInvalidationBus,
     required this.localPrefs,
     this.shellOnline = true,
@@ -43,6 +45,7 @@ class SalesModuleScreen extends StatefulWidget {
   final SalesApi salesApi;
   final SaleReturnsApi saleReturnsApi;
   final SyncApi syncApi;
+  final UploadsApi uploadsApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
 
@@ -137,6 +140,9 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                     builder: (c) => PendingPhotoUploadsScreen(
                       storeId: widget.storeId,
                       localPrefs: widget.localPrefs,
+                      uploadsApi: widget.uploadsApi,
+                      productsApi: widget.productsApi,
+                      catalogInvalidationBus: widget.catalogInvalidationBus,
                     ),
                   ),
                 );

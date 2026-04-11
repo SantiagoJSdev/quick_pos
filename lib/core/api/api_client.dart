@@ -16,7 +16,8 @@ class ApiClient {
   final http.Client _client;
   final String? _baseUrlOverride;
   static const _uuid = Uuid();
-  static const _requestTimeout = Duration(seconds: 12);
+  /// Emulador + túnel ngrok suelen superar 12s en el primer round-trip; 408 en probe = agotó esto.
+  static const _requestTimeout = Duration(seconds: 30);
 
   /// UUID v4 por petición si no se pasa uno explícito (`FRONTEND_INTEGRATION_CONTEXT.md`).
   String _effectiveRequestId(String? requestId) =>
@@ -28,6 +29,7 @@ class ApiClient {
   Map<String, String> _headers(String storeId, {String? requestId}) {
     return {
       ...ngrokSkipBrowserWarningHeadersForApiBase(_effectiveBaseUrl()),
+      'User-Agent': 'QuickPos/1 (Flutter)',
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'X-Store-Id': storeId,

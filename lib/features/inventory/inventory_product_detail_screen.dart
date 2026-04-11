@@ -174,6 +174,7 @@ class _InventoryProductDetailScreenState
           localPrefs: widget.localPrefs,
           productId: productId,
           productLabel: label,
+          catalogInvalidationBus: widget.catalogInvalidationBus,
         ),
       ),
     );

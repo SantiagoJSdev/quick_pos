@@ -36,6 +36,7 @@ class InventoryStockTab extends StatefulWidget {
     required this.localPrefs,
     required this.catalogInvalidationBus,
     this.shellOnline = true,
+    this.shellInventoryTabActive = true,
     this.onLoadedCount,
   });
 
@@ -50,6 +51,9 @@ class InventoryStockTab extends StatefulWidget {
 
   /// Desde [MainShell]: evita llamadas HTTP que bloquean hasta timeout.
   final bool shellOnline;
+
+  /// Cuando el usuario vuelve a la pestaña Inventario del shell, se vuelve a pedir stock al API.
+  final bool shellInventoryTabActive;
 
   /// Total de líneas tras cada carga (para contador en el módulo).
   final ValueChanged<int>? onLoadedCount;
@@ -80,6 +84,10 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   void didUpdateWidget(covariant InventoryStockTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_load());
+      unawaited(_loadStoreMargin());
+    }
+    if (!oldWidget.shellInventoryTabActive && widget.shellInventoryTabActive) {
       unawaited(_load());
       unawaited(_loadStoreMargin());
     }
@@ -529,8 +537,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                 ? 'Sin movimientos de inventario · SKU: ${line.displaySku}$barcodeSuffix$minSuffix'
                 : 'SKU: ${line.displaySku}$barcodeSuffix$minSuffix',
           ),
-          onTap: () {
-            Navigator.of(context).push<void>(
+          onTap: () async {
+            await Navigator.of(context).push<void>(
               MaterialPageRoute(
                 builder: (ctx) => InventoryProductDetailScreen(
                   storeId: widget.storeId,
@@ -547,6 +555,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                 ),
               ),
             );
+            if (mounted) await _load();
           },
           trailing: Column(
             mainAxisAlignment: MainAxisAlignment.center,

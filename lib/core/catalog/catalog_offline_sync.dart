@@ -31,6 +31,11 @@ Future<void> flushPendingCatalogMutations({
           } else {
             cache.add(created);
           }
+          await prefs.remapPendingProductPhotoUploadProductId(
+            storeId: storeId,
+            fromProductId: e.localTempId!,
+            toProductId: created.id,
+          );
         } else {
           cache.removeWhere((p) => p.id == created.id);
           cache.add(created);
@@ -52,6 +57,11 @@ Future<void> flushPendingCatalogMutations({
           } else {
             cache.add(created.product);
           }
+          await prefs.remapPendingProductPhotoUploadProductId(
+            storeId: storeId,
+            fromProductId: e.localTempId!,
+            toProductId: created.product.id,
+          );
         } else {
           cache.removeWhere((p) => p.id == created.product.id);
           cache.add(created.product);

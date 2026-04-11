@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import 'api_connectivity_debug.dart';
 import 'ngrok_headers.dart';
 
 const kBackendUrlResolver =
@@ -43,19 +44,33 @@ class BackendOriginResolver {
     final c = _client ?? http.Client();
     final own = _client == null;
     try {
+      traceApiConnectivity('Vercel resolver GET $kBackendUrlResolver');
       final r = await c
           .get(
             Uri.parse(kBackendUrlResolver),
             headers: const {'Accept': 'application/json'},
           )
           .timeout(timeout);
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) {
+        traceApiConnectivity(
+          'Vercel resolver HTTP ${r.statusCode} (esperado 200)',
+        );
+        return null;
+      }
       final decoded = jsonDecode(r.body);
-      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded is! Map<String, dynamic>) {
+        traceApiConnectivity('Vercel resolver: JSON no es objeto');
+        return null;
+      }
       final parsed = ResolverResponse.fromJson(decoded);
-      if (parsed.baseUrl.isEmpty) return null;
+      if (parsed.baseUrl.isEmpty) {
+        traceApiConnectivity('Vercel resolver: baseUrl vacío');
+        return null;
+      }
+      traceApiConnectivity('Vercel OK → origin=${parsed.baseUrl}');
       return parsed;
-    } catch (_) {
+    } catch (e) {
+      traceApiConnectivity('Vercel resolver excepción: $e');
       return null;
     } finally {
       if (own) c.close();
@@ -68,20 +83,27 @@ class BackendOriginResolver {
 /// Comprueba que el host responde HTTP (p. ej. antes de enlazar tienda).
 Future<bool> probeApiV1Reachable(
   String apiV1Base, {
-  Duration timeout = const Duration(seconds: 8),
+  Duration timeout = const Duration(seconds: 25),
 }) async {
   final client = http.Client();
   try {
     final base = AppConfig.normalizeApiBaseUrl(apiV1Base);
     if (base.isEmpty) return false;
     final uri = Uri.parse('$base/');
+    traceApiConnectivity('Probe GET $uri');
     final headers = <String, String>{
       'Accept': 'application/json',
+      'User-Agent': 'QuickPos/1 (Flutter)',
       ...ngrokSkipBrowserWarningHeadersForApiBase(base),
     };
     final r = await client.get(uri, headers: headers).timeout(timeout);
-    return r.statusCode < 500;
-  } catch (_) {
+    final ok = r.statusCode < 500;
+    traceApiConnectivity(
+      'Probe → HTTP ${r.statusCode} (${ok ? 'OK' : 'fallo ≥500'})',
+    );
+    return ok;
+  } catch (e) {
+    traceApiConnectivity('Probe excepción: $e');
     return false;
   } finally {
     client.close();

@@ -25,7 +25,8 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.localPrefs,
     required this.forcedOffline,
     required this.onlineStatus,
-    required this.onToggleConnectivityMode,
+    required this.onConnectivityModeButtonPressed,
+    required this.onBackendTransportFailure,
   });
 
   final String storeId;
@@ -35,7 +36,10 @@ class StoreDashboardScreen extends StatefulWidget {
   final LocalPrefs localPrefs;
   final bool forcedOffline;
   final bool onlineStatus;
-  final VoidCallback onToggleConnectivityMode;
+  final VoidCallback onConnectivityModeButtonPressed;
+
+  /// Timeout / sin red al cargar settings: el shell marca backend inalcanzable para pasar a offline efectivo.
+  final VoidCallback onBackendTransportFailure;
 
   @override
   State<StoreDashboardScreen> createState() => _StoreDashboardScreenState();
@@ -68,8 +72,9 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
 
   Future<BusinessSettings> _loadSettingsWithCache() async {
     if (!widget.onlineStatus || widget.forcedOffline) {
-      final cached =
-          await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (cached != null) {
         _settingsFromCache = true;
         return cached;
@@ -80,38 +85,49 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     }
     try {
       final s = await widget.storesApi.getBusinessSettings(widget.storeId);
-      await widget.localPrefs.saveBusinessSettingsCache(
-        widget.storeId,
-        {
-          'id': s.id,
-          'storeId': s.storeId,
-          'defaultMarginPercent': s.defaultMarginPercent,
-          'functionalCurrency': {
-            'code': s.functionalCurrency.code,
-            'name': s.functionalCurrency.name,
-          },
-          'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
-              ? null
-              : {
-                  'code': s.defaultSaleDocCurrency!.code,
-                  'name': s.defaultSaleDocCurrency!.name,
-                },
-          'store': {
-            'name': s.storeName,
-            'type': s.storeType,
-          },
+      await widget.localPrefs.saveBusinessSettingsCache(widget.storeId, {
+        'id': s.id,
+        'storeId': s.storeId,
+        'defaultMarginPercent': s.defaultMarginPercent,
+        'functionalCurrency': {
+          'code': s.functionalCurrency.code,
+          'name': s.functionalCurrency.name,
         },
-      );
+        'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
+            ? null
+            : {
+                'code': s.defaultSaleDocCurrency!.code,
+                'name': s.defaultSaleDocCurrency!.name,
+              },
+        'store': {'name': s.storeName, 'type': s.storeType},
+      });
       _settingsFromCache = false;
       return s;
-    } catch (_) {
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+    } catch (e) {
+      if (_isLikelyTransportFailure(e)) {
+        widget.onBackendTransportFailure();
+      }
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (cached != null) {
         _settingsFromCache = true;
         return cached;
       }
       rethrow;
     }
+  }
+
+  static bool _isLikelyTransportFailure(Object e) {
+    if (e is ApiError) return e.isLikelyTransportFailure;
+    final blob = e.toString().toLowerCase();
+    return blob.contains('socket') ||
+        blob.contains('connection') ||
+        blob.contains('failed host') ||
+        blob.contains('network') ||
+        blob.contains('timeout') ||
+        blob.contains('tiempo') ||
+        blob.contains('clientexception');
   }
 
   Future<void> _loadTerminal() async {
@@ -180,10 +196,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     SystemNavigator.pop();
   }
 
-  Widget _functionalCurrencyCard(
-    BuildContext context,
-    BusinessSettings s,
-  ) {
+  Widget _functionalCurrencyCard(BuildContext context, BusinessSettings s) {
     final code = s.functionalCurrency.code;
     final name = s.functionalCurrency.name;
     final value = code.isEmpty
@@ -199,26 +212,26 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
             Text(
               'Moneda funcional',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: PosSaleUi.text,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: PosSaleUi.text,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               value,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: PosSaleUi.text,
-                    fontWeight: FontWeight.w700,
-                  ),
+                color: PosSaleUi.text,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Moneda de referencia para inventario y costos (p. ej. USD). '
               'La moneda del ticket en caja la define el servidor al facturar.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: PosSaleUi.textMuted,
-                    height: 1.35,
-                  ),
+                color: PosSaleUi.textMuted,
+                height: 1.35,
+              ),
             ),
           ],
         ),
@@ -246,16 +259,16 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
             Text(
               'Este terminal',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: PosSaleUi.text,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: PosSaleUi.text,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'App $ver',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: PosSaleUi.textMuted,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: PosSaleUi.textMuted),
             ),
             const SizedBox(height: 8),
             Row(
@@ -265,9 +278,9 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   child: SelectableText(
                     id,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                          color: PosSaleUi.text,
-                        ),
+                      fontFamily: 'monospace',
+                      color: PosSaleUi.text,
+                    ),
                   ),
                 ),
                 IconButton(
@@ -288,9 +301,9 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
               'Varios equipos pueden usar la misma tienda (mismo enlace). Cada '
               'instalación tiene su propio deviceId para ventas, historial y sync.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: PosSaleUi.textMuted,
-                    height: 1.35,
-                  ),
+                color: PosSaleUi.textMuted,
+                height: 1.35,
+              ),
             ),
           ],
         ),
@@ -366,22 +379,27 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
             onRefresh: _refresh,
             color: PosSaleUi.primary,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                8,
+                20,
+                32 + MediaQuery.of(context).padding.bottom + 88,
+              ),
               children: [
                 Text(
                   s.storeName,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: PosSaleUi.text,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 if (s.storeType != null) ...[
                   const SizedBox(height: 4),
                   Text(
                     s.storeType!,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: PosSaleUi.textMuted,
-                        ),
+                      color: PosSaleUi.textMuted,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -389,8 +407,10 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 const SizedBox(height: 16),
                 if (_settingsFromCache) ...[
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.orange.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
@@ -422,9 +442,9 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   'Margen por defecto de la tienda e ID de tienda (copiar). '
                   'Solo personal autorizado.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PosSaleUi.textMuted,
-                        height: 1.35,
-                      ),
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
@@ -471,31 +491,30 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 ),
                 const SizedBox(height: 10),
                 FilledButton.tonalIcon(
-                  onPressed: widget.onToggleConnectivityMode,
-                  icon: Icon(
-                    widget.forcedOffline ? Icons.wifi : Icons.wifi_off,
-                  ),
+                  onPressed: widget.onConnectivityModeButtonPressed,
+                  icon: Icon(widget.onlineStatus ? Icons.wifi_off : Icons.wifi),
                   label: Text(
-                    widget.forcedOffline
-                        ? 'Poner Online'
-                        : 'Poner Offline',
+                    widget.onlineStatus ? 'Poner Offline' : 'Poner Online',
                   ),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(44),
-                    backgroundColor: widget.forcedOffline
-                        ? Colors.red.withValues(alpha: 0.16)
-                        : Colors.green.withValues(alpha: 0.16),
-                    foregroundColor:
-                        widget.forcedOffline ? Colors.red : Colors.green,
+                    backgroundColor: widget.onlineStatus
+                        ? Colors.green.withValues(alpha: 0.16)
+                        : Colors.red.withValues(alpha: 0.16),
+                    foregroundColor: widget.onlineStatus
+                        ? Colors.green
+                        : Colors.red,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  widget.onlineStatus ? 'Estado actual: Online' : 'Estado actual: Offline',
+                  widget.onlineStatus
+                      ? 'Estado actual: Online'
+                      : 'Estado actual: Offline',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: widget.onlineStatus ? Colors.green : Colors.red,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: widget.onlineStatus ? Colors.green : Colors.red,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 28),
                 OutlinedButton.icon(

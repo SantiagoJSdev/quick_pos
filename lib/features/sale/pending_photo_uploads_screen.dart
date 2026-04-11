@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/api/api_client.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/uploads_api.dart';
-import '../../core/photos/product_photo_upload_sync.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/photos/pending_product_photo_upload_entry.dart';
+import '../../core/photos/product_photo_upload_sync.dart';
 import '../../core/storage/local_prefs.dart';
 import 'pos_sale_ui_tokens.dart';
 
@@ -14,10 +14,16 @@ class PendingPhotoUploadsScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.localPrefs,
+    required this.uploadsApi,
+    required this.productsApi,
+    required this.catalogInvalidationBus,
   });
 
   final String storeId;
   final LocalPrefs localPrefs;
+  final UploadsApi uploadsApi;
+  final ProductsApi productsApi;
+  final CatalogInvalidationBus catalogInvalidationBus;
 
   @override
   State<PendingPhotoUploadsScreen> createState() =>
@@ -26,7 +32,7 @@ class PendingPhotoUploadsScreen extends StatefulWidget {
 
 class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
   bool _loading = true;
-  bool _retryingNow = false;
+  bool _flushBusy = false;
   String? _error;
   List<PendingProductPhotoUploadEntry> _rows = const [];
   String _filter = 'ALL';
@@ -66,9 +72,85 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
     return _rows.where((e) => !e.manualReview).toList();
   }
 
-  Future<void> _retryNow(PendingProductPhotoUploadEntry entry) async {
-    if (_retryingNow) return;
-    setState(() => _retryingNow = true);
+  ProductPhotoUploader _buildUploader() {
+    return (e) async {
+      final upload = await widget.uploadsApi.uploadProductImage(
+        widget.storeId,
+        filePath: e.localFilePath,
+      );
+      final updated = await widget.productsApi.associateProductImage(
+        widget.storeId,
+        e.productId,
+        imageUrl: upload.url,
+      );
+      final cache = await widget.localPrefs.loadCatalogProductsCache();
+      final i = cache.indexWhere((p) => p.id == updated.id);
+      if (i >= 0) {
+        cache[i] = updated;
+      } else {
+        cache.add(updated);
+      }
+      await widget.localPrefs.saveCatalogProductsCache(cache);
+      widget.catalogInvalidationBus.invalidateFromLocalMutation(
+        productIds: {updated.id},
+      );
+    };
+  }
+
+  Future<void> _flushQueue({bool showSummarySnack = true}) async {
+    if (_flushBusy) return;
+    setState(() => _flushBusy = true);
+    try {
+      final result = await flushPendingProductPhotoUploads(
+        storeId: widget.storeId,
+        prefs: widget.localPrefs,
+        uploader: _buildUploader(),
+      );
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      if (showSummarySnack && mounted) {
+        final parts = <String>[];
+        if (result.uploaded > 0) {
+          parts.add(
+            result.uploaded == 1
+                ? '1 foto subida'
+                : '${result.uploaded} fotos subidas',
+          );
+        }
+        if (result.removedMissingFile > 0) {
+          parts.add(
+            '${result.removedMissingFile} archivo local inexistente, quitado de la cola',
+          );
+        }
+        if (result.updatedAsFailed > 0 && result.uploaded == 0) {
+          parts.add('Error al subir: revisá el mensaje en la primera fila');
+        } else if (result.updatedAsFailed > 0) {
+          parts.add('Quedaron entradas con error');
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              parts.isEmpty
+                  ? 'Nada que enviar (o todo requiere revisión manual).'
+                  : parts.join(' · '),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo procesar la cola: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _flushBusy = false);
+    }
+  }
+
+  Future<void> _retryRow(PendingProductPhotoUploadEntry entry) async {
+    if (_flushBusy) return;
+    setState(() => _flushBusy = true);
     try {
       final all = await widget.localPrefs.loadPendingProductPhotoUploads();
       final i = all.indexWhere((e) => e.opId == entry.opId);
@@ -87,28 +169,11 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
         await widget.localPrefs.savePendingProductPhotoUploads(all);
       }
 
-      final api = ApiClient();
-      final uploadsApi = UploadsApi(api);
-      final productsApi = ProductsApi(api);
-      try {
-        await flushPendingProductPhotoUploads(
-          storeId: widget.storeId,
-          prefs: widget.localPrefs,
-          uploader: (e) async {
-            final upload = await uploadsApi.uploadProductImage(
-              widget.storeId,
-              filePath: e.localFilePath,
-            );
-            await productsApi.associateProductImage(
-              widget.storeId,
-              e.productId,
-              imageUrl: upload.url,
-            );
-          },
-        );
-      } finally {
-        api.close();
-      }
+      await flushPendingProductPhotoUploads(
+        storeId: widget.storeId,
+        prefs: widget.localPrefs,
+        uploader: _buildUploader(),
+      );
 
       if (!mounted) return;
       await _load();
@@ -122,7 +187,7 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
         SnackBar(content: Text('No se pudo reintentar: $e')),
       );
     } finally {
-      if (mounted) setState(() => _retryingNow = false);
+      if (mounted) setState(() => _flushBusy = false);
     }
   }
 
@@ -133,6 +198,19 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
         title: const Text('Cola de fotos'),
         backgroundColor: PosSaleUi.surface,
         foregroundColor: PosSaleUi.text,
+        actions: [
+          IconButton(
+            tooltip: 'Subir cola ahora',
+            onPressed: _loading || _flushBusy ? null : () => _flushQueue(),
+            icon: _flushBusy
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cloud_upload_outlined),
+          ),
+        ],
       ),
       backgroundColor: PosSaleUi.bg,
       body: _loading
@@ -159,8 +237,9 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
                   ),
                 )
               : RefreshIndicator(
-                  onRefresh: _load,
+                  onRefresh: () => _flushQueue(showSummarySnack: false),
                   child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
                     children: [
                       Wrap(
@@ -180,7 +259,8 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
                           ChoiceChip(
                             label: const Text('Revisión manual'),
                             selected: _filter == 'MANUAL',
-                            onSelected: (_) => setState(() => _filter = 'MANUAL'),
+                            onSelected: (_) =>
+                                setState(() => _filter = 'MANUAL'),
                           ),
                         ],
                       ),
@@ -196,8 +276,9 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
                         )
                       else
                         ..._filtered.map((e) {
-                          final created =
-                              DateTime.tryParse(e.createdAtIso)?.toLocal().toString();
+                          final created = DateTime.tryParse(e.createdAtIso)
+                              ?.toLocal()
+                              .toString();
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: Container(
@@ -230,7 +311,8 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
                                           Clipboard.setData(
                                             ClipboardData(text: e.opId),
                                           );
-                                          ScaffoldMessenger.of(context).showSnackBar(
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
                                             const SnackBar(
                                               content: Text('opId copiado'),
                                             ),
@@ -242,13 +324,12 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
                                           color: PosSaleUi.textMuted,
                                         ),
                                       ),
-                                      if (e.manualReview)
-                                        TextButton(
-                                          onPressed: _retryingNow
-                                              ? null
-                                              : () => _retryNow(e),
-                                          child: const Text('Reintentar ahora'),
-                                        ),
+                                      TextButton(
+                                        onPressed: _flushBusy
+                                            ? null
+                                            : () => _retryRow(e),
+                                        child: const Text('Reintentar'),
+                                      ),
                                     ],
                                   ),
                                   Text(
@@ -280,7 +361,7 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
                                     const SizedBox(height: 4),
                                     Text(
                                       e.lastError!,
-                                      maxLines: 3,
+                                      maxLines: 4,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: Colors.orangeAccent,
@@ -299,4 +380,3 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
     );
   }
 }
-

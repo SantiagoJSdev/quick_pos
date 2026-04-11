@@ -145,6 +145,40 @@ class LocalPrefs {
     await savePendingProductPhotoUploads(list);
   }
 
+  /// Tras crear en servidor un producto que en cola era `local_*`, actualiza fotos pendientes.
+  Future<void> remapPendingProductPhotoUploadProductId({
+    required String storeId,
+    required String fromProductId,
+    required String toProductId,
+  }) async {
+    final from = fromProductId.trim();
+    final to = toProductId.trim();
+    if (from.isEmpty || to.isEmpty || from == to) return;
+    final list = await loadPendingProductPhotoUploads();
+    var changed = false;
+    final next = <PendingProductPhotoUploadEntry>[];
+    for (final e in list) {
+      if (e.storeId == storeId && e.productId == from) {
+        next.add(
+          PendingProductPhotoUploadEntry(
+            opId: e.opId,
+            storeId: e.storeId,
+            productId: to,
+            localFilePath: e.localFilePath,
+            createdAtIso: e.createdAtIso,
+            attemptCount: e.attemptCount,
+            lastError: e.lastError,
+            manualReview: e.manualReview,
+          ),
+        );
+        changed = true;
+      } else {
+        next.add(e);
+      }
+    }
+    if (changed) await savePendingProductPhotoUploads(next);
+  }
+
   /// UUID v4 estable por instalación (sync / ventas).
   Future<String> getOrCreateDeviceId() async {
     final existing = _prefs.getString(_kDeviceId);

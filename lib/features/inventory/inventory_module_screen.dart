@@ -25,6 +25,7 @@ class InventoryModuleScreen extends StatefulWidget {
     required this.localPrefs,
     required this.catalogInvalidationBus,
     this.shellOnline = true,
+    this.shellInventoryTabActive = true,
   });
 
   final String storeId;
@@ -38,6 +39,9 @@ class InventoryModuleScreen extends StatefulWidget {
 
   /// Desde [MainShell]: en offline se usa caché sin esperar timeouts de red.
   final bool shellOnline;
+
+  /// `true` cuando la pestaña principal del shell es Inventario (refresca lista al volver).
+  final bool shellInventoryTabActive;
 
   @override
   State<InventoryModuleScreen> createState() => _InventoryModuleScreenState();
@@ -131,6 +135,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                   localPrefs: widget.localPrefs,
                   catalogInvalidationBus: widget.catalogInvalidationBus,
                   shellOnline: widget.shellOnline,
+                  shellInventoryTabActive: widget.shellInventoryTabActive,
                   onLoadedCount: (n) {
                     if (mounted) setState(() => _stockLineCount = n);
                   },

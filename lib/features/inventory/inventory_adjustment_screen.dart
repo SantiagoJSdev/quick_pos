@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/storage/local_prefs.dart';
@@ -20,6 +21,7 @@ class InventoryAdjustmentScreen extends StatefulWidget {
     required this.productId,
     required this.productLabel,
     this.suggestedReason,
+    this.catalogInvalidationBus,
   });
 
   final String storeId;
@@ -30,6 +32,8 @@ class InventoryAdjustmentScreen extends StatefulWidget {
 
   /// P. ej. alta de producto + `IN_ADJUST` “Inventario inicial” (`FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §3).
   final String? suggestedReason;
+
+  final CatalogInvalidationBus? catalogInvalidationBus;
 
   @override
   State<InventoryAdjustmentScreen> createState() =>
@@ -124,6 +128,9 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
     try {
       final res = await widget.inventoryApi.postAdjustment(widget.storeId, body);
       if (!mounted) return;
+      widget.catalogInvalidationBus?.invalidateFromLocalMutation(
+        productIds: {widget.productId},
+      );
       final msg = res.skipped
           ? 'Ya estaba aplicado (idempotente). Stock sin cambios duplicados.'
           : 'Ajuste aplicado.';
@@ -148,6 +155,9 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
           ),
         );
         if (!mounted) return;
+        widget.catalogInvalidationBus?.invalidateFromLocalMutation(
+          productIds: {widget.productId},
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(

@@ -215,6 +215,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   bool get _checkoutPanelVisible =>
       !_loading && _error == null && _selectedDocumentCurrency != null;
 
+  void _logPosCheckoutApiFailure(ApiError e, String uiMessage) {
+    final summary = _cart
+        .map((l) => '${l.productId} x${l.quantity} (${l.name})')
+        .join('; ');
+    debugPrint(
+      '[POS checkout] storeId=${widget.storeId} http=${e.statusCode} '
+      'error=${e.error} messages=${e.messages} requestId=${e.requestId} '
+      'uiMessage=${uiMessage.replaceAll('\n', ' ')} cart=[$summary]',
+    );
+  }
+
   void _showCheckoutPanelMessage(
     String message, {
     bool error = false,
@@ -1234,6 +1245,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           : raw.contains('PAYMENTS_INVALID_AMOUNT')
           ? 'Hay un monto de pago inválido. Revisá los campos de cobro.'
           : raw;
+      _logPosCheckoutApiFailure(e, msg);
       _showCheckoutPanelMessage(msg, error: true);
     } catch (e) {
       if (!mounted) return;
@@ -1618,6 +1630,125 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return null;
   }
 
+  /// Con teclado abierto el cuerpo del scaffold se encoge y la lista inline queda
+  /// sin altura; mostramos sugerencias en un panel encima del teclado.
+  bool _keyboardSuggestionOverlayActive(BuildContext context) {
+    if (!_searchFocus.hasFocus) return false;
+    if (_loading || _error != null) return false;
+    if (_search.text.trim().isEmpty) return false;
+    return MediaQuery.viewInsetsOf(context).bottom > 0;
+  }
+
+  bool _showInlineSearchSuggestions(BuildContext context) {
+    if (_search.text.trim().isEmpty || _loading || _error != null) {
+      return false;
+    }
+    return !_keyboardSuggestionOverlayActive(context);
+  }
+
+  void _dismissSearchSuggestionOverlay() {
+    _searchFocus.unfocus();
+  }
+
+  Widget _buildSearchSuggestionsScrollable() {
+    if (_searchPreview.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            'Sin coincidencias',
+            style: TextStyle(color: PosSaleUi.textMuted),
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: EdgeInsets.zero,
+      itemCount: _searchPreview.length,
+      separatorBuilder: (context, i) =>
+          const Divider(height: 1, color: PosSaleUi.divider),
+      itemBuilder: (context, i) {
+        final p = _searchPreview[i];
+        final docLbl = _documentPriceLabel(p);
+        final bc = p.barcode?.trim();
+        return PosSaleSearchResultTile(
+          product: p,
+          primaryLine: docLbl ?? '${p.price} ${p.currency}',
+          secondaryLine: [
+            'SKU ${p.sku}',
+            if (bc != null && bc.isNotEmpty) bc,
+          ].join(' · '),
+          imageUrl: _resolvedImageUrl(p.imageUrl),
+          onTap: () => unawaited(_addProductToCart(p)),
+        );
+      },
+    );
+  }
+
+  Widget _buildKeyboardSuggestionOverlay(BuildContext context) {
+    final screenH = MediaQuery.sizeOf(context).height;
+    final panelH = min(400.0, max(200.0, screenH * 0.46));
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _dismissSearchSuggestionOverlay,
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.45),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: GestureDetector(
+            onTap: () {},
+            child: Material(
+              color: PosSaleUi.searchSuggestionsSurface,
+              elevation: 16,
+              shadowColor: Colors.black,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SizedBox(
+                width: double.infinity,
+                height: panelH,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 4, 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Productos',
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: PosSaleUi.text,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cerrar',
+                            onPressed: _dismissSearchSuggestionOverlay,
+                            icon: const Icon(
+                              Icons.close,
+                              color: PosSaleUi.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, color: PosSaleUi.divider),
+                    Expanded(child: _buildSearchSuggestionsScrollable()),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _bumpLine(int index, double delta) {
     final line = _cart[index];
     if (line.isByWeight) {
@@ -1802,245 +1933,225 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                   ),
                 ),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final idealSearchH =
-                        _kSearchRowExtent * _kSearchVisibleRows +
-                        (_kSearchVisibleRows - 1);
-                    // Share Expanded between suggestions and ticket: reserve a slice for the
-                    // cart block, use the remainder for up to 5 result rows (no fixed % cap
-                    // that only showed ~2 rows when plenty of space was left).
-                    final cartReserve =
-                        (constraints.maxHeight * _kSearchCartReserveFraction)
-                            .clamp(
-                              _kSearchCartReserveMin,
-                              _kSearchCartReserveMax,
-                            );
-                    final searchCap = min(
-                      idealSearchH,
-                      max(0.0, constraints.maxHeight - cartReserve),
-                    ).clamp(0.0, constraints.maxHeight);
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_search.text.trim().isNotEmpty &&
-                            !_loading &&
-                            _error == null) ...[
-                          Material(
-                            color: PosSaleUi.searchSuggestionsSurface,
-                            elevation: 3,
-                            child: _searchPreview.isEmpty
-                                ? const Padding(
-                                    padding: EdgeInsets.all(16),
-                                    child: Text(
-                                      'Sin coincidencias',
-                                      style: TextStyle(
-                                        color: PosSaleUi.textMuted,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final idealSearchH =
+                            _kSearchRowExtent * _kSearchVisibleRows +
+                            (_kSearchVisibleRows - 1);
+                        // Share Expanded between suggestions and ticket: reserve a slice for the
+                        // cart block, use the remainder for up to 5 result rows (no fixed % cap
+                        // that only showed ~2 rows when plenty of space was left).
+                        final cartReserve =
+                            (constraints.maxHeight *
+                                    _kSearchCartReserveFraction)
+                                .clamp(
+                                  _kSearchCartReserveMin,
+                                  _kSearchCartReserveMax,
+                                );
+                        final searchCap = min(
+                          idealSearchH,
+                          max(0.0, constraints.maxHeight - cartReserve),
+                        ).clamp(0.0, constraints.maxHeight);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (_showInlineSearchSuggestions(context)) ...[
+                              Material(
+                                color: PosSaleUi.searchSuggestionsSurface,
+                                elevation: 3,
+                                child: SizedBox(
+                                  height: searchCap,
+                                  child: _buildSearchSuggestionsScrollable(),
+                                ),
+                              ),
+                            ],
+                            Expanded(
+                              child: _loading
+                                  ? const Center(
+                                      child: CircularProgressIndicator(
+                                        color: PosSaleUi.primary,
                                       ),
-                                    ),
-                                  )
-                                : SizedBox(
-                                    height: searchCap,
-                                    child: ListView.separated(
-                                      padding: EdgeInsets.zero,
-                                      itemCount: _searchPreview.length,
-                                      separatorBuilder: (context, i) =>
-                                          const Divider(
-                                            height: 1,
-                                            color: PosSaleUi.divider,
-                                          ),
-                                      itemBuilder: (context, i) {
-                                        final p = _searchPreview[i];
-                                        final docLbl = _documentPriceLabel(p);
-                                        final bc = p.barcode?.trim();
-                                        return PosSaleSearchResultTile(
-                                          product: p,
-                                          primaryLine:
-                                              docLbl ??
-                                              '${p.price} ${p.currency}',
-                                          secondaryLine: [
-                                            'SKU ${p.sku}',
-                                            if (bc != null && bc.isNotEmpty) bc,
-                                          ].join(' · '),
-                                          imageUrl: _resolvedImageUrl(
-                                            p.imageUrl,
-                                          ),
-                                          onTap: () =>
-                                              unawaited(_addProductToCart(p)),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                          ),
-                        ],
-                        Expanded(
-                          child: _loading
-                              ? const Center(
-                                  child: CircularProgressIndicator(
-                                    color: PosSaleUi.primary,
-                                  ),
-                                )
-                              : _error != null
-                              ? Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(24),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
+                                    )
+                                  : _error != null
+                                  ? Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(24),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              _error!,
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(
+                                                color: PosSaleUi.text,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 16),
+                                            FilledButton(
+                                              onPressed: _load,
+                                              child: const Text('Reintentar'),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    )
+                                  : Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
                                       children: [
-                                        Text(
-                                          _error!,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(
-                                            color: PosSaleUi.text,
+                                        Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            16,
+                                            10,
+                                            16,
+                                            6,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Text(
+                                                'TICKET ACTUAL',
+                                                style: PosSaleUi.titleCart(
+                                                  context,
+                                                ),
+                                              ),
+                                              const Spacer(),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 2,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: PosSaleUi.primary,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        999,
+                                                      ),
+                                                ),
+                                                child: Text(
+                                                  _cartQtySummary(),
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                        const SizedBox(height: 16),
-                                        FilledButton(
-                                          onPressed: _load,
-                                          child: const Text('Reintentar'),
+                                        Expanded(
+                                          child: cartEmpty
+                                              ? Center(
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                          32,
+                                                        ),
+                                                    child: Column(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons
+                                                              .shopping_cart_outlined,
+                                                          size: 56,
+                                                          color: PosSaleUi
+                                                              .textFaint,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 16,
+                                                        ),
+                                                        const Text(
+                                                          'El ticket está vacío',
+                                                          style: TextStyle(
+                                                            color: PosSaleUi
+                                                                .textMuted,
+                                                            fontWeight:
+                                                                FontWeight.w500,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 8,
+                                                        ),
+                                                        Text(
+                                                          'Buscá un producto o escaneá el código.',
+                                                          textAlign:
+                                                              TextAlign.center,
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            color: PosSaleUi
+                                                                .textFaint,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                )
+                                              : RefreshIndicator(
+                                                  color: PosSaleUi.primary,
+                                                  onRefresh: _load,
+                                                  child: ListView.separated(
+                                                    itemCount: _cart.length,
+                                                    separatorBuilder:
+                                                        (context, i) =>
+                                                            const Divider(
+                                                              height: 1,
+                                                              color: PosSaleUi
+                                                                  .divider,
+                                                            ),
+                                                    itemBuilder: (context, i) {
+                                                      final l = _cart[i];
+                                                      final uf =
+                                                          _functionalFromDocument(
+                                                            l.documentUnitPrice,
+                                                          );
+                                                      final lf =
+                                                          _functionalFromDocument(
+                                                            l.lineTotalDocument,
+                                                          );
+                                                      return PosSaleCartLineTile(
+                                                        line: l,
+                                                        imageUrl:
+                                                            _cartImageUrlForProductId(
+                                                              l.productId,
+                                                            ),
+                                                        unitFunctional: uf,
+                                                        lineTotalFunctional: lf,
+                                                        functionalCode: func,
+                                                        documentCode:
+                                                            doc ??
+                                                            l.documentCurrencyCode,
+                                                        onMinus: () =>
+                                                            _bumpLine(i, -1),
+                                                        onPlus: () =>
+                                                            _bumpLine(i, 1),
+                                                        onQtyTap: () =>
+                                                            _onLineQtyTap(i),
+                                                        onDismissed: () =>
+                                                            _removeLineByProductId(
+                                                              l.productId,
+                                                            ),
+                                                      );
+                                                    },
+                                                  ),
+                                                ),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                )
-                              : Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        16,
-                                        10,
-                                        16,
-                                        6,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Text(
-                                            'TICKET ACTUAL',
-                                            style: PosSaleUi.titleCart(context),
-                                          ),
-                                          const Spacer(),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: PosSaleUi.primary,
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              _cartQtySummary(),
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: cartEmpty
-                                          ? Center(
-                                              child: Padding(
-                                                padding: const EdgeInsets.all(
-                                                  32,
-                                                ),
-                                                child: Column(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      Icons
-                                                          .shopping_cart_outlined,
-                                                      size: 56,
-                                                      color:
-                                                          PosSaleUi.textFaint,
-                                                    ),
-                                                    const SizedBox(height: 16),
-                                                    const Text(
-                                                      'El ticket está vacío',
-                                                      style: TextStyle(
-                                                        color:
-                                                            PosSaleUi.textMuted,
-                                                        fontWeight:
-                                                            FontWeight.w500,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 8),
-                                                    Text(
-                                                      'Buscá un producto o escaneá el código.',
-                                                      textAlign:
-                                                          TextAlign.center,
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color:
-                                                            PosSaleUi.textFaint,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            )
-                                          : RefreshIndicator(
-                                              color: PosSaleUi.primary,
-                                              onRefresh: _load,
-                                              child: ListView.separated(
-                                                itemCount: _cart.length,
-                                                separatorBuilder:
-                                                    (context, i) =>
-                                                        const Divider(
-                                                          height: 1,
-                                                          color:
-                                                              PosSaleUi.divider,
-                                                        ),
-                                                itemBuilder: (context, i) {
-                                                  final l = _cart[i];
-                                                  final uf =
-                                                      _functionalFromDocument(
-                                                        l.documentUnitPrice,
-                                                      );
-                                                  final lf =
-                                                      _functionalFromDocument(
-                                                        l.lineTotalDocument,
-                                                      );
-                                                  return PosSaleCartLineTile(
-                                                    line: l,
-                                                    imageUrl:
-                                                        _cartImageUrlForProductId(
-                                                          l.productId,
-                                                        ),
-                                                    unitFunctional: uf,
-                                                    lineTotalFunctional: lf,
-                                                    functionalCode: func,
-                                                    documentCode:
-                                                        doc ??
-                                                        l.documentCurrencyCode,
-                                                    onMinus: () =>
-                                                        _bumpLine(i, -1),
-                                                    onPlus: () =>
-                                                        _bumpLine(i, 1),
-                                                    onQtyTap: () =>
-                                                        _onLineQtyTap(i),
-                                                    onDismissed: () =>
-                                                        _removeLineByProductId(
-                                                          l.productId,
-                                                        ),
-                                                  );
-                                                },
-                                              ),
-                                            ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                      ],
-                    );
-                  },
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    if (_keyboardSuggestionOverlayActive(context))
+                      Positioned.fill(
+                        child: _buildKeyboardSuggestionOverlay(context),
+                      ),
+                  ],
                 ),
               ),
               if (!_loading && _error == null && doc != null)

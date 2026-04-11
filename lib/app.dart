@@ -14,6 +14,7 @@ import 'core/api/sync_api.dart';
 import 'core/api/uploads_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
 import 'core/config/app_config.dart';
+import 'core/network/api_connectivity_debug.dart';
 import 'core/network/backend_origin_resolver.dart';
 import 'core/network/connectivity_util.dart';
 import 'core/storage/local_prefs.dart';
@@ -67,15 +68,28 @@ class _QuickPosAppState extends State<QuickPosApp> {
 
   Future<void> _tryAutoResolveApiBaseIfNeeded() async {
     final existing = await widget.localPrefs.getApiBaseUrlOverride();
-    if (existing != null && existing.isNotEmpty) return;
+    if (existing != null && existing.isNotEmpty) {
+      traceApiConnectivity(
+        'Auto-resolve omitido: ya hay API_BASE override → $existing',
+      );
+      return;
+    }
 
     List<ConnectivityResult> conn;
     try {
       conn = await Connectivity().checkConnectivity();
-    } catch (_) {
+    } catch (e) {
+      traceApiConnectivity(
+        'Auto-resolve omitido: checkConnectivity error → $e',
+      );
       return;
     }
-    if (!connectivityAppearsOnline(conn)) return;
+    if (!connectivityAppearsOnline(conn)) {
+      traceApiConnectivity(
+        'Auto-resolve omitido: sin conectividad aparente → $conn',
+      );
+      return;
+    }
 
     final resolver = BackendOriginResolver();
     final vercel = await resolver.fetchFromVercel();
@@ -84,10 +98,18 @@ class _QuickPosAppState extends State<QuickPosApp> {
         vercel.baseUrl,
         vercel.updatedAt,
       );
+    } else {
+      traceApiConnectivity(
+        'Vercel no devolvió URL (timeout/red/JSON); se usa origen guardado si hay',
+      );
     }
 
-    final origin = vercel?.baseUrl ?? await widget.localPrefs.getPersistedApiOrigin();
-    if (origin == null || origin.isEmpty) return;
+    final origin =
+        vercel?.baseUrl ?? await widget.localPrefs.getPersistedApiOrigin();
+    if (origin == null || origin.isEmpty) {
+      traceApiConnectivity('Sin origen (Vercel + prefs vacíos)');
+      return;
+    }
 
     final apiV1 = apiV1BaseFromOrigin(origin);
     if (apiV1.isEmpty) return;
@@ -96,14 +118,25 @@ class _QuickPosAppState extends State<QuickPosApp> {
     final storeId = storeRaw?.trim();
     var ok = false;
     if (storeId != null && storeId.isNotEmpty) {
+      traceApiConnectivity(
+        'Validando API con GET business-settings (storeId presente)…',
+      );
       final c = ApiClient(baseUrl: apiV1);
       try {
         await StoresApi(c).getBusinessSettings(storeId);
         ok = true;
-      } catch (_) {}
+        traceApiConnectivity('business-settings OK → se guarda override');
+      } catch (e) {
+        traceApiConnectivity('business-settings falló: $e');
+      }
       c.close();
     } else {
       ok = await probeApiV1Reachable(apiV1);
+      if (!ok) {
+        traceApiConnectivity(
+          'Probe falló (p. ej. ngrok caído); el origen igual quedó en prefs',
+        );
+      }
     }
 
     if (ok) {
@@ -119,7 +152,27 @@ class _QuickPosAppState extends State<QuickPosApp> {
     await widget.localPrefs.getOrCreateDeviceId();
     await _tryAutoResolveApiBaseIfNeeded();
     final apiOverride = await widget.localPrefs.getApiBaseUrlOverride();
-    AppConfig.setRuntimeApiBaseUrlOverride(apiOverride);
+    if (apiOverride != null && apiOverride.isNotEmpty) {
+      AppConfig.setRuntimeApiBaseUrlOverride(apiOverride);
+      traceApiConnectivity('Efectiva: override prefs → $apiOverride');
+    } else {
+      final origin = await widget.localPrefs.getPersistedApiOrigin();
+      final derived = (origin != null && origin.isNotEmpty)
+          ? apiV1BaseFromOrigin(origin)
+          : '';
+      if (derived.isNotEmpty) {
+        AppConfig.setRuntimeApiBaseUrlOverride(derived);
+        traceApiConnectivity(
+          'Efectiva: origen nube persistido → $derived '
+          '(probe/settings no confirmaron; misma base que Postman/ngrok)',
+        );
+      } else {
+        AppConfig.setRuntimeApiBaseUrlOverride(null);
+        traceApiConnectivity(
+          'Efectiva: dart-define/default → ${AppConfig.effectiveApiBaseUrl}',
+        );
+      }
+    }
     final id = await widget.localPrefs.getStoreId();
     final trimmed = id?.trim();
     if (!mounted) return;
@@ -156,32 +209,30 @@ class _QuickPosAppState extends State<QuickPosApp> {
           ? AppTheme.light()
           : QuickMarketShellTheme.theme(),
       home: _booting
-          ? const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            )
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _storeId == null
-              ? LinkStoreScreen(
-                  storesApi: _storesApi,
-                  exchangeRatesApi: _exchangeRatesApi,
-                  onLinked: _onLinked,
-                  localPrefs: widget.localPrefs,
-                )
-              : MainShell(
-                  storeId: _storeId!,
-                  storesApi: _storesApi,
-                  exchangeRatesApi: _exchangeRatesApi,
-                  inventoryApi: _inventoryApi,
-                  productsApi: _productsApi,
-                  salesApi: _salesApi,
-                  purchasesApi: _purchasesApi,
-                  saleReturnsApi: _saleReturnsApi,
-                  suppliersApi: _suppliersApi,
-                  syncApi: _syncApi,
-                  uploadsApi: _uploadsApi,
-                  catalogInvalidationBus: _catalogInvalidationBus,
-                  onChangeStore: _onChangeStore,
-                  localPrefs: widget.localPrefs,
-                ),
+          ? LinkStoreScreen(
+              storesApi: _storesApi,
+              exchangeRatesApi: _exchangeRatesApi,
+              onLinked: _onLinked,
+              localPrefs: widget.localPrefs,
+            )
+          : MainShell(
+              storeId: _storeId!,
+              storesApi: _storesApi,
+              exchangeRatesApi: _exchangeRatesApi,
+              inventoryApi: _inventoryApi,
+              productsApi: _productsApi,
+              salesApi: _salesApi,
+              purchasesApi: _purchasesApi,
+              saleReturnsApi: _saleReturnsApi,
+              suppliersApi: _suppliersApi,
+              syncApi: _syncApi,
+              uploadsApi: _uploadsApi,
+              catalogInvalidationBus: _catalogInvalidationBus,
+              onChangeStore: _onChangeStore,
+              localPrefs: widget.localPrefs,
+            ),
     );
   }
 }

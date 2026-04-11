@@ -16,6 +16,7 @@ import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/catalog_offline_sync.dart';
 import '../../core/network/api_base_cloud_sync.dart';
+import '../../core/network/api_connectivity_debug.dart';
 import '../../core/network/connectivity_util.dart';
 import '../../core/photos/product_photo_upload_sync.dart';
 import '../../core/pos/pos_terminal_info.dart';
@@ -87,8 +88,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   DateTime? _lastCloudResolverAttempt;
 
   void _recomputeOnlineFlag() {
-    final hasNetwork =
-        connectivityAppearsOnline(_lastConn ?? const [ConnectivityResult.none]);
+    final hasNetwork = connectivityAppearsOnline(
+      _lastConn ?? const [ConnectivityResult.none],
+    );
     _isOnline = !_manualForceOffline && hasNetwork && _backendReachable;
   }
 
@@ -129,8 +131,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   Future<void> _probeBackendHealth() async {
     if (!mounted || _manualForceOffline) return;
-    final hasNetwork =
-        connectivityAppearsOnline(_lastConn ?? const [ConnectivityResult.none]);
+    final hasNetwork = connectivityAppearsOnline(
+      _lastConn ?? const [ConnectivityResult.none],
+    );
     if (!hasNetwork) {
       if (_backendReachable) {
         _backendReachable = false;
@@ -163,7 +166,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           mounted) {
         unawaited(_runAutoSync(reason: 'backend-recovered'));
       }
-    } catch (_) {
+    } catch (e) {
+      traceApiConnectivity(
+        'Health probe GET business-settings falló (storeId=${widget.storeId}): $e',
+      );
       if (_backendReachable) {
         _backendReachable = false;
         if (mounted) setState(_recomputeOnlineFlag);
@@ -198,7 +204,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     try {
       final t = await PosTerminalInfo.load(widget.localPrefs);
       if (!mounted) return;
-      final cycle = await runSyncCycle(
+      await runSyncCycle(
         storeId: widget.storeId,
         prefs: widget.localPrefs,
         syncApi: widget.syncApi,
@@ -208,12 +214,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         doPull: true,
         doFlush: true,
       );
-      _backendReachable = cycle.pullError == null &&
-          !cycle.flush.hadTransportFailure &&
-          !cycle.flush.hadRetryableFailure;
-      if (mounted) {
-        setState(_recomputeOnlineFlag);
-      }
+      // No tocar _backendReachable aquí: el sync (pull/watermark/cola) puede fallar
+      // aunque `GET .../business-settings` responda bien (como en Postman).
+      // El estado "online" lo define `_probeBackendHealth` con esa misma ruta.
       await flushPendingCatalogMutations(
         storeId: widget.storeId,
         prefs: widget.localPrefs,
@@ -241,16 +244,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             cache.add(updated);
           }
           await widget.localPrefs.saveCatalogProductsCache(cache);
-          widget.catalogInvalidationBus
-              .invalidateFromLocalMutation(productIds: {updated.id});
+          widget.catalogInvalidationBus.invalidateFromLocalMutation(
+            productIds: {updated.id},
+          );
         },
       );
-      if (mounted) setState(_recomputeOnlineFlag);
-    } catch (_) {
-      _backendReachable = false;
-      if (mounted) {
-        setState(_recomputeOnlineFlag);
-      }
+    } catch (e) {
+      traceApiConnectivity(
+        'runSyncCycle / post-sync falló (no cambia online): $e',
+      );
     } finally {
       _autoSyncBusy = false;
     }
@@ -280,130 +282,169 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         body: IndexedStack(
           index: _index,
           children: [
-              KeyedSubtree(
-                key: const ValueKey<String>('shell_tab_inicio'),
-                child: StoreDashboardScreen(
-                  storeId: widget.storeId,
-                  storesApi: widget.storesApi,
-                  exchangeRatesApi: widget.exchangeRatesApi,
-                  onChangeStore: widget.onChangeStore,
-                  localPrefs: widget.localPrefs,
-                  forcedOffline: _manualForceOffline,
-                  onlineStatus: _isOnline,
-                  onToggleConnectivityMode: () {
+            KeyedSubtree(
+              key: const ValueKey<String>('shell_tab_inicio'),
+              child: StoreDashboardScreen(
+                storeId: widget.storeId,
+                storesApi: widget.storesApi,
+                exchangeRatesApi: widget.exchangeRatesApi,
+                onChangeStore: widget.onChangeStore,
+                localPrefs: widget.localPrefs,
+                forcedOffline: _manualForceOffline,
+                onlineStatus: _isOnline,
+                onBackendTransportFailure: () {
+                  if (!mounted) return;
+                  setState(() {
+                    _backendReachable = false;
+                    _recomputeOnlineFlag();
+                  });
+                },
+                onConnectivityModeButtonPressed: () {
+                  traceApiConnectivity(
+                    'Botón conectividad: online=$_isOnline '
+                    'forzadoOffline=$_manualForceOffline '
+                    'backendAlcanzable=$_backendReachable',
+                  );
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (_isOnline) {
                     setState(() {
-                      _manualForceOffline = !_manualForceOffline;
-                      if (!_manualForceOffline) {
-                        _backendReachable = true;
-                      }
+                      _manualForceOffline = true;
                       _recomputeOnlineFlag();
                     });
-                    if (!_manualForceOffline) {
-                      unawaited(_runAutoSync(reason: 'manual-online'));
-                      unawaited(_probeBackendHealth());
+                    messenger?.showSnackBar(
+                      const SnackBar(
+                        content: Text('Modo offline forzado.'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    traceApiConnectivity(
+                      'Tras forzar offline: online=$_isOnline',
+                    );
+                    return;
+                  }
+                  setState(() {
+                    if (_manualForceOffline) {
+                      _manualForceOffline = false;
                     }
-                  },
-                ),
+                    _backendReachable = false;
+                    _recomputeOnlineFlag();
+                  });
+                  messenger?.showSnackBar(
+                    const SnackBar(
+                      content: Text('Reintentando conexión con el servidor…'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                  traceApiConnectivity(
+                    'Tras intentar online: online=$_isOnline '
+                    'forzadoOffline=$_manualForceOffline',
+                  );
+                  unawaited(_runAutoSync(reason: 'manual-online'));
+                  unawaited(_probeBackendHealth());
+                },
               ),
-              KeyedSubtree(
-                key: const ValueKey<String>('shell_tab_inventario'),
-                child: InventoryModuleScreen(
-                  storeId: widget.storeId,
-                  inventoryApi: widget.inventoryApi,
-                  productsApi: widget.productsApi,
-                  suppliersApi: widget.suppliersApi,
-                  storesApi: widget.storesApi,
-                  uploadsApi: widget.uploadsApi,
-                  localPrefs: widget.localPrefs,
-                  catalogInvalidationBus: widget.catalogInvalidationBus,
-                  shellOnline: _isOnline,
-                ),
+            ),
+            KeyedSubtree(
+              key: const ValueKey<String>('shell_tab_inventario'),
+              child: InventoryModuleScreen(
+                storeId: widget.storeId,
+                inventoryApi: widget.inventoryApi,
+                productsApi: widget.productsApi,
+                suppliersApi: widget.suppliersApi,
+                storesApi: widget.storesApi,
+                uploadsApi: widget.uploadsApi,
+                localPrefs: widget.localPrefs,
+                catalogInvalidationBus: widget.catalogInvalidationBus,
+                shellOnline: _isOnline,
+                shellInventoryTabActive: _index == 1,
               ),
-              KeyedSubtree(
-                key: const ValueKey<String>('shell_tab_venta'),
-                child: SalesModuleScreen(
-                  storeId: widget.storeId,
-                  productsApi: widget.productsApi,
-                  storesApi: widget.storesApi,
-                  exchangeRatesApi: widget.exchangeRatesApi,
-                  salesApi: widget.salesApi,
-                  saleReturnsApi: widget.saleReturnsApi,
-                  syncApi: widget.syncApi,
-                  catalogInvalidationBus: widget.catalogInvalidationBus,
-                  localPrefs: widget.localPrefs,
-                  shellOnline: _isOnline,
-                ),
+            ),
+            KeyedSubtree(
+              key: const ValueKey<String>('shell_tab_venta'),
+              child: SalesModuleScreen(
+                storeId: widget.storeId,
+                productsApi: widget.productsApi,
+                storesApi: widget.storesApi,
+                exchangeRatesApi: widget.exchangeRatesApi,
+                salesApi: widget.salesApi,
+                saleReturnsApi: widget.saleReturnsApi,
+                syncApi: widget.syncApi,
+                uploadsApi: widget.uploadsApi,
+                catalogInvalidationBus: widget.catalogInvalidationBus,
+                localPrefs: widget.localPrefs,
+                shellOnline: _isOnline,
               ),
-              KeyedSubtree(
-                key: const ValueKey<String>('shell_tab_proveedores'),
-                child: SuppliersListScreen(
-                  storeId: widget.storeId,
-                  localPrefs: widget.localPrefs,
-                  storesApi: widget.storesApi,
-                  exchangeRatesApi: widget.exchangeRatesApi,
-                  productsApi: widget.productsApi,
-                  purchasesApi: widget.purchasesApi,
-                  suppliersApi: widget.suppliersApi,
-                  syncApi: widget.syncApi,
-                  catalogInvalidationBus: widget.catalogInvalidationBus,
-                  shellOnline: _isOnline,
-                ),
+            ),
+            KeyedSubtree(
+              key: const ValueKey<String>('shell_tab_proveedores'),
+              child: SuppliersListScreen(
+                storeId: widget.storeId,
+                localPrefs: widget.localPrefs,
+                storesApi: widget.storesApi,
+                exchangeRatesApi: widget.exchangeRatesApi,
+                productsApi: widget.productsApi,
+                purchasesApi: widget.purchasesApi,
+                suppliersApi: widget.suppliersApi,
+                syncApi: widget.syncApi,
+                catalogInvalidationBus: widget.catalogInvalidationBus,
+                shellOnline: _isOnline,
               ),
-            ],
+            ),
+          ],
         ),
         bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: double.infinity,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.circle,
-                  size: 10,
-                  color: _isOnline ? Colors.green : Colors.red,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _isOnline ? 'Online' : 'Offline',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.circle,
+                    size: 10,
                     color: _isOnline ? Colors.green : Colors.red,
                   ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isOnline ? 'Online' : 'Offline',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _isOnline ? Colors.green : Colors.red,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            NavigationBar(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: 'Inicio',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.inventory_2_outlined),
+                  selectedIcon: Icon(Icons.inventory_2),
+                  label: 'Inventario',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.point_of_sale_outlined),
+                  selectedIcon: Icon(Icons.point_of_sale),
+                  label: 'Venta',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.local_shipping_outlined),
+                  selectedIcon: Icon(Icons.local_shipping),
+                  label: 'Proveedores',
                 ),
               ],
             ),
-          ),
-          NavigationBar(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home),
-                label: 'Inicio',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.inventory_2_outlined),
-                selectedIcon: Icon(Icons.inventory_2),
-                label: 'Inventario',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.point_of_sale_outlined),
-                selectedIcon: Icon(Icons.point_of_sale),
-                label: 'Venta',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.local_shipping_outlined),
-                selectedIcon: Icon(Icons.local_shipping),
-                label: 'Proveedores',
-              ),
-            ],
-          ),
-        ],
+          ],
         ),
       ),
     );

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../api/api_error.dart';
+import '../catalog/pending_catalog_mutation_entry.dart';
 import '../storage/local_prefs.dart';
 import 'pending_product_photo_upload_entry.dart';
 
@@ -74,6 +75,38 @@ Future<ProductPhotoUploadFlushResult> flushPendingProductPhotoUploads({
 
     if (uploader == null) {
       continue;
+    }
+
+    if (e.productId.startsWith('local_')) {
+      final mutations = await prefs.loadPendingCatalogMutations();
+      final waiting = mutations.any(
+        (m) =>
+            m.storeId == storeId &&
+            (m.localTempId ?? '') == e.productId &&
+            (m.type == PendingCatalogMutationEntry.typeCreate ||
+                m.type == PendingCatalogMutationEntry.typeCreateWithStock),
+      );
+      if (waiting) {
+        break;
+      }
+      final i = next.indexWhere((x) => x.opId == e.opId);
+      if (i >= 0) {
+        next[i] = PendingProductPhotoUploadEntry(
+          opId: e.opId,
+          storeId: e.storeId,
+          productId: e.productId,
+          localFilePath: e.localFilePath,
+          createdAtIso: e.createdAtIso,
+          attemptCount: e.attemptCount,
+          lastError:
+              'Foto enlazada a id local obsoleto. Eliminá esta fila y volvé a '
+              'cargar la imagen desde la ficha del producto en Inventario.',
+          manualReview: true,
+        );
+        markedManual++;
+      }
+      failed++;
+      break;
     }
 
     try {
