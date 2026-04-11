@@ -15,6 +15,7 @@ import '../../core/api/sync_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/catalog_offline_sync.dart';
+import '../../core/network/api_base_cloud_sync.dart';
 import '../../core/network/connectivity_util.dart';
 import '../../core/photos/product_photo_upload_sync.dart';
 import '../../core/pos/pos_terminal_info.dart';
@@ -23,6 +24,7 @@ import '../../core/sync/sync_cycle.dart';
 import '../inventory/inventory_module_screen.dart';
 import '../settings/store_dashboard_screen.dart';
 import '../sale/sales_module_screen.dart';
+import 'shell_online_scope.dart';
 import '../suppliers/suppliers_list_screen.dart';
 
 /// Navegación principal: **Inicio**, **Inventario**, **Venta** (menú → POS / historial / precios), **Proveedores** (C1/C2).
@@ -82,6 +84,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   bool _isOnline = true;
   bool _backendReachable = true;
   bool _manualForceOffline = false;
+  DateTime? _lastCloudResolverAttempt;
 
   void _recomputeOnlineFlag() {
     final hasNetwork =
@@ -134,6 +137,18 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (mounted) setState(_recomputeOnlineFlag);
       }
       return;
+    }
+    if (!_backendReachable) {
+      final now = DateTime.now();
+      if (_lastCloudResolverAttempt == null ||
+          now.difference(_lastCloudResolverAttempt!) >=
+              const Duration(seconds: 45)) {
+        _lastCloudResolverAttempt = now;
+        await tryRefreshApiBaseFromCloudWhenUnreachable(
+          prefs: widget.localPrefs,
+          storeId: widget.storeId,
+        );
+      }
     }
     final wasReachable = _backendReachable;
     try {
@@ -259,10 +274,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: [
+    return ShellOnlineScope(
+      isOnline: _isOnline,
+      child: Scaffold(
+        body: IndexedStack(
+          index: _index,
+          children: [
               KeyedSubtree(
                 key: const ValueKey<String>('shell_tab_inicio'),
                 child: StoreDashboardScreen(
@@ -333,8 +350,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 ),
               ),
             ],
-          ),
-      bottomNavigationBar: Column(
+        ),
+        bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
@@ -387,6 +404,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             ],
           ),
         ],
+        ),
       ),
     );
   }

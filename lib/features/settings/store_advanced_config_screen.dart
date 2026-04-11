@@ -5,6 +5,7 @@ import '../../core/api/api_error.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/config/app_config.dart';
+import '../../core/network/backend_origin_resolver.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/storage/local_prefs.dart';
 import '../sale/pos_sale_ui_tokens.dart';
@@ -149,9 +150,11 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   bool _savingMargin = false;
   bool _savingApiUrl = false;
   bool _testingApiUrl = false;
+  bool _cloudResolverBusy = false;
   String? _apiConnectionStatus;
   bool _apiConnectionOk = false;
   String _selectedProfile = '';
+  DateTime? _resolverUpdatedAt;
 
   @override
   void initState() {
@@ -160,6 +163,13 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     final initial = AppConfig.effectiveApiBaseUrl;
     _apiUrlCtrl.text = initial;
     _selectedProfile = _detectProfile(initial);
+    _loadResolverMeta();
+  }
+
+  Future<void> _loadResolverMeta() async {
+    final at = await widget.localPrefs.getPersistedApiOriginUpdatedAt();
+    if (!mounted) return;
+    setState(() => _resolverUpdatedAt = at);
   }
 
   Future<BusinessSettings> _load() async {
@@ -299,7 +309,10 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     final normalized = AppConfig.normalizeApiBaseUrl(raw);
     setState(() => _savingApiUrl = true);
     try {
-      await widget.localPrefs.setApiBaseUrlOverride(normalized);
+      await widget.localPrefs.setApiBaseUrlOverride(
+        normalized,
+        followCloudResolver: false,
+      );
       AppConfig.setRuntimeApiBaseUrlOverride(normalized);
       if (!mounted) return;
       _apiUrlCtrl.text = normalized;
@@ -319,7 +332,7 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     }
   }
 
-  Future<void> _testApiUrl() async {
+  Future<void> _runApiConnectionTest({bool saveOverrideOnSuccess = false}) async {
     final raw = _apiUrlCtrl.text.trim();
     if (!_looksLikeApiUrl(raw)) {
       setState(() {
@@ -342,8 +355,25 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
       if (!mounted) return;
       setState(() {
         _apiConnectionOk = true;
-        _apiConnectionStatus = 'Conexión OK. Se pudo leer business-settings.';
+        _apiConnectionStatus = saveOverrideOnSuccess
+            ? 'Conexión OK. URL guardada.'
+            : 'Conexión OK. Se pudo leer business-settings.';
       });
+      if (saveOverrideOnSuccess) {
+        await widget.localPrefs.setApiBaseUrlOverride(
+          normalized,
+          followCloudResolver: true,
+        );
+        if (!mounted) return;
+        AppConfig.setRuntimeApiBaseUrlOverride(normalized);
+        _apiUrlCtrl.text = normalized;
+        _selectedProfile = _detectProfile(normalized);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('URL de backend guardada (verificada con la nube).'),
+          ),
+        );
+      }
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() {
@@ -359,6 +389,66 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     } finally {
       testClient.close();
       if (mounted) setState(() => _testingApiUrl = false);
+    }
+  }
+
+  Future<void> _testApiUrl() => _runApiConnectionTest();
+
+  Future<void> _fetchFromCloudAndProbe() async {
+    setState(() {
+      _cloudResolverBusy = true;
+      _apiConnectionStatus = null;
+      _apiConnectionOk = false;
+    });
+    try {
+      final r = await BackendOriginResolver().fetchFromVercel();
+      if (!mounted) return;
+      String? origin;
+      DateTime? resolverAt;
+      if (r != null) {
+        await widget.localPrefs.setPersistedApiOrigin(r.baseUrl, r.updatedAt);
+        if (!mounted) return;
+        origin = r.baseUrl;
+        resolverAt = r.updatedAt;
+      } else {
+        origin = await widget.localPrefs.getPersistedApiOrigin();
+        resolverAt = await widget.localPrefs.getPersistedApiOriginUpdatedAt();
+        if (!mounted) return;
+        if (origin == null || origin.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Vercel no respondió y no hay origen guardado. Probá de nuevo o '
+                'configurá la URL a mano.',
+              ),
+            ),
+          );
+          return;
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Vercel no respondió; se probó el último origen guardado en el equipo.',
+            ),
+          ),
+        );
+      }
+      final apiV1 = apiV1BaseFromOrigin(origin);
+      if (apiV1.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Respuesta del resolver inválida.')),
+        );
+        return;
+      }
+      setState(() {
+        _resolverUpdatedAt = resolverAt;
+        _apiUrlCtrl.text = apiV1;
+        _selectedProfile = _detectProfile(apiV1);
+      });
+      await _runApiConnectionTest(saveOverrideOnSuccess: true);
+    } finally {
+      if (mounted) setState(() => _cloudResolverBusy = false);
     }
   }
 
@@ -540,6 +630,38 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                         height: 1.35,
                       ),
                 ),
+                if (_resolverUpdatedAt != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Origen automático (Vercel): última respuesta '
+                    '${_resolverUpdatedAt!.toUtc().toIso8601String()}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: PosSaleUi.textFaint,
+                          height: 1.35,
+                          fontSize: 11,
+                        ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: (_savingApiUrl ||
+                          _testingApiUrl ||
+                          _cloudResolverBusy)
+                      ? null
+                      : _fetchFromCloudAndProbe,
+                  icon: _cloudResolverBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_download_outlined, size: 20),
+                  label: Text(
+                    _cloudResolverBusy
+                        ? 'Consultando Vercel…'
+                        : 'Actualizar desde la nube (Vercel)',
+                  ),
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _apiUrlCtrl,
@@ -564,21 +686,27 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                     ChoiceChip(
                       label: const Text('Producción'),
                       selected: _selectedProfile == 'PROD',
-                      onSelected: (_savingApiUrl || _testingApiUrl)
+                      onSelected: (_savingApiUrl ||
+                              _testingApiUrl ||
+                              _cloudResolverBusy)
                           ? null
                           : (_) => _applyProfile('PROD'),
                     ),
                     ChoiceChip(
                       label: const Text('LAN'),
                       selected: _selectedProfile == 'LAN',
-                      onSelected: (_savingApiUrl || _testingApiUrl)
+                      onSelected: (_savingApiUrl ||
+                              _testingApiUrl ||
+                              _cloudResolverBusy)
                           ? null
                           : (_) => _applyProfile('LAN'),
                     ),
                     ChoiceChip(
                       label: const Text('Local (emulador)'),
                       selected: _selectedProfile == 'LOCAL',
-                      onSelected: (_savingApiUrl || _testingApiUrl)
+                      onSelected: (_savingApiUrl ||
+                              _testingApiUrl ||
+                              _cloudResolverBusy)
                           ? null
                           : (_) => _applyProfile('LOCAL'),
                     ),
@@ -589,7 +717,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: (_savingApiUrl || _testingApiUrl)
+                        onPressed: (_savingApiUrl ||
+                                _testingApiUrl ||
+                                _cloudResolverBusy)
                             ? null
                             : _testApiUrl,
                         child: _testingApiUrl
@@ -604,7 +734,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: FilledButton(
-                        onPressed: (_savingApiUrl || _testingApiUrl)
+                        onPressed: (_savingApiUrl ||
+                                _testingApiUrl ||
+                                _cloudResolverBusy)
                             ? null
                             : _saveApiUrl,
                         child: _savingApiUrl
@@ -619,7 +751,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: (_savingApiUrl || _testingApiUrl)
+                        onPressed: (_savingApiUrl ||
+                                _testingApiUrl ||
+                                _cloudResolverBusy)
                             ? null
                             : _resetApiUrlDefault,
                         child: const Text('Usar default'),

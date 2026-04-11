@@ -25,6 +25,7 @@ import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_sale_entry.dart';
 import '../../core/sync/sync_cycle.dart';
+import '../shell/shell_online_scope.dart';
 import 'barcode_scanner_screen.dart';
 import 'pos_cart_quantity.dart';
 import 'pos_held_tickets_ui.dart';
@@ -55,7 +56,6 @@ class PosSaleScreen extends StatefulWidget {
     required this.catalogInvalidationBus,
     required this.localPrefs,
     this.onRequestExit,
-    this.shellOnline = true,
   });
 
   final String storeId;
@@ -69,9 +69,6 @@ class PosSaleScreen extends StatefulWidget {
 
   /// Si no es null (p. ej. módulo Ventas), muestra atrás en la barra superior.
   final VoidCallback? onRequestExit;
-
-  /// Desde [MainShell]: si es `false`, el POS arranca solo con caché (sin esperar red).
-  final bool shellOnline;
 
   @override
   State<PosSaleScreen> createState() => _PosSaleScreenState();
@@ -115,13 +112,14 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   int _heldTicketsCount = 0;
   String? _activeHeldTicketId;
+  bool _shellOnline = true;
+  bool? _shellOnlineBound;
 
   @override
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
     _searchFocus.addListener(() => setState(() {}));
-    _load();
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (!mounted) return;
       setState(() => _terminal = t);
@@ -136,11 +134,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   @override
-  void didUpdateWidget(covariant PosSaleScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!oldWidget.shellOnline && widget.shellOnline) {
-      unawaited(_load());
-    }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = ShellOnlineScope.of(context);
+    if (_shellOnlineBound == next) return;
+    _shellOnlineBound = next;
+    _shellOnline = next;
+    unawaited(_load());
   }
 
   void _onCatalogInvalidated() {
@@ -157,7 +157,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   /// [doPull]: actualiza watermark con `GET /sync/pull`; [doFlush]: envía cola mixta.
   Future<void> _runSyncCycle({bool silent = false, bool doPull = true}) async {
-    if (!widget.shellOnline) {
+    if (!_shellOnline) {
       if (!silent && mounted) {
         _showCheckoutPanelMessage(
           'Modo offline: la sincronización se hará al volver online.',
@@ -315,7 +315,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       if (mounted) setState(() {});
       return;
     }
-    if (!widget.shellOnline) {
+    if (!_shellOnline) {
       await _applyFxFromPrefsCacheOnly();
       if (rebuildDocumentLinePrices) {
         _rebuildCartDocumentPrices();
@@ -708,7 +708,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _loading = true;
       _error = null;
     });
-    if (!widget.shellOnline) {
+    if (!_shellOnline) {
       await _bootstrapShellOfflineLoad();
       if (!mounted) return;
       setState(() => _loading = false);
@@ -1187,7 +1187,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             saleId: sid,
             totalDocument: totalDoc,
             documentCurrencyCode: doc,
-            recordedAtIso: DateTime.now().toUtc().toIso8601String(),
+            // Calendario «hoy» del historial local usa día local; UTC podía caer en otro día.
+            recordedAtIso: DateTime.now().toIso8601String(),
             status: RecentSaleTicket.statusSynced,
             displayCode: ticketNo,
           ),
@@ -1273,7 +1274,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           saleId: clientSid,
           totalDocument: totalDoc,
           documentCurrencyCode: doc,
-          recordedAtIso: DateTime.now().toUtc().toIso8601String(),
+          recordedAtIso: DateTime.now().toIso8601String(),
           status: RecentSaleTicket.statusQueued,
           displayCode: ticketNo,
         ),

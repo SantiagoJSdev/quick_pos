@@ -248,7 +248,6 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           suppliersApi: widget.suppliersApi,
           syncApi: widget.syncApi,
           catalogInvalidationBus: widget.catalogInvalidationBus,
-          shellOnline: widget.shellOnline,
         ),
       ),
     );

@@ -38,6 +38,9 @@ const _kInventoryCachePrefix = 'inventory_cache_v1_';
 const _kSalesGeneralCachePrefix = 'sales_general_cache_v1_';
 const _kLatestRateCachePrefix = 'latest_rate_cache_v1_';
 const _kApiBaseUrlOverrideV1 = 'api_base_url_override_v1';
+const _kApiFollowCloudResolverV1 = 'api_follow_cloud_resolver_v1';
+const _kPosApiOrigin = 'pos_api_origin';
+const _kPosApiOriginUpdatedAt = 'pos_api_origin_updated_at';
 const _kPendingProductPhotoUploadsV1 = 'pending_product_photo_uploads_v1';
 
 class LocalPrefs {
@@ -60,12 +63,51 @@ class LocalPrefs {
     return trimmed;
   }
 
-  Future<void> setApiBaseUrlOverride(String url) async {
+  /// [followCloudResolver]: si es `true`, [MainShell] puede actualizar la URL desde Vercel en segundo plano
+  /// cuando el backend no responde (túnel ngrok nuevo). Manual / «Usar default» → `false`.
+  Future<void> setApiBaseUrlOverride(
+    String url, {
+    required bool followCloudResolver,
+  }) async {
     await _prefs.setString(_kApiBaseUrlOverrideV1, url.trim());
+    await _prefs.setBool(_kApiFollowCloudResolverV1, followCloudResolver);
   }
+
+  Future<bool> getApiBaseFollowsCloudResolver() async =>
+      _prefs.getBool(_kApiFollowCloudResolverV1) ?? false;
 
   Future<void> clearApiBaseUrlOverride() async {
     await _prefs.remove(_kApiBaseUrlOverrideV1);
+    await _prefs.remove(_kApiFollowCloudResolverV1);
+  }
+
+  /// Origen del API sin path (p. ej. `https://….ngrok-free.dev`). Solo “último conocido” del resolver.
+  Future<void> setPersistedApiOrigin(String origin, DateTime? updatedAt) async {
+    final o = origin.trim().replaceAll(RegExp(r'/+$'), '');
+    if (o.isEmpty) {
+      await _prefs.remove(_kPosApiOrigin);
+      await _prefs.remove(_kPosApiOriginUpdatedAt);
+      return;
+    }
+    await _prefs.setString(_kPosApiOrigin, o);
+    if (updatedAt != null) {
+      await _prefs.setString(
+        _kPosApiOriginUpdatedAt,
+        updatedAt.toUtc().toIso8601String(),
+      );
+    }
+  }
+
+  Future<String?> getPersistedApiOrigin() async {
+    final s = _prefs.getString(_kPosApiOrigin)?.trim();
+    if (s == null || s.isEmpty) return null;
+    return s;
+  }
+
+  Future<DateTime?> getPersistedApiOriginUpdatedAt() async {
+    final s = _prefs.getString(_kPosApiOriginUpdatedAt);
+    if (s == null || s.isEmpty) return null;
+    return DateTime.tryParse(s);
   }
 
   Future<List<PendingProductPhotoUploadEntry>> loadPendingProductPhotoUploads() async {
@@ -722,8 +764,8 @@ class LocalPrefs {
     return list.length;
   }
 
-  /// Historial local de tickets: **solo día calendario actual** (local device); al cargar se purgan días anteriores.
-  /// Máx. ~80 filas del día para no inflar preferencias. Filtrar por tienda en UI.
+  /// Historial local de tickets: **hoy y ayer** (calendario local del dispositivo); al cargar se purgan entradas más viejas.
+  /// Máx. ~80 filas para no inflar preferencias. Filtrar por tienda en UI.
   Future<List<RecentSaleTicket>> loadRecentSaleTickets() async {
     final raw = _prefs.getString(_kRecentSalesV1);
     if (raw == null || raw.isEmpty) return [];
@@ -736,11 +778,12 @@ class LocalPrefs {
         final t = RecentSaleTicket.tryFromJson(Map<String, dynamic>.from(e));
         if (t != null) out.add(t);
       }
-      final todayOnly = out.where((t) => t.isRecordedOnLocalCalendarToday).toList();
-      if (todayOnly.length != out.length) {
-        await saveRecentSaleTickets(todayOnly);
+      final windowed =
+          out.where((t) => t.isRecordedOnLocalDeviceHistoryWindow).toList();
+      if (windowed.length != out.length) {
+        await saveRecentSaleTickets(windowed);
       }
-      return todayOnly;
+      return windowed;
     } catch (_) {
       return [];
     }
@@ -843,16 +886,16 @@ class LocalPrefs {
     return null;
   }
 
-  /// Inserta al frente; solo entradas del **día actual** local; evita duplicar [saleId].
+  /// Inserta al frente; solo ventas de **hoy o ayer** (calendario local); evita duplicar [saleId].
   Future<void> prependRecentSaleTicket(RecentSaleTicket entry) async {
     final list = await loadRecentSaleTickets();
     final next = <RecentSaleTicket>[];
-    if (entry.isRecordedOnLocalCalendarToday) {
+    if (entry.isRecordedOnLocalDeviceHistoryWindow) {
       next.add(entry);
     }
     for (final e in list) {
       if (e.saleId == entry.saleId) continue;
-      if (!e.isRecordedOnLocalCalendarToday) continue;
+      if (!e.isRecordedOnLocalDeviceHistoryWindow) continue;
       next.add(e);
       if (next.length >= _kMaxRecentSalesSameDay) break;
     }

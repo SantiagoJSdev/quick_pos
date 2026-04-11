@@ -78,7 +78,6 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                       syncApi: widget.syncApi,
                       catalogInvalidationBus: widget.catalogInvalidationBus,
                       localPrefs: widget.localPrefs,
-                      shellOnline: widget.shellOnline,
                       onRequestExit: () => Navigator.of(c).pop(),
                     ),
                   ),

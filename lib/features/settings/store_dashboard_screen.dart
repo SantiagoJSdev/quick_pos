@@ -55,7 +55,29 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     unawaited(_loadTerminal());
   }
 
+  @override
+  void didUpdateWidget(covariant StoreDashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onlineStatus != widget.onlineStatus ||
+        oldWidget.forcedOffline != widget.forcedOffline) {
+      setState(() {
+        _future = _loadSettingsWithCache();
+      });
+    }
+  }
+
   Future<BusinessSettings> _loadSettingsWithCache() async {
+    if (!widget.onlineStatus || widget.forcedOffline) {
+      final cached =
+          await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      if (cached != null) {
+        _settingsFromCache = true;
+        return cached;
+      }
+      throw StateError(
+        'Sin configuración en caché. Conectate o esperá a recuperar red.',
+      );
+    }
     try {
       final s = await widget.storesApi.getBusinessSettings(widget.storeId);
       await widget.localPrefs.saveBusinessSettingsCache(

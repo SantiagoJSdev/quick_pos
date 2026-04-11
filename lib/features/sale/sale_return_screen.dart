@@ -19,6 +19,7 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_sale_return_entry.dart';
 import '../../core/sync/sale_return_payload.dart';
 import '../../core/sync/sync_cycle.dart';
+import '../shell/shell_online_scope.dart';
 import 'pos_sale_ui_tokens.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
@@ -117,6 +118,8 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
   bool _useSpotFx = false;
   String? _clientReturnId;
   PosTerminalInfo? _terminal;
+  bool _shellOnline = true;
+  bool? _shellOnlineBound;
 
   @override
   void initState() {
@@ -124,7 +127,16 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (mounted) setState(() => _terminal = t);
     });
-    _loadSettings();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = ShellOnlineScope.of(context);
+    if (_shellOnlineBound == next) return;
+    _shellOnlineBound = next;
+    _shellOnline = next;
+    unawaited(_loadSettings());
   }
 
   @override
@@ -137,6 +149,24 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
   }
 
   Future<void> _loadSettings() async {
+    if (!_shellOnline) {
+      final cached =
+          await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      if (!mounted) return;
+      if (cached != null) {
+        setState(() {
+          _settings = cached;
+          _error = null;
+        });
+      } else {
+        setState(() {
+          _settings = null;
+          _error =
+              'Sin configuración en caché. Conectate para usar devoluciones.';
+        });
+      }
+      return;
+    }
     try {
       final s = await widget.storesApi.getBusinessSettings(widget.storeId);
       await widget.localPrefs.saveBusinessSettingsCache(

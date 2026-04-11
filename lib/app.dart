@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 import 'core/api/api_client.dart';
@@ -13,6 +14,8 @@ import 'core/api/sync_api.dart';
 import 'core/api/uploads_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
 import 'core/config/app_config.dart';
+import 'core/network/backend_origin_resolver.dart';
+import 'core/network/connectivity_util.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/quickmarket_shell_theme.dart';
@@ -62,8 +65,59 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _bootstrap();
   }
 
+  Future<void> _tryAutoResolveApiBaseIfNeeded() async {
+    final existing = await widget.localPrefs.getApiBaseUrlOverride();
+    if (existing != null && existing.isNotEmpty) return;
+
+    List<ConnectivityResult> conn;
+    try {
+      conn = await Connectivity().checkConnectivity();
+    } catch (_) {
+      return;
+    }
+    if (!connectivityAppearsOnline(conn)) return;
+
+    final resolver = BackendOriginResolver();
+    final vercel = await resolver.fetchFromVercel();
+    if (vercel != null) {
+      await widget.localPrefs.setPersistedApiOrigin(
+        vercel.baseUrl,
+        vercel.updatedAt,
+      );
+    }
+
+    final origin = vercel?.baseUrl ?? await widget.localPrefs.getPersistedApiOrigin();
+    if (origin == null || origin.isEmpty) return;
+
+    final apiV1 = apiV1BaseFromOrigin(origin);
+    if (apiV1.isEmpty) return;
+
+    final storeRaw = await widget.localPrefs.getStoreId();
+    final storeId = storeRaw?.trim();
+    var ok = false;
+    if (storeId != null && storeId.isNotEmpty) {
+      final c = ApiClient(baseUrl: apiV1);
+      try {
+        await StoresApi(c).getBusinessSettings(storeId);
+        ok = true;
+      } catch (_) {}
+      c.close();
+    } else {
+      ok = await probeApiV1Reachable(apiV1);
+    }
+
+    if (ok) {
+      await widget.localPrefs.setApiBaseUrlOverride(
+        apiV1,
+        followCloudResolver: true,
+      );
+      AppConfig.setRuntimeApiBaseUrlOverride(apiV1);
+    }
+  }
+
   Future<void> _bootstrap() async {
     await widget.localPrefs.getOrCreateDeviceId();
+    await _tryAutoResolveApiBaseIfNeeded();
     final apiOverride = await widget.localPrefs.getApiBaseUrlOverride();
     AppConfig.setRuntimeApiBaseUrlOverride(apiOverride);
     final id = await widget.localPrefs.getStoreId();
@@ -110,6 +164,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
                   storesApi: _storesApi,
                   exchangeRatesApi: _exchangeRatesApi,
                   onLinked: _onLinked,
+                  localPrefs: widget.localPrefs,
                 )
               : MainShell(
                   storeId: _storeId!,

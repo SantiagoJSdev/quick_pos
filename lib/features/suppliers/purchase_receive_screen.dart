@@ -22,6 +22,7 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_purchase_receive_entry.dart';
 import '../../core/sync/purchase_receive_payload.dart';
 import '../../core/sync/sync_cycle.dart';
+import '../shell/shell_online_scope.dart';
 import 'supplier_form_screen.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
@@ -54,7 +55,6 @@ class PurchaseReceiveScreen extends StatefulWidget {
     required this.suppliersApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
-    this.shellOnline = true,
   });
 
   final String storeId;
@@ -66,9 +66,6 @@ class PurchaseReceiveScreen extends StatefulWidget {
   final SuppliersApi suppliersApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
-
-  /// Desde [MainShell]: carga proveedores/productos/settings desde caché local.
-  final bool shellOnline;
 
   @override
   State<PurchaseReceiveScreen> createState() => _PurchaseReceiveScreenState();
@@ -100,6 +97,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
 
   String? _purchaseClientId;
   PosTerminalInfo? _terminal;
+  bool _shellOnline = true;
+  bool? _shellOnlineBound;
 
   @override
   void initState() {
@@ -107,15 +106,16 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     PosTerminalInfo.load(widget.localPrefs).then((t) {
       if (mounted) setState(() => _terminal = t);
     });
-    _load();
   }
 
   @override
-  void didUpdateWidget(covariant PurchaseReceiveScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!oldWidget.shellOnline && widget.shellOnline) {
-      unawaited(_load());
-    }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = ShellOnlineScope.of(context);
+    if (_shellOnlineBound == next) return;
+    _shellOnlineBound = next;
+    _shellOnline = next;
+    unawaited(_load());
   }
 
   @override
@@ -260,7 +260,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       _fxLoadError = null;
       return;
     }
-    if (!widget.shellOnline) {
+    if (!_shellOnline) {
       final cached = await widget.localPrefs.loadPosFxPairCache(
         storeId: widget.storeId,
         functionalCode: func,
@@ -345,7 +345,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       _loading = true;
       _contextError = null;
     });
-    if (!widget.shellOnline) {
+    if (!_shellOnline) {
       await _bootstrapOfflineLoad();
       if (mounted) setState(() => _loading = false);
       return;

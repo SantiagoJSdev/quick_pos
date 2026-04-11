@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
+import '../network/ngrok_headers.dart';
 import 'api_error.dart';
 
 class ApiClient {
@@ -21,8 +22,12 @@ class ApiClient {
   String _effectiveRequestId(String? requestId) =>
       (requestId != null && requestId.isNotEmpty) ? requestId : _uuid.v4();
 
+  String _effectiveBaseUrl() =>
+      _baseUrlOverride ?? AppConfig.effectiveApiBaseUrl;
+
   Map<String, String> _headers(String storeId, {String? requestId}) {
     return {
+      ...ngrokSkipBrowserWarningHeadersForApiBase(_effectiveBaseUrl()),
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'X-Store-Id': storeId,
@@ -31,7 +36,7 @@ class ApiClient {
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {
-    final configured = _baseUrlOverride ?? AppConfig.effectiveApiBaseUrl;
+    final configured = _effectiveBaseUrl();
     final base = configured.endsWith('/')
         ? configured.substring(0, configured.length - 1)
         : configured;
@@ -137,6 +142,7 @@ class ApiClient {
   }) async {
     final req = http.MultipartRequest('POST', _uri(path));
     req.headers.addAll({
+      ...ngrokSkipBrowserWarningHeadersForApiBase(_effectiveBaseUrl()),
       'Accept': 'application/json',
       'X-Store-Id': storeId,
       'X-Request-Id': _effectiveRequestId(requestId),

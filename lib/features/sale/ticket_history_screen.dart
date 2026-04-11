@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/api/api_error.dart';
@@ -616,8 +618,10 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
     await widget.localPrefs
         .reconcileRecentQueuedTicketsWithPendingSales(widget.storeId);
     var all = await widget.localPrefs.loadRecentSaleTickets();
-    var forStore =
-        all.where((e) => e.storeId == widget.storeId).toList(growable: false);
+    final sid = widget.storeId.trim();
+    var forStore = all
+        .where((e) => e.storeId.trim() == sid)
+        .toList(growable: false);
     for (final t in forStore) {
       if (t.status != RecentSaleTicket.statusQueued) continue;
       try {
@@ -626,8 +630,9 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
       } catch (_) {}
     }
     all = await widget.localPrefs.loadRecentSaleTickets();
-    forStore =
-        all.where((e) => e.storeId == widget.storeId).toList(growable: false);
+    forStore = all
+        .where((e) => e.storeId.trim() == sid)
+        .toList(growable: false);
     if (!mounted) return;
     setState(() {
       _items = forStore;
@@ -654,7 +659,7 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
                     size: 56, color: PosSaleUi.textFaint),
                 SizedBox(height: 16),
                 Text(
-                  'No hay ventas de hoy en este dispositivo',
+                  'No hay ventas recientes en este dispositivo',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: PosSaleUi.textMuted),
                 ),
@@ -662,8 +667,10 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
                 Padding(
                   padding: EdgeInsets.symmetric(horizontal: 32),
                   child: Text(
-                    'Solo se guarda localmente el día calendario actual; al cambiar de día se limpia. '
-                    'Para otras fechas usá la pestaña General.',
+                    'Se listan cobros de hoy y ayer guardados en este equipo. '
+                    'Si la venta está en el servidor pero no acá, revisá la pestaña General '
+                    '(rango amplio por defecto). Con «Solo este dispositivo» desactivado evitás '
+                    'filtrar por ID de equipo.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: PosSaleUi.textFaint,
@@ -754,9 +761,18 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
   void initState() {
     super.initState();
     final n = DateTime.now();
-    _from = DateTime(n.year, n.month, n.day);
-    _to = _from;
+    final today = DateTime(n.year, n.month, n.day);
+    _to = today;
+    // Incluye varios días: el backend usa calendario de la tienda; el emulador puede estar
+    // en otro día YYYY-MM-DD y una venta de “hoy” en BD no cae en la query de solo-hoy-local.
+    var from = today.subtract(const Duration(days: 7));
+    from = DateTime(from.year, from.month, from.day);
+    _from = from;
     _primeDeviceId();
+    // Carga automática al abrir (sin tocar «Consultar»).
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_fetch(reset: true));
+    });
   }
 
   Future<void> _primeDeviceId() async {
@@ -913,8 +929,9 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          'Consulta en el servidor. Las fechas son calendario de la tienda; '
-          'sin fechas el backend usa últimos 7 días.',
+          'Consulta en el servidor (calendario de la tienda en el rango elegido). '
+          'Por defecto: últimos 8 días inclusives (hoy − 7 → hoy) en fechas del dispositivo, '
+          'para que no falten ventas por diferencia de día o zona horaria.',
           style: TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
         ),
         const SizedBox(height: 16),

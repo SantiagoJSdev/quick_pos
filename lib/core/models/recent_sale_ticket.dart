@@ -93,10 +93,23 @@ class RecentSaleTicket {
   bool get isRecordedOnLocalCalendarToday {
     final dt = DateTime.tryParse(recordedAtIso);
     if (dt == null) return false;
-    final local = dt.toLocal();
+    final local = dt.isUtc ? dt.toLocal() : dt;
     final now = DateTime.now();
     return local.year == now.year &&
         local.month == now.month &&
         local.day == now.day;
+  }
+
+  /// **Hoy o ayer** (calendario local del dispositivo). Evita perder la venta de “esta mañana”
+  /// si el día ya cambió o hubo desfase con el servidor.
+  bool get isRecordedOnLocalDeviceHistoryWindow {
+    final dt = DateTime.tryParse(recordedAtIso);
+    if (dt == null) return false;
+    final local = dt.isUtc ? dt.toLocal() : dt;
+    final n = DateTime.now();
+    final today = DateTime(n.year, n.month, n.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final d = DateTime(local.year, local.month, local.day);
+    return d == today || d == yesterday;
   }
 }
