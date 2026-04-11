@@ -150,11 +150,15 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                 decoration: InputDecoration(
                   hintText: 'Nombre, SKU o código de barras…',
                   hintStyle: const TextStyle(color: PosSaleUi.textFaint),
-                  prefixIcon:
-                      const Icon(Icons.search, color: PosSaleUi.textMuted),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: PosSaleUi.textMuted,
+                  ),
                   suffixIcon: IconButton(
-                    icon: const Icon(Icons.qr_code_scanner,
-                        color: PosSaleUi.primary),
+                    icon: const Icon(
+                      Icons.qr_code_scanner,
+                      color: PosSaleUi.primary,
+                    ),
                     tooltip: 'Escanear código de barras o QR del producto',
                     onPressed: _loading ? null : _scanSearch,
                   ),
@@ -170,8 +174,10 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: PosSaleUi.primary, width: 1.5),
+                    borderSide: const BorderSide(
+                      color: PosSaleUi.primary,
+                      width: 1.5,
+                    ),
                   ),
                 ),
                 autocorrect: false,
@@ -180,105 +186,104 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
             Expanded(
               child: _loading
                   ? const Center(
-                      child:
-                          CircularProgressIndicator(color: PosSaleUi.primary),
+                      child: CircularProgressIndicator(
+                        color: PosSaleUi.primary,
+                      ),
                     )
                   : _error != null
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: PosSaleUi.text),
+                            ),
+                            const SizedBox(height: 16),
+                            FilledButton(
+                              onPressed: _load,
+                              child: const Text('Reintentar'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : RefreshIndicator(
+                      color: PosSaleUi.primary,
+                      onRefresh: _load,
+                      child: _filtered.isEmpty
+                          ? ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: const [
+                                SizedBox(height: 48),
                                 Text(
-                                  _error!,
+                                  'Sin resultados',
                                   textAlign: TextAlign.center,
-                                  style: const TextStyle(color: PosSaleUi.text),
-                                ),
-                                const SizedBox(height: 16),
-                                FilledButton(
-                                  onPressed: _load,
-                                  child: const Text('Reintentar'),
+                                  style: TextStyle(color: PosSaleUi.textMuted),
                                 ),
                               ],
-                            ),
-                          ),
-                        )
-                      : RefreshIndicator(
-                          color: PosSaleUi.primary,
-                          onRefresh: _load,
-                          child: _filtered.isEmpty
-                              ? ListView(
-                                  physics:
-                                      const AlwaysScrollableScrollPhysics(),
-                                  children: const [
-                                    SizedBox(height: 48),
-                                    Text(
-                                      'Sin resultados',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: PosSaleUi.textMuted),
-                                    ),
-                                  ],
-                                )
-                              : ListView.separated(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  itemCount: _filtered.length,
-                                  separatorBuilder: (context, i) =>
-                                      const SizedBox(height: 8),
-                                  itemBuilder: (context, i) {
-                                    final p = _filtered[i];
-                                    final bc = p.barcode?.trim();
-                                    return Material(
-                                      color: PosSaleUi.surface2,
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(14),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              p.name,
-                                              style: const TextStyle(
-                                                color: PosSaleUi.text,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              [
-                                                'SKU ${p.sku}',
-                                                if (bc != null &&
-                                                    bc.isNotEmpty)
-                                                  'EAN $bc',
-                                              ].join(' · '),
-                                              style: const TextStyle(
-                                                color: PosSaleUi.textMuted,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 10),
-                                            Text(
-                                              '${p.price} ${p.currency}',
-                                              style: const TextStyle(
-                                                color: PosSaleUi.gold,
-                                                fontSize: 20,
-                                                fontWeight: FontWeight.w700,
-                                                fontFeatures: [
-                                                  FontFeature.tabularFigures(),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              itemCount: _filtered.length,
+                              separatorBuilder: (context, i) =>
+                                  const SizedBox(height: 8),
+                              itemBuilder: (context, i) {
+                                final p = _filtered[i];
+                                final bc = p.barcode?.trim();
+                                return Material(
+                                  color: PosSaleUi.surface2,
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(14),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          p.name,
+                                          style: const TextStyle(
+                                            color: PosSaleUi.text,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          [
+                                            'SKU ${p.sku}',
+                                            if (bc != null && bc.isNotEmpty)
+                                              'EAN $bc',
+                                          ].join(' · '),
+                                          style: const TextStyle(
+                                            color: PosSaleUi.textMuted,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          '${p.price} ${p.currency}',
+                                          style: const TextStyle(
+                                            color: PosSaleUi.gold,
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w700,
+                                            fontFeatures: [
+                                              FontFeature.tabularFigures(),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
             ),
           ],
         ),

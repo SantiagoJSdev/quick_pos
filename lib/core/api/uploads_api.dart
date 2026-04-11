@@ -41,4 +41,3 @@ class UploadsApi {
     return ProductImageUploadResult.fromJson(json);
   }
 }
-

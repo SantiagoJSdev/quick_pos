@@ -23,6 +23,10 @@ class PosSalePricing {
     if (!pair.inverted) {
       return MoneyStringMath.multiply(catalogPrice, r.rateQuotePerBase);
     }
-    return MoneyStringMath.divide(catalogPrice, r.rateQuotePerBase, fractionDigits: 2);
+    return MoneyStringMath.divide(
+      catalogPrice,
+      r.rateQuotePerBase,
+      fractionDigits: 2,
+    );
   }
 }

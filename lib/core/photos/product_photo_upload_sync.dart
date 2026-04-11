@@ -5,9 +5,8 @@ import '../catalog/pending_catalog_mutation_entry.dart';
 import '../storage/local_prefs.dart';
 import 'pending_product_photo_upload_entry.dart';
 
-typedef ProductPhotoUploader = Future<void> Function(
-  PendingProductPhotoUploadEntry entry,
-);
+typedef ProductPhotoUploader =
+    Future<void> Function(PendingProductPhotoUploadEntry entry);
 
 class ProductPhotoUploadFlushResult {
   const ProductPhotoUploadFlushResult({
@@ -159,4 +158,3 @@ Future<ProductPhotoUploadFlushResult> flushPendingProductPhotoUploads({
     markedManualReview: markedManual,
   );
 }
-

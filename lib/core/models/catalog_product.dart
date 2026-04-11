@@ -69,9 +69,15 @@ class CatalogProduct {
       unit: json['unit'] as String?,
       supplierId: _parseOptionalId(json['supplierId']),
       pricingMode: _parseOptionalString(json['pricingMode']),
-      marginPercentOverride: _parseOptionalString(json['marginPercentOverride']),
-      effectiveMarginPercent: _parseOptionalString(json['effectiveMarginPercent']),
-      marginComputedPercent: _parseOptionalString(json['marginComputedPercent']),
+      marginPercentOverride: _parseOptionalString(
+        json['marginPercentOverride'],
+      ),
+      effectiveMarginPercent: _parseOptionalString(
+        json['effectiveMarginPercent'],
+      ),
+      marginComputedPercent: _parseOptionalString(
+        json['marginComputedPercent'],
+      ),
       suggestedPrice: _parseOptionalString(json['suggestedPrice']),
       imageUrl: _parseOptionalString(json['imageUrl']),
     );
@@ -141,8 +147,9 @@ class CatalogProduct {
     if (type != null && type!.isNotEmpty) m['type'] = type;
     if (unit != null && unit!.trim().isNotEmpty) m['unit'] = unit!.trim();
     if (description != null) {
-      m['description'] =
-          description!.trim().isEmpty ? null : description!.trim();
+      m['description'] = description!.trim().isEmpty
+          ? null
+          : description!.trim();
     }
     final sid = supplierId?.trim();
     m['supplierId'] = (sid == null || sid.isEmpty) ? null : sid;
@@ -152,8 +159,7 @@ class CatalogProduct {
     m['pricingMode'] = pm;
     if (pm == 'USE_PRODUCT_OVERRIDE') {
       final o = marginPercentOverride?.trim();
-      m['marginPercentOverride'] =
-          (o != null && o.isNotEmpty) ? o : null;
+      m['marginPercentOverride'] = (o != null && o.isNotEmpty) ? o : null;
     } else {
       m['marginPercentOverride'] = null;
     }

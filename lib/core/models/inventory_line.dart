@@ -75,14 +75,12 @@ class InventoryLine {
   final String? totalCostFunctional;
   final InventoryProductSummary? product;
 
-  String get displayName =>
-      product?.name?.trim().isNotEmpty == true
-          ? product!.name!.trim()
-          : 'Producto $productId';
+  String get displayName => product?.name?.trim().isNotEmpty == true
+      ? product!.name!.trim()
+      : 'Producto $productId';
 
-  String get displaySku => product?.sku?.trim().isNotEmpty == true
-      ? product!.sku!.trim()
-      : '—';
+  String get displaySku =>
+      product?.sku?.trim().isNotEmpty == true ? product!.sku!.trim() : '—';
 
   double? get quantityAsDouble => double.tryParse(quantity.trim());
 
@@ -120,8 +118,7 @@ class InventoryLine {
       quantity: json['quantity']?.toString() ?? '0',
       reserved: json['reserved']?.toString() ?? '0',
       minStock: (minStr == null || minStr.isEmpty) ? null : minStr,
-      averageUnitCostFunctional:
-          json['averageUnitCostFunctional']?.toString(),
+      averageUnitCostFunctional: json['averageUnitCostFunctional']?.toString(),
       totalCostFunctional: json['totalCostFunctional']?.toString(),
       product: InventoryProductSummary.fromJson(productMap),
     );

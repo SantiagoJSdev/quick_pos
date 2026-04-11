@@ -16,7 +16,8 @@ class ExchangeRatesApi {
     final query = <String, String>{
       'baseCurrencyCode': baseCurrencyCode,
       'quoteCurrencyCode': quoteCurrencyCode,
-      if (effectiveOn != null && effectiveOn.isNotEmpty) 'effectiveOn': effectiveOn,
+      if (effectiveOn != null && effectiveOn.isNotEmpty)
+        'effectiveOn': effectiveOn,
     };
     final json = await _client.getJson(
       '/exchange-rates/latest',

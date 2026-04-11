@@ -94,7 +94,8 @@ class _ProductInitialStockBottomSheetState
     if (cost.isNotEmpty) {
       if (!_decimalPositive.hasMatch(cost)) {
         setState(
-          () => _error = 'Costo unitario (func.): número decimal válido o vacío.',
+          () =>
+              _error = 'Costo unitario (func.): número decimal válido o vacío.',
         );
         return;
       }
@@ -149,7 +150,9 @@ class _ProductInitialStockBottomSheetState
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Producto creado · SKU ${res.product.sku} · stock cargado'),
+          content: Text(
+            'Producto creado · SKU ${res.product.sku} · stock cargado',
+          ),
         ),
       );
       Navigator.of(context).pop(true);
@@ -206,7 +209,9 @@ class _ProductInitialStockBottomSheetState
     cached.add(
       CatalogProduct(
         id: localId,
-        sku: widget.productDraft.sku.isEmpty ? 'PENDIENTE' : widget.productDraft.sku,
+        sku: widget.productDraft.sku.isEmpty
+            ? 'PENDIENTE'
+            : widget.productDraft.sku,
         name: widget.productDraft.name,
         barcode: widget.productDraft.barcode,
         description: widget.productDraft.description,
@@ -239,21 +244,23 @@ class _ProductInitialStockBottomSheetState
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
-      padding: EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 16 + bottom),
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 16,
+        bottom: 16 + bottom,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Stock inicial',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
+          Text('Stock inicial', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
             widget.productDraft.name,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           if (_sentCanon != null) ...[
             const SizedBox(height: 8),
@@ -261,8 +268,8 @@ class _ProductInitialStockBottomSheetState
               'Reintentos usan la misma Idempotency-Key y el mismo cuerpo. Si cambiás '
               'cantidad u otros datos, la app genera clave y opId nuevos.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
           const SizedBox(height: 20),
@@ -306,7 +313,9 @@ class _ProductInitialStockBottomSheetState
           Row(
             children: [
               TextButton(
-                onPressed: _loading ? null : () => Navigator.of(context).pop(false),
+                onPressed: _loading
+                    ? null
+                    : () => Navigator.of(context).pop(false),
                 child: const Text('Cancelar'),
               ),
               const Spacer(),

@@ -1,7 +1,9 @@
 /// Base URL del API **sin** barra final (ej. `http://10.0.2.2:3002/api/v1`).
-/// Emulador Android → `localhost` del PC es `10.0.2.2`.
+/// Emulador Android → el backend en `localhost:3002` del PC es `http://10.0.2.2:3002`.
+/// Dispositivo físico en la misma LAN → usá la IP de la máquina (p. ej. `http://192.168.x.x:3002/api/v1`)
+/// o **Configuración (clave)** en la app.
 ///
-/// Override al ejecutar:
+/// Override al compilar/ejecutar:
 /// `flutter run --dart-define=API_BASE_URL=https://mi-servidor.com/api/v1`
 ///
 /// Clave para **Inicio → Configuración (clave)** (margen de tienda, id tienda), hasta haber usuarios/roles.

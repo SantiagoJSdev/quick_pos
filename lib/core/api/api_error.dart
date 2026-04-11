@@ -14,8 +14,7 @@ class ApiError implements Exception {
   final List<String> messages;
   final String? requestId;
 
-  String get userMessage =>
-      messages.isEmpty ? error : messages.join('\n');
+  String get userMessage => messages.isEmpty ? error : messages.join('\n');
 
   /// Texto para UI / soporte: incluye `requestId` del cuerpo M0 si el servidor lo devolvió.
   String get userMessageForSupport {
@@ -30,8 +29,7 @@ class ApiError implements Exception {
   /// Transporte / timeout (p. ej. sin red). Incluye mensajes en español del [ApiClient].
   bool get isLikelyTransportFailure {
     if (statusCode == 408) return true;
-    final blob =
-        '${error.toLowerCase()}\n${messages.join('\n').toLowerCase()}';
+    final blob = '${error.toLowerCase()}\n${messages.join('\n').toLowerCase()}';
     const keys = <String>[
       'timeout',
       'agotado',
@@ -87,6 +85,5 @@ class ApiError implements Exception {
   }
 
   @override
-  String toString() =>
-      'ApiError($statusCode, $error, requestId: $requestId)';
+  String toString() => 'ApiError($statusCode, $error, requestId: $requestId)';
 }

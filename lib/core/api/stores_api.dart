@@ -43,19 +43,14 @@ class StoresApi {
     required String defaultSaleDocCurrencyCode,
     String type = 'main',
   }) async {
-    await _client.putJson(
-      '/stores/$storeId',
-      storeId,
-      {'name': name, 'type': type},
-    );
-    await _client.putJson(
-      '/stores/$storeId/business-settings',
-      storeId,
-      {
-        'functionalCurrencyCode': functionalCurrencyCode,
-        'defaultSaleDocCurrencyCode': defaultSaleDocCurrencyCode,
-      },
-    );
+    await _client.putJson('/stores/$storeId', storeId, {
+      'name': name,
+      'type': type,
+    });
+    await _client.putJson('/stores/$storeId/business-settings', storeId, {
+      'functionalCurrencyCode': functionalCurrencyCode,
+      'defaultSaleDocCurrencyCode': defaultSaleDocCurrencyCode,
+    });
     return getBusinessSettings(storeId);
   }
 }

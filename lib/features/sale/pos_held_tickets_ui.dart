@@ -55,20 +55,14 @@ class _SaveHeldTicketSheetBodyState extends State<_SaveHeldTicketSheetBody> {
     final a = _aliasCtrl.text.trim();
     final n = _noteCtrl.text.trim();
     try {
-      await widget.onConfirm(
-        a.isEmpty ? null : a,
-        n.isEmpty ? null : n,
-      );
+      await widget.onConfirm(a.isEmpty ? null : a, n.isEmpty ? null : n);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'No se pudo guardar el ticket: $e',
-              maxLines: 3,
-            ),
+            content: Text('No se pudo guardar el ticket: $e', maxLines: 3),
           ),
         );
       }
@@ -187,11 +181,7 @@ class _SaveHeldTicketSheetBodyState extends State<_SaveHeldTicketSheetBody> {
   }
 }
 
-enum RecoverCartConflictChoice {
-  replace,
-  saveCurrentAndOpen,
-  cancel,
-}
+enum RecoverCartConflictChoice { replace, saveCurrentAndOpen, cancel }
 
 Future<RecoverCartConflictChoice?> showRecoverCartConflictDialog(
   BuildContext context,
@@ -325,10 +315,8 @@ class _HeldTicketsListSheetState extends State<_HeldTicketsListSheet> {
               child: ListView.separated(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottom),
                 itemCount: _items.length,
-                separatorBuilder: (_, _) => const Divider(
-                  height: 1,
-                  color: PosSaleUi.divider,
-                ),
+                separatorBuilder: (_, _) =>
+                    const Divider(height: 1, color: PosSaleUi.divider),
                 itemBuilder: (c, i) {
                   final t = _items[i];
                   final timeShort = t.updatedAtIso.length >= 16
@@ -367,8 +355,11 @@ class _HeldTicketsListSheetState extends State<_HeldTicketsListSheet> {
                               setState(() => _items = next);
                             }
                           },
-                          icon: const Icon(Icons.edit_outlined,
-                              color: PosSaleUi.textMuted, size: 20),
+                          icon: const Icon(
+                            Icons.edit_outlined,
+                            color: PosSaleUi.textMuted,
+                            size: 20,
+                          ),
                         ),
                         IconButton(
                           tooltip: 'Eliminar',
@@ -378,8 +369,11 @@ class _HeldTicketsListSheetState extends State<_HeldTicketsListSheet> {
                             final next = await widget.reloadTickets();
                             if (mounted) setState(() => _items = next);
                           },
-                          icon: const Icon(Icons.delete_outline,
-                              color: PosSaleUi.error, size: 22),
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: PosSaleUi.error,
+                            size: 22,
+                          ),
                         ),
                         FilledButton.tonal(
                           onPressed: () {

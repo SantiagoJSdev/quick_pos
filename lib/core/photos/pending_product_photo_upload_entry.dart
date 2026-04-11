@@ -32,7 +32,9 @@ class PendingProductPhotoUploadEntry {
     };
   }
 
-  static PendingProductPhotoUploadEntry? tryFromJson(Map<String, dynamic> json) {
+  static PendingProductPhotoUploadEntry? tryFromJson(
+    Map<String, dynamic> json,
+  ) {
     final opId = json['opId']?.toString().trim() ?? '';
     final storeId = json['storeId']?.toString().trim() ?? '';
     final productId = json['productId']?.toString().trim() ?? '';
@@ -60,4 +62,3 @@ class PendingProductPhotoUploadEntry {
     );
   }
 }
-

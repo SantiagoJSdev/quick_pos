@@ -9,15 +9,9 @@ class ProductsApi {
   final ApiClient _client;
 
   /// `GET /api/v1/products/:id` — `null` si no existe o error de red/API.
-  Future<CatalogProduct?> getProduct(
-    String storeId,
-    String productId,
-  ) async {
+  Future<CatalogProduct?> getProduct(String storeId, String productId) async {
     try {
-      final json = await _client.getJson(
-        '/products/$productId',
-        storeId,
-      );
+      final json = await _client.getJson('/products/$productId', storeId);
       return CatalogProduct.fromJson(json);
     } catch (_) {
       return null;
@@ -32,10 +26,7 @@ class ProductsApi {
     final raw = await _client.getJsonList(
       '/products',
       storeId,
-      query: {
-        'includeInactive': includeInactive.toString(),
-        'source': source,
-      },
+      query: {'includeInactive': includeInactive.toString(), 'source': source},
     );
     return raw.map(CatalogProduct.fromJson).toList();
   }

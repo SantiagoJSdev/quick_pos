@@ -12,21 +12,18 @@ Future<Map<String, dynamic>> submitSyncNoop({
 }) async {
   final since = await prefs.getSyncPullLastVersion();
   final now = DateTime.now().toUtc().toIso8601String();
-  return syncApi.push(
-    storeId,
-    {
-      'deviceId': deviceId,
-      'appVersion': appVersion,
-      'clientTime': now,
-      'lastServerVersion': since,
-      'ops': [
-        {
-          'opId': ClientMutationId.newId(),
-          'opType': 'NOOP',
-          'timestamp': now,
-          'payload': <String, dynamic>{},
-        },
-      ],
-    },
-  );
+  return syncApi.push(storeId, {
+    'deviceId': deviceId,
+    'appVersion': appVersion,
+    'clientTime': now,
+    'lastServerVersion': since,
+    'ops': [
+      {
+        'opId': ClientMutationId.newId(),
+        'opType': 'NOOP',
+        'timestamp': now,
+        'payload': <String, dynamic>{},
+      },
+    ],
+  });
 }

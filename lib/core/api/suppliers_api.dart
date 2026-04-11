@@ -15,10 +15,7 @@ class SuppliersApi {
     String active = 'true',
   }) async {
     final capped = limit.clamp(1, 200);
-    final query = <String, String>{
-      'limit': '$capped',
-      'active': active,
-    };
+    final query = <String, String>{'limit': '$capped', 'active': active};
     final trimmedQ = q?.trim();
     if (trimmedQ != null && trimmedQ.isNotEmpty) {
       query['q'] = trimmedQ;

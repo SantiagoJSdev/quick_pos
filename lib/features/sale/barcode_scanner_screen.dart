@@ -115,10 +115,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen>
           return Stack(
             fit: StackFit.expand,
             children: [
-              MobileScanner(
-                controller: _controller,
-                onDetect: _onDetect,
-              ),
+              MobileScanner(controller: _controller, onDetect: _onDetect),
               IgnorePointer(
                 child: Stack(
                   fit: StackFit.expand,
@@ -179,8 +176,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen>
                                     gradient: LinearGradient(
                                       colors: [
                                         Colors.transparent,
-                                        PosSaleUi.primary
-                                            .withValues(alpha: 0.9),
+                                        PosSaleUi.primary.withValues(
+                                          alpha: 0.9,
+                                        ),
                                         Colors.transparent,
                                       ],
                                     ),
@@ -203,11 +201,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen>
                   'Apuntá al código de barras o QR del producto.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white,
-                        shadows: const [
-                          Shadow(blurRadius: 8, color: Colors.black),
-                        ],
-                      ),
+                    color: Colors.white,
+                    shadows: const [Shadow(blurRadius: 8, color: Colors.black)],
+                  ),
                 ),
               ),
             ],

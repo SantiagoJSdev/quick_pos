@@ -15,16 +15,18 @@ class PurchaseReceivePayload {
   }) {
     final doc = documentCurrencyCode.trim();
     final func = functionalCurrencyCode.trim();
-    final rateForSnapshot = SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
-      functionalCode: func,
-      documentCode: doc,
-      pair: fxPair,
-    );
-    final effectiveDate = fxPair == null || func.toUpperCase() == doc.toUpperCase()
+    final rateForSnapshot =
+        SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
+          functionalCode: func,
+          documentCode: doc,
+          pair: fxPair,
+        );
+    final effectiveDate =
+        fxPair == null || func.toUpperCase() == doc.toUpperCase()
         ? _todayYyyyMmDd()
         : fxPair.rate.effectiveDate.trim().isEmpty
-            ? _todayYyyyMmDd()
-            : fxPair.rate.effectiveDate.trim();
+        ? _todayYyyyMmDd()
+        : fxPair.rate.effectiveDate.trim();
     final ed = effectiveDate.length >= 10
         ? effectiveDate.substring(0, 10)
         : effectiveDate;

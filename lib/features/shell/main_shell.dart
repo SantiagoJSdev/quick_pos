@@ -15,7 +15,6 @@ import '../../core/api/sync_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/catalog_offline_sync.dart';
-import '../../core/network/api_base_cloud_sync.dart';
 import '../../core/network/api_connectivity_debug.dart';
 import '../../core/network/connectivity_util.dart';
 import '../../core/photos/product_photo_upload_sync.dart';
@@ -85,7 +84,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   bool _isOnline = true;
   bool _backendReachable = true;
   bool _manualForceOffline = false;
-  DateTime? _lastCloudResolverAttempt;
 
   void _recomputeOnlineFlag() {
     final hasNetwork = connectivityAppearsOnline(
@@ -140,18 +138,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (mounted) setState(_recomputeOnlineFlag);
       }
       return;
-    }
-    if (!_backendReachable) {
-      final now = DateTime.now();
-      if (_lastCloudResolverAttempt == null ||
-          now.difference(_lastCloudResolverAttempt!) >=
-              const Duration(seconds: 45)) {
-        _lastCloudResolverAttempt = now;
-        await tryRefreshApiBaseFromCloudWhenUnreachable(
-          prefs: widget.localPrefs,
-          storeId: widget.storeId,
-        );
-      }
     }
     final wasReachable = _backendReachable;
     try {

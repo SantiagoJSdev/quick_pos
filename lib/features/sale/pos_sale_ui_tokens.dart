@@ -29,9 +29,9 @@ class PosSaleUi {
   static const Color searchSuggestionsSurface = Color(0xFF2E2618);
 
   static TextStyle titleCart(BuildContext context) => const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 0.7,
-        color: textMuted,
-      );
+    fontSize: 11,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.7,
+    color: textMuted,
+  );
 }

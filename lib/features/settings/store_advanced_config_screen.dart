@@ -5,7 +5,6 @@ import '../../core/api/api_error.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/config/app_config.dart';
-import '../../core/network/backend_origin_resolver.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/storage/local_prefs.dart';
 import '../sale/pos_sale_ui_tokens.dart';
@@ -115,10 +114,7 @@ class _StoreConfigPinDialogState extends State<_StoreConfigPinDialog> {
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancelar'),
         ),
-        FilledButton(
-          onPressed: _trySubmit,
-          child: const Text('Entrar'),
-        ),
+        FilledButton(onPressed: _trySubmit, child: const Text('Entrar')),
       ],
     );
   }
@@ -150,11 +146,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   bool _savingMargin = false;
   bool _savingApiUrl = false;
   bool _testingApiUrl = false;
-  bool _cloudResolverBusy = false;
   String? _apiConnectionStatus;
   bool _apiConnectionOk = false;
   String _selectedProfile = '';
-  DateTime? _resolverUpdatedAt;
 
   @override
   void initState() {
@@ -163,13 +157,6 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     final initial = AppConfig.effectiveApiBaseUrl;
     _apiUrlCtrl.text = initial;
     _selectedProfile = _detectProfile(initial);
-    _loadResolverMeta();
-  }
-
-  Future<void> _loadResolverMeta() async {
-    final at = await widget.localPrefs.getPersistedApiOriginUpdatedAt();
-    if (!mounted) return;
-    setState(() => _resolverUpdatedAt = at);
   }
 
   Future<BusinessSettings> _load() async {
@@ -207,10 +194,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     }
     setState(() => _savingMargin = true);
     try {
-      await widget.storesApi.patchBusinessSettings(
-        widget.storeId,
-        {'defaultMarginPercent': raw},
-      );
+      await widget.storesApi.patchBusinessSettings(widget.storeId, {
+        'defaultMarginPercent': raw,
+      });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Margen de tienda actualizado')),
@@ -218,14 +204,14 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
       await _refresh();
     } on ApiError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.userMessage)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.userMessage)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _savingMargin = false);
     }
@@ -267,12 +253,16 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
   }
 
   String _buildProfileUrl(String profile) {
-    final current = Uri.tryParse(AppConfig.normalizeApiBaseUrl(_apiUrlCtrl.text));
+    final current = Uri.tryParse(
+      AppConfig.normalizeApiBaseUrl(_apiUrlCtrl.text),
+    );
     final pathRaw = (current?.path ?? '/api/v1').trim();
     final currentPath = pathRaw.isEmpty
         ? '/api/v1'
         : (pathRaw.startsWith('/') ? pathRaw : '/$pathRaw');
-    final portSuffix = (current?.hasPort ?? false) ? ':${current!.port}' : ':3002';
+    final portSuffix = (current?.hasPort ?? false)
+        ? ':${current!.port}'
+        : ':3002';
     switch (profile) {
       case 'LOCAL':
         return 'http://10.0.2.2$portSuffix$currentPath';
@@ -299,9 +289,7 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     if (!_looksLikeApiUrl(raw)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'URL inválida. Usá http(s)://host[:puerto]/api/v1',
-          ),
+          content: Text('URL inválida. Usá http(s)://host[:puerto]/api/v1'),
         ),
       );
       return;
@@ -309,30 +297,29 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
     final normalized = AppConfig.normalizeApiBaseUrl(raw);
     setState(() => _savingApiUrl = true);
     try {
-      await widget.localPrefs.setApiBaseUrlOverride(
-        normalized,
-        followCloudResolver: false,
-      );
+      await widget.localPrefs.setApiBaseUrlOverride(normalized);
       AppConfig.setRuntimeApiBaseUrlOverride(normalized);
       if (!mounted) return;
       _apiUrlCtrl.text = normalized;
       _selectedProfile = _detectProfile(normalized);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('URL de backend guardada. Se usa en próximas llamadas.'),
+          content: Text(
+            'URL de backend guardada. Se usa en próximas llamadas.',
+          ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _savingApiUrl = false);
     }
   }
 
-  Future<void> _runApiConnectionTest({bool saveOverrideOnSuccess = false}) async {
+  Future<void> _runApiConnectionTest() async {
     final raw = _apiUrlCtrl.text.trim();
     if (!_looksLikeApiUrl(raw)) {
       setState(() {
@@ -355,25 +342,8 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
       if (!mounted) return;
       setState(() {
         _apiConnectionOk = true;
-        _apiConnectionStatus = saveOverrideOnSuccess
-            ? 'Conexión OK. URL guardada.'
-            : 'Conexión OK. Se pudo leer business-settings.';
+        _apiConnectionStatus = 'Conexión OK. Se pudo leer business-settings.';
       });
-      if (saveOverrideOnSuccess) {
-        await widget.localPrefs.setApiBaseUrlOverride(
-          normalized,
-          followCloudResolver: true,
-        );
-        if (!mounted) return;
-        AppConfig.setRuntimeApiBaseUrlOverride(normalized);
-        _apiUrlCtrl.text = normalized;
-        _selectedProfile = _detectProfile(normalized);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('URL de backend guardada (verificada con la nube).'),
-          ),
-        );
-      }
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() {
@@ -394,64 +364,6 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
 
   Future<void> _testApiUrl() => _runApiConnectionTest();
 
-  Future<void> _fetchFromCloudAndProbe() async {
-    setState(() {
-      _cloudResolverBusy = true;
-      _apiConnectionStatus = null;
-      _apiConnectionOk = false;
-    });
-    try {
-      final r = await BackendOriginResolver().fetchFromVercel();
-      if (!mounted) return;
-      String? origin;
-      DateTime? resolverAt;
-      if (r != null) {
-        await widget.localPrefs.setPersistedApiOrigin(r.baseUrl, r.updatedAt);
-        if (!mounted) return;
-        origin = r.baseUrl;
-        resolverAt = r.updatedAt;
-      } else {
-        origin = await widget.localPrefs.getPersistedApiOrigin();
-        resolverAt = await widget.localPrefs.getPersistedApiOriginUpdatedAt();
-        if (!mounted) return;
-        if (origin == null || origin.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Vercel no respondió y no hay origen guardado. Probá de nuevo o '
-                'configurá la URL a mano.',
-              ),
-            ),
-          );
-          return;
-        }
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Vercel no respondió; se probó el último origen guardado en el equipo.',
-            ),
-          ),
-        );
-      }
-      final apiV1 = apiV1BaseFromOrigin(origin);
-      if (apiV1.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Respuesta del resolver inválida.')),
-        );
-        return;
-      }
-      setState(() {
-        _resolverUpdatedAt = resolverAt;
-        _apiUrlCtrl.text = apiV1;
-        _selectedProfile = _detectProfile(apiV1);
-      });
-      await _runApiConnectionTest(saveOverrideOnSuccess: true);
-    } finally {
-      if (mounted) setState(() => _cloudResolverBusy = false);
-    }
-  }
-
   Future<void> _resetApiUrlDefault() async {
     setState(() => _savingApiUrl = true);
     try {
@@ -462,14 +374,16 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
       _selectedProfile = _detectProfile(_apiUrlCtrl.text);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('URL restablecida al valor por defecto de compilación.'),
+          content: Text(
+            'URL restablecida al valor por defecto de compilación.',
+          ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _savingApiUrl = false);
     }
@@ -523,17 +437,17 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                 Text(
                   'ID de la tienda',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: PosSaleUi.text,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Mismo valor que usa el API (`storeId`). Copialo para soporte o integraciones.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PosSaleUi.textMuted,
-                        height: 1.35,
-                      ),
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Card(
@@ -547,7 +461,8 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                         Expanded(
                           child: SelectableText(
                             widget.storeId,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
                                   fontFamily: 'monospace',
                                   color: PosSaleUi.text,
                                 ),
@@ -576,18 +491,18 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                 Text(
                   'Margen por defecto',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: PosSaleUi.text,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Porcentaje sobre costo para sugerir precio de lista (0–999). '
                   'Se aplica a productos en modo «Margen de la tienda».',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PosSaleUi.textMuted,
-                        height: 1.35,
-                      ),
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -599,8 +514,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                     border: OutlineInputBorder(),
                     filled: true,
                   ),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 FilledButton(
@@ -617,49 +533,17 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                 Text(
                   'Conexión backend',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: PosSaleUi.text,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: PosSaleUi.text,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Cambiá la URL base del API para este dispositivo sin recompilar '
-                  '(ej. red LAN para APK en móvil).',
+                  '(ej. emulador → 10.0.2.2:3002, móvil en LAN → IP del PC).',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PosSaleUi.textMuted,
-                        height: 1.35,
-                      ),
-                ),
-                if (_resolverUpdatedAt != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Origen automático (Vercel): última respuesta '
-                    '${_resolverUpdatedAt!.toUtc().toIso8601String()}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: PosSaleUi.textFaint,
-                          height: 1.35,
-                          fontSize: 11,
-                        ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: (_savingApiUrl ||
-                          _testingApiUrl ||
-                          _cloudResolverBusy)
-                      ? null
-                      : _fetchFromCloudAndProbe,
-                  icon: _cloudResolverBusy
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.cloud_download_outlined, size: 20),
-                  label: Text(
-                    _cloudResolverBusy
-                        ? 'Consultando Vercel…'
-                        : 'Actualizar desde la nube (Vercel)',
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -684,29 +568,23 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                   runSpacing: 8,
                   children: [
                     ChoiceChip(
-                      label: const Text('Producción'),
+                      label: const Text('Por defecto (compilación)'),
                       selected: _selectedProfile == 'PROD',
-                      onSelected: (_savingApiUrl ||
-                              _testingApiUrl ||
-                              _cloudResolverBusy)
+                      onSelected: (_savingApiUrl || _testingApiUrl)
                           ? null
                           : (_) => _applyProfile('PROD'),
                     ),
                     ChoiceChip(
                       label: const Text('LAN'),
                       selected: _selectedProfile == 'LAN',
-                      onSelected: (_savingApiUrl ||
-                              _testingApiUrl ||
-                              _cloudResolverBusy)
+                      onSelected: (_savingApiUrl || _testingApiUrl)
                           ? null
                           : (_) => _applyProfile('LAN'),
                     ),
                     ChoiceChip(
                       label: const Text('Local (emulador)'),
                       selected: _selectedProfile == 'LOCAL',
-                      onSelected: (_savingApiUrl ||
-                              _testingApiUrl ||
-                              _cloudResolverBusy)
+                      onSelected: (_savingApiUrl || _testingApiUrl)
                           ? null
                           : (_) => _applyProfile('LOCAL'),
                     ),
@@ -717,16 +595,16 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: (_savingApiUrl ||
-                                _testingApiUrl ||
-                                _cloudResolverBusy)
+                        onPressed: (_savingApiUrl || _testingApiUrl)
                             ? null
                             : _testApiUrl,
                         child: _testingApiUrl
                             ? const SizedBox(
                                 width: 22,
                                 height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Probar conexión'),
                       ),
@@ -734,16 +612,16 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: FilledButton(
-                        onPressed: (_savingApiUrl ||
-                                _testingApiUrl ||
-                                _cloudResolverBusy)
+                        onPressed: (_savingApiUrl || _testingApiUrl)
                             ? null
                             : _saveApiUrl,
                         child: _savingApiUrl
                             ? const SizedBox(
                                 width: 22,
                                 height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Guardar URL'),
                       ),
@@ -751,9 +629,7 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: (_savingApiUrl ||
-                                _testingApiUrl ||
-                                _cloudResolverBusy)
+                        onPressed: (_savingApiUrl || _testingApiUrl)
                             ? null
                             : _resetApiUrlDefault,
                         child: const Text('Usar default'),
@@ -774,9 +650,9 @@ class _StoreAdvancedConfigScreenState extends State<StoreAdvancedConfigScreen> {
                 const SizedBox(height: 24),
                 Text(
                   'Tienda: ${s.storeName}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PosSaleUi.textFaint,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: PosSaleUi.textFaint),
                 ),
               ],
             );

@@ -40,7 +40,9 @@ Future<void> flushPendingCatalogMutations({
           cache.removeWhere((p) => p.id == created.id);
           cache.add(created);
         }
-        catalogInvalidation?.invalidateFromLocalMutation(productIds: {created.id});
+        catalogInvalidation?.invalidateFromLocalMutation(
+          productIds: {created.id},
+        );
       } else if (e.type == PendingCatalogMutationEntry.typeCreateWithStock) {
         final body = e.body;
         final key = e.idempotencyKey?.trim() ?? '';
@@ -66,8 +68,9 @@ Future<void> flushPendingCatalogMutations({
           cache.removeWhere((p) => p.id == created.product.id);
           cache.add(created.product);
         }
-        catalogInvalidation
-            ?.invalidateFromLocalMutation(productIds: {created.product.id});
+        catalogInvalidation?.invalidateFromLocalMutation(
+          productIds: {created.product.id},
+        );
       } else if (e.type == PendingCatalogMutationEntry.typeUpdate) {
         final pid = e.productId?.trim() ?? '';
         final body = e.body;
@@ -75,7 +78,9 @@ Future<void> flushPendingCatalogMutations({
         final updated = await productsApi.updateProduct(storeId, pid, body);
         final i = cache.indexWhere((p) => p.id == updated.id);
         if (i >= 0) cache[i] = updated;
-        catalogInvalidation?.invalidateFromLocalMutation(productIds: {updated.id});
+        catalogInvalidation?.invalidateFromLocalMutation(
+          productIds: {updated.id},
+        );
       } else if (e.type == PendingCatalogMutationEntry.typeDeactivate) {
         final pid = e.productId?.trim() ?? '';
         if (pid.isEmpty) continue;

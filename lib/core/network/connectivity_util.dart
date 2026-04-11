@@ -11,5 +11,6 @@ bool connectivityTransitionedToOnline(
   List<ConnectivityResult> next,
 ) {
   if (previous == null) return false;
-  return !connectivityAppearsOnline(previous) && connectivityAppearsOnline(next);
+  return !connectivityAppearsOnline(previous) &&
+      connectivityAppearsOnline(next);
 }

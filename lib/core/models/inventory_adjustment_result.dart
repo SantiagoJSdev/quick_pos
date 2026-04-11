@@ -1,9 +1,6 @@
 /// Respuesta de `POST /api/v1/inventory/adjustments` — §13.7.
 class InventoryAdjustmentResult {
-  const InventoryAdjustmentResult({
-    required this.status,
-    this.movementId,
-  });
+  const InventoryAdjustmentResult({required this.status, this.movementId});
 
   final String status;
   final String? movementId;

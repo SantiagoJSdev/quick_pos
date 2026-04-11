@@ -42,7 +42,10 @@ class PendingCatalogMutationEntry {
     final storeId = json['storeId']?.toString().trim() ?? '';
     final type = json['type']?.toString().trim() ?? '';
     final createdAtIso = json['createdAtIso']?.toString().trim() ?? '';
-    if (opId.isEmpty || storeId.isEmpty || type.isEmpty || createdAtIso.isEmpty) {
+    if (opId.isEmpty ||
+        storeId.isEmpty ||
+        type.isEmpty ||
+        createdAtIso.isEmpty) {
       return null;
     }
     final rawBody = json['body'];

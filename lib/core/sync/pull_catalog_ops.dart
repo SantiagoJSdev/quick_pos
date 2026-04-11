@@ -30,8 +30,5 @@ PullCatalogMutationSummary summarizePullOpsProductChanges(List<dynamic> ops) {
       if (id != null && id.isNotEmpty) ids.add(id);
     }
   }
-  return PullCatalogMutationSummary(
-    hadMutation: any,
-    affectedProductIds: ids,
-  );
+  return PullCatalogMutationSummary(hadMutation: any, affectedProductIds: ids);
 }

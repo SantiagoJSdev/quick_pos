@@ -74,19 +74,14 @@ class SalesListMeta {
 }
 
 class SalesListPage {
-  const SalesListPage({
-    required this.items,
-    this.nextCursor,
-    this.meta,
-  });
+  const SalesListPage({required this.items, this.nextCursor, this.meta});
 
   final List<SalesListItem> items;
   final String? nextCursor;
   final SalesListMeta? meta;
 
   bool get hasMore =>
-      (meta?.hasMore == true) ||
-      (nextCursor != null && nextCursor!.isNotEmpty);
+      (meta?.hasMore == true) || (nextCursor != null && nextCursor!.isNotEmpty);
 
   factory SalesListPage.fromJson(Map<String, dynamic> json) {
     final items = <SalesListItem>[];

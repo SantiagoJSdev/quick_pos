@@ -17,11 +17,7 @@ import 'inventory_product_detail_screen.dart';
 import 'product_form_screen.dart';
 
 /// Filtro por cantidad / mínimo (`FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §2).
-enum _StockListFilter {
-  all,
-  outOfStock,
-  belowMin,
-}
+enum _StockListFilter { all, outOfStock, belowMin }
 
 /// B1 — contenido de **Stock** (sin `Scaffold`; va dentro de [InventoryModuleScreen]).
 class InventoryStockTab extends StatefulWidget {
@@ -96,13 +92,11 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   Future<void> _loadStoreMargin() async {
     if (!widget.shellOnline) return;
     try {
-      final bs =
-          await widget.storesApi.getBusinessSettings(widget.storeId);
+      final bs = await widget.storesApi.getBusinessSettings(widget.storeId);
       if (!mounted) return;
       final m = bs.defaultMarginPercent?.trim();
       setState(() {
-        _storeDefaultMarginPercent =
-            (m == null || m.isEmpty) ? null : m;
+        _storeDefaultMarginPercent = (m == null || m.isEmpty) ? null : m;
       });
     } catch (_) {
       /* opcional: sin margen en settings */
@@ -140,8 +134,9 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       _error = null;
     });
     if (!widget.shellOnline) {
-      final cachedInv =
-          await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final cachedInv = await widget.localPrefs.loadInventoryCache(
+        widget.storeId,
+      );
       final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
       final merged = _mergeInventoryWithCatalog(cachedInv, cachedCatalog);
       if (!mounted) return;
@@ -168,7 +163,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         await widget.localPrefs.saveCatalogProductsCache(raw);
         catalog = raw.where((p) => p.active).toList();
       } catch (_) {
-        final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
+        final cachedCatalog = await widget.localPrefs
+            .loadCatalogProductsCache();
         catalog = cachedCatalog.where((p) => p.active).toList();
       }
       final inInventory = list.map((l) => l.productId).toSet();
@@ -185,11 +181,12 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           );
         }
       }
-      final merged = [...list, ...synthetic]..sort(
-            (a, b) => a.displayName
-                .toLowerCase()
-                .compareTo(b.displayName.toLowerCase()),
-          );
+      final merged = [...list, ...synthetic]
+        ..sort(
+          (a, b) => a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          ),
+        );
       if (!mounted) return;
       setState(() {
         _all = merged;
@@ -198,7 +195,9 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       });
       widget.onLoadedCount?.call(_all.length);
     } on ApiError catch (e) {
-      final cachedInv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final cachedInv = await widget.localPrefs.loadInventoryCache(
+        widget.storeId,
+      );
       final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
       final merged = _mergeInventoryWithCatalog(cachedInv, cachedCatalog);
       if (!mounted) return;
@@ -220,7 +219,9 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         widget.onLoadedCount?.call(0);
       }
     } catch (e) {
-      final cachedInv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final cachedInv = await widget.localPrefs.loadInventoryCache(
+        widget.storeId,
+      );
       final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
       final merged = _mergeInventoryWithCatalog(cachedInv, cachedCatalog);
       if (!mounted) return;
@@ -262,12 +263,10 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         );
       }
     }
-    return [...list, ...synthetic]
-      ..sort(
-        (a, b) => a.displayName
-            .toLowerCase()
-            .compareTo(b.displayName.toLowerCase()),
-      );
+    return [...list, ...synthetic]..sort(
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+    );
   }
 
   bool _anyLineExactBarcode(String raw) {
@@ -377,8 +376,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                     onSelected: _loading
                         ? null
                         : (v) => setState(() {
-                              if (v) _stockFilter = _StockListFilter.all;
-                            }),
+                            if (v) _stockFilter = _StockListFilter.all;
+                          }),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -391,10 +390,10 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                     onSelected: _loading
                         ? null
                         : (v) => setState(() {
-                              _stockFilter = v
-                                  ? _StockListFilter.outOfStock
-                                  : _StockListFilter.all;
-                            }),
+                            _stockFilter = v
+                                ? _StockListFilter.outOfStock
+                                : _StockListFilter.all;
+                          }),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -409,10 +408,10 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
                     onSelected: _loading
                         ? null
                         : (v) => setState(() {
-                              _stockFilter = v
-                                  ? _StockListFilter.belowMin
-                                  : _StockListFilter.all;
-                            }),
+                            _stockFilter = v
+                                ? _StockListFilter.belowMin
+                                : _StockListFilter.all;
+                          }),
                   ),
                 ),
               ],
@@ -427,8 +426,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
             'es mayor que cero y no supera el piso minStock que envía el API (reponer pronto). '
             'Incluye productos de catálogo sin movimientos (0). Buscá o escaneá con el ícono.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
         if (_usingCachedData)
@@ -440,10 +439,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
             ),
           ),
         Expanded(
-          child: RefreshIndicator(
-            onRefresh: _load,
-            child: _buildBody(),
-          ),
+          child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
         ),
       ],
     );
@@ -491,18 +487,18 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
             child: Text(
               _all.isEmpty
                   ? 'No hay productos en catálogo ni líneas de inventario.\n\n'
-                      'Creá productos en la pestaña Catálogo (arriba); '
-                      'aparecerán acá con 0 hasta la primera compra o ajuste de stock.'
+                        'Creá productos en la pestaña Catálogo (arriba); '
+                        'aparecerán acá con 0 hasta la primera compra o ajuste de stock.'
                   : _searchController.text.trim().isNotEmpty
-                      ? 'Ningún resultado para la búsqueda y el filtro actual.'
-                      : _stockFilter != _StockListFilter.all
-                          ? 'Ningún producto cumple este filtro de stock.\n\n'
-                              '“Bajo mínimo” solo aplica si el API envía minStock > 0.'
-                          : 'Ningún resultado.',
+                  ? 'Ningún resultado para la búsqueda y el filtro actual.'
+                  : _stockFilter != _StockListFilter.all
+                  ? 'Ningún producto cumple este filtro de stock.\n\n'
+                        '“Bajo mínimo” solo aplica si el API envía minStock > 0.'
+                  : 'Ningún resultado.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],
@@ -517,15 +513,17 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         final synth = line.isSyntheticInventoryRow;
         final min = line.minStock?.trim();
         final minSuffix = (min != null && min.isNotEmpty) ? ' · mín. $min' : '';
-        final barcodeSuffix = line.product?.barcode != null &&
-                line.product!.barcode!.isNotEmpty
+        final barcodeSuffix =
+            line.product?.barcode != null && line.product!.barcode!.isNotEmpty
             ? ' · ${line.product!.barcode}'
             : '';
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 8),
           leading: (!synth && (line.isOutOfStock || line.isBelowMinimumStock))
               ? Icon(
-                  line.isOutOfStock ? Icons.inventory_2_outlined : Icons.warning_amber_outlined,
+                  line.isOutOfStock
+                      ? Icons.inventory_2_outlined
+                      : Icons.warning_amber_outlined,
                   color: line.isOutOfStock
                       ? Theme.of(context).colorScheme.outline
                       : Theme.of(context).colorScheme.tertiary,
@@ -568,8 +566,8 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
               Text(
                 synth ? 'catálogo' : 'disp.',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),

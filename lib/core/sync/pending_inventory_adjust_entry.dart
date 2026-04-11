@@ -18,11 +18,11 @@ class PendingInventoryAdjustEntry {
   final String opTimestampIso;
 
   Map<String, dynamic> toJson() => {
-        'opId': opId,
-        'storeId': storeId,
-        'payload': payload,
-        'opTimestampIso': opTimestampIso,
-      };
+    'opId': opId,
+    'storeId': storeId,
+    'payload': payload,
+    'opTimestampIso': opTimestampIso,
+  };
 
   static PendingInventoryAdjustEntry? tryFromJson(Map<String, dynamic> json) {
     final opId = json['opId'] as String?;

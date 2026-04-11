@@ -8,9 +8,6 @@ class CurrencyRef {
     if (json == null) return null;
     final code = json['code'] as String?;
     if (code == null) return null;
-    return CurrencyRef(
-      code: code,
-      name: json['name'] as String?,
-    );
+    return CurrencyRef(code: code, name: json['name'] as String?);
   }
 }

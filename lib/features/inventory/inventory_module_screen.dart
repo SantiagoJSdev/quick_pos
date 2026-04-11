@@ -78,9 +78,9 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
             Text(
               'Inventario',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: PosSaleUi.text,
-                    fontWeight: FontWeight.w700,
-                  ),
+                color: PosSaleUi.text,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -116,9 +116,9 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
                       ? 'Cantidades en tienda. Tocá un producto para ver movimientos y ajustar stock.'
                       : 'Ficha de producto (nombre, SKU, precio, código de barras). Acá creás y editás productos.') +
                   _countSuffix(),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: PosSaleUi.textMuted,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: PosSaleUi.textMuted),
             ),
           ),
           Expanded(

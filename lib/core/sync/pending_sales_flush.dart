@@ -39,8 +39,9 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
   final allPurchases = await prefs.loadPendingPurchaseReceives();
   final allReturns = await prefs.loadPendingSaleReturns();
 
-  final saleQueue =
-      allSales.where((e) => e.storeId == storeId).toList(growable: false);
+  final saleQueue = allSales
+      .where((e) => e.storeId == storeId)
+      .toList(growable: false);
   final adjQueue = allAdjusts
       .where((e) => e.storeId == storeId)
       .toList(growable: false);
@@ -132,8 +133,9 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     collectOpIds('acked');
     collectOpIds('skipped');
 
-    final remainingSales =
-        allSales.where((e) => !remove.contains(e.opId)).toList(growable: false);
+    final remainingSales = allSales
+        .where((e) => !remove.contains(e.opId))
+        .toList(growable: false);
     final remainingAdj = allAdjusts
         .where((e) => !remove.contains(e.opId))
         .toList(growable: false);

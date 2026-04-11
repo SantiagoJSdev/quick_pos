@@ -18,4 +18,3 @@ class PurchasesApi {
     return _client.getJson('/purchases/$purchaseId', storeId);
   }
 }
-

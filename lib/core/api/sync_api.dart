@@ -6,10 +6,7 @@ class SyncApi {
   final ApiClient _client;
 
   /// `POST /api/v1/sync/push` — `SYNC_CONTRACTS.md`.
-  Future<Map<String, dynamic>> push(
-    String storeId,
-    Map<String, dynamic> body,
-  ) {
+  Future<Map<String, dynamic>> push(String storeId, Map<String, dynamic> body) {
     return _client.postJson('/sync/push', storeId, body);
   }
 
@@ -22,10 +19,7 @@ class SyncApi {
     return _client.getJson(
       '/sync/pull',
       storeId,
-      query: {
-        'since': '$since',
-        'limit': '$limit',
-      },
+      query: {'since': '$since', 'limit': '$limit'},
     );
   }
 }

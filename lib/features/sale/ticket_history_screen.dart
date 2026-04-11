@@ -41,8 +41,9 @@ Future<String> _queuedSaleLinesSummary(
       final qty = m['quantity']?.toString() ?? '?';
       final price = m['price']?.toString() ?? '?';
       i++;
-      final pidShort =
-          pid.length > 8 ? '${pid.substring(0, 8)}…' : (pid.isEmpty ? '—' : pid);
+      final pidShort = pid.length > 8
+          ? '${pid.substring(0, 8)}…'
+          : (pid.isEmpty ? '—' : pid);
       buf.writeln('$i. $qty u. × $price  ·  $pidShort');
     }
     if (buf.isEmpty) return 'Sin líneas legibles en la copia local.';
@@ -66,7 +67,8 @@ List<Widget> _saleTicketVisualWidgets(
 ) {
   final lines = _humanLinesFromRemoteSaleJson(sale);
   final doc = _jsonStringField(sale, 'documentCurrencyCode');
-  final total = _jsonStringField(sale, 'totalDocument') ??
+  final total =
+      _jsonStringField(sale, 'totalDocument') ??
       _jsonStringField(sale, 'documentTotal');
   final stat = _jsonStringField(sale, 'status');
   final created = _jsonStringField(sale, 'createdAt');
@@ -101,7 +103,10 @@ List<Widget> _saleTicketVisualWidgets(
                 child: Text(
                   right.isEmpty ? '—' : right,
                   textAlign: TextAlign.end,
-                  style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
+                  style: const TextStyle(
+                    color: PosSaleUi.textMuted,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
@@ -134,9 +139,7 @@ List<Widget> _saleTicketVisualWidgets(
     const Text('Total del ticket', style: label),
     const SizedBox(height: 4),
     Text(
-      total != null && doc != null
-          ? '$total $doc'
-          : (total ?? '—'),
+      total != null && doc != null ? '$total $doc' : (total ?? '—'),
       style: const TextStyle(
         color: PosSaleUi.text,
         fontWeight: FontWeight.w700,
@@ -146,15 +149,9 @@ List<Widget> _saleTicketVisualWidgets(
     if (paid != null || change != null) ...[
       const SizedBox(height: 10),
       if (paid != null)
-        Text(
-          'Pagado: $paid${doc != null ? ' $doc' : ''}',
-          style: muted,
-        ),
+        Text('Pagado: $paid${doc != null ? ' $doc' : ''}', style: muted),
       if (change != null)
-        Text(
-          'Vuelto: $change${doc != null ? ' $doc' : ''}',
-          style: muted,
-        ),
+        Text('Vuelto: $change${doc != null ? ' $doc' : ''}', style: muted),
     ],
     const SizedBox(height: 16),
     const Text('Productos', style: label),
@@ -218,7 +215,11 @@ List<Widget> _saleTicketVisualWidgets(
             ),
           );
         },
-        icon: const Icon(Icons.info_outline, size: 18, color: PosSaleUi.textMuted),
+        icon: const Icon(
+          Icons.info_outline,
+          size: 18,
+          color: PosSaleUi.textMuted,
+        ),
         label: const Text(
           'Ver datos técnicos (soporte)',
           style: TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
@@ -309,8 +310,11 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
   Future<void> _openDetail(RecentSaleTicket t) async {
     if (t.status == RecentSaleTicket.statusQueued) {
       if (!mounted) return;
-      final lines =
-          await _queuedSaleLinesSummary(widget.localPrefs, widget.storeId, t.saleId);
+      final lines = await _queuedSaleLinesSummary(
+        widget.localPrefs,
+        widget.storeId,
+        t.saleId,
+      );
       if (!mounted) return;
       final noLabel = _ticketShortNumberLabel(t.displayCode);
       await showDialog<void>(
@@ -355,9 +359,9 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: t.saleId));
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ID copiado')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('ID copiado')));
                 },
                 child: const Text('Copiar ID'),
               ),
@@ -409,7 +413,9 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
                   return const Padding(
                     padding: EdgeInsets.all(32),
                     child: Center(
-                      child: CircularProgressIndicator(color: PosSaleUi.primary),
+                      child: CircularProgressIndicator(
+                        color: PosSaleUi.primary,
+                      ),
                     ),
                   );
                 }
@@ -449,13 +455,12 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
                   );
                 }
                 final json = snap.data!;
-                final pretty =
-                    const JsonEncoder.withIndent('  ').convert(json);
+                final pretty = const JsonEncoder.withIndent('  ').convert(json);
                 final headerTitle = titleSuffix.startsWith('#')
                     ? 'Ticket $titleSuffix'
                     : (titleSuffix.length > 14
-                        ? '${titleSuffix.substring(0, 14)}…'
-                        : titleSuffix);
+                          ? '${titleSuffix.substring(0, 14)}…'
+                          : titleSuffix);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -489,11 +494,14 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
                               Clipboard.setData(ClipboardData(text: saleId));
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                    content: Text('UUID de venta copiado')),
+                                  content: Text('UUID de venta copiado'),
+                                ),
                               );
                             },
-                            icon: const Icon(Icons.copy,
-                                color: PosSaleUi.textMuted),
+                            icon: const Icon(
+                              Icons.copy,
+                              color: PosSaleUi.textMuted,
+                            ),
                           ),
                         ],
                       ),
@@ -538,9 +546,9 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
               child: Text(
                 'Historial de tickets',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: PosSaleUi.text,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: PosSaleUi.text,
+                  fontWeight: FontWeight.w600,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -570,7 +578,8 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
             storeId: widget.storeId,
             localPrefs: widget.localPrefs,
             salesApi: widget.salesApi,
-            onOpenRemote: (saleId, total, currency) => _openRemoteSaleBottomSheet(
+            onOpenRemote: (saleId, total, currency) =>
+                _openRemoteSaleBottomSheet(
                   context,
                   widget.salesApi,
                   widget.storeId,
@@ -615,8 +624,9 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    await widget.localPrefs
-        .reconcileRecentQueuedTicketsWithPendingSales(widget.storeId);
+    await widget.localPrefs.reconcileRecentQueuedTicketsWithPendingSales(
+      widget.storeId,
+    );
     var all = await widget.localPrefs.loadRecentSaleTickets();
     final sid = widget.storeId.trim();
     var forStore = all
@@ -655,8 +665,11 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
               physics: const AlwaysScrollableScrollPhysics(),
               children: const [
                 SizedBox(height: 80),
-                Icon(Icons.smartphone_outlined,
-                    size: 56, color: PosSaleUi.textFaint),
+                Icon(
+                  Icons.smartphone_outlined,
+                  size: 56,
+                  color: PosSaleUi.textFaint,
+                ),
                 SizedBox(height: 16),
                 Text(
                   'No hay ventas recientes en este dispositivo',
@@ -672,10 +685,7 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
                     '(rango amplio por defecto). Con «Solo este dispositivo» desactivado evitás '
                     'filtrar por ID de equipo.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: PosSaleUi.textFaint,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: PosSaleUi.textFaint, fontSize: 12),
                   ),
                 ),
               ],
@@ -683,17 +693,15 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
           : ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: _items.length,
-              separatorBuilder: (context, i) => const Divider(
-                height: 1,
-                color: PosSaleUi.divider,
-              ),
+              separatorBuilder: (context, i) =>
+                  const Divider(height: 1, color: PosSaleUi.divider),
               itemBuilder: (context, i) {
                 final t = _items[i];
                 final queued = t.status == RecentSaleTicket.statusQueued;
                 final dt = DateTime.tryParse(t.recordedAtIso);
                 final sub = dt != null
                     ? '${dt.toLocal().toString().substring(0, 19)} · '
-                        '${queued ? "Pendiente envío (sync auto.)" : "En servidor"}'
+                          '${queued ? "Pendiente envío (sync auto.)" : "En servidor"}'
                     : t.status;
                 final no = _ticketShortNumberLabel(t.displayCode);
                 return ListTile(
@@ -737,7 +745,7 @@ class _GeneralHistoryTab extends StatefulWidget {
   final LocalPrefs localPrefs;
   final SalesApi salesApi;
   final Future<void> Function(String saleId, String? total, String? currency)
-      onOpenRemote;
+  onOpenRemote;
 
   @override
   State<_GeneralHistoryTab> createState() => _GeneralHistoryTabState();
@@ -854,7 +862,9 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
       }
     } catch (e) {
       if (reset) {
-        final cached = await widget.localPrefs.loadSalesGeneralCache(widget.storeId);
+        final cached = await widget.localPrefs.loadSalesGeneralCache(
+          widget.storeId,
+        );
         if (cached != null && cached.rows.isNotEmpty) {
           if (!mounted) return;
           setState(() {
@@ -919,9 +929,8 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
   @override
   Widget build(BuildContext context) {
     final tz = _meta?.timezone;
-    final range = _meta != null &&
-            _meta!.dateFrom != null &&
-            _meta!.dateTo != null
+    final range =
+        _meta != null && _meta!.dateFrom != null && _meta!.dateTo != null
         ? '${_meta!.dateFrom} → ${_meta!.dateTo}'
         : null;
 
@@ -940,16 +949,20 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
             Expanded(
               child: OutlinedButton(
                 onPressed: _loading ? null : _pickFrom,
-                child: Text('Desde ${_ymd(_from)}',
-                    style: const TextStyle(color: PosSaleUi.text)),
+                child: Text(
+                  'Desde ${_ymd(_from)}',
+                  style: const TextStyle(color: PosSaleUi.text),
+                ),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton(
                 onPressed: _loading ? null : _pickTo,
-                child: Text('Hasta ${_ymd(_to)}',
-                    style: const TextStyle(color: PosSaleUi.text)),
+                child: Text(
+                  'Hasta ${_ymd(_to)}',
+                  style: const TextStyle(color: PosSaleUi.text),
+                ),
               ),
             ),
           ],
@@ -957,8 +970,10 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
         const SizedBox(height: 8),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Solo este dispositivo',
-              style: TextStyle(color: PosSaleUi.text, fontSize: 14)),
+          title: const Text(
+            'Solo este dispositivo',
+            style: TextStyle(color: PosSaleUi.text, fontSize: 14),
+          ),
           subtitle: Text(
             _deviceId == null ? 'Cargando ID…' : _deviceId!,
             style: const TextStyle(color: PosSaleUi.textFaint, fontSize: 11),
@@ -1036,19 +1051,19 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
             ),
             subtitle: Text(
               _subtitle(it),
-              style: const TextStyle(
-                color: PosSaleUi.textMuted,
-                fontSize: 12,
-              ),
+              style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 12),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: const Icon(Icons.chevron_right, color: PosSaleUi.textMuted),
+            trailing: const Icon(
+              Icons.chevron_right,
+              color: PosSaleUi.textMuted,
+            ),
             onTap: () => widget.onOpenRemote(
-                  it.id,
-                  it.totalDocument,
-                  it.documentCurrencyCode,
-                ),
+              it.id,
+              it.totalDocument,
+              it.documentCurrencyCode,
+            ),
           );
         }),
         if (_hasFetched &&

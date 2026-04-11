@@ -21,8 +21,9 @@ class CatalogInvalidationBus extends ChangeNotifier {
   /// Llamado tras aplicar lógicamente ops de pull que afectan catálogo.
   void invalidateFromPull({Set<String>? productIds}) {
     _generation++;
-    _lastTouchedProductIds =
-        productIds != null ? Set<String>.from(productIds) : {};
+    _lastTouchedProductIds = productIds != null
+        ? Set<String>.from(productIds)
+        : {};
     notifyListeners();
   }
 

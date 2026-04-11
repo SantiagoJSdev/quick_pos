@@ -10,12 +10,13 @@ import 'api_error.dart';
 
 class ApiClient {
   ApiClient({http.Client? httpClient, String? baseUrl})
-      : _client = httpClient ?? http.Client(),
-        _baseUrlOverride = baseUrl;
+    : _client = httpClient ?? http.Client(),
+      _baseUrlOverride = baseUrl;
 
   final http.Client _client;
   final String? _baseUrlOverride;
   static const _uuid = Uuid();
+
   /// Emulador + túnel ngrok suelen superar 12s en el primer round-trip; 408 en probe = agotó esto.
   static const _requestTimeout = Duration(seconds: 30);
 

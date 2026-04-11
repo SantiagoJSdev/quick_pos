@@ -9,20 +9,21 @@ class QuickMarketShellTheme {
   QuickMarketShellTheme._();
 
   static ThemeData theme() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: AppTheme.primaryOrange,
-      brightness: Brightness.dark,
-    ).copyWith(
-      primary: AppTheme.primaryOrange,
-      onPrimary: Colors.white,
-      surface: PosSaleUi.surface,
-      onSurface: PosSaleUi.text,
-      onSurfaceVariant: PosSaleUi.textMuted,
-      outline: PosSaleUi.border,
-      outlineVariant: PosSaleUi.divider,
-      error: PosSaleUi.error,
-      onError: Colors.white,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: AppTheme.primaryOrange,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: AppTheme.primaryOrange,
+          onPrimary: Colors.white,
+          surface: PosSaleUi.surface,
+          onSurface: PosSaleUi.text,
+          onSurfaceVariant: PosSaleUi.textMuted,
+          outline: PosSaleUi.border,
+          outlineVariant: PosSaleUi.divider,
+          error: PosSaleUi.error,
+          onError: Colors.white,
+        );
 
     return ThemeData(
       useMaterial3: true,
@@ -94,8 +95,9 @@ class QuickMarketShellTheme {
         iconColor: PosSaleUi.textMuted,
         textColor: PosSaleUi.text,
       ),
-      progressIndicatorTheme:
-          const ProgressIndicatorThemeData(color: PosSaleUi.primary),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: PosSaleUi.primary,
+      ),
     );
   }
 }

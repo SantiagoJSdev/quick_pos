@@ -59,12 +59,14 @@ List<_ParsedSaleLine> _parseSaleLines(Map<String, dynamic> sale) {
       }
     }
     final qty = m['quantity']?.toString() ?? '0';
-    out.add(_ParsedSaleLine(
-      saleLineId: id,
-      productId: pid,
-      label: label.isEmpty ? id.substring(0, 8) : label,
-      quantitySold: qty,
-    ));
+    out.add(
+      _ParsedSaleLine(
+        saleLineId: id,
+        productId: pid,
+        label: label.isEmpty ? id.substring(0, 8) : label,
+        quantitySold: qty,
+      ),
+    );
   }
   return out;
 }
@@ -150,8 +152,9 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
 
   Future<void> _loadSettings() async {
     if (!_shellOnline) {
-      final cached =
-          await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (!mounted) return;
       if (cached != null) {
         setState(() {
@@ -169,31 +172,27 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
     }
     try {
       final s = await widget.storesApi.getBusinessSettings(widget.storeId);
-      await widget.localPrefs.saveBusinessSettingsCache(
-        widget.storeId,
-        {
-          'id': s.id,
-          'storeId': s.storeId,
-          'defaultMarginPercent': s.defaultMarginPercent,
-          'functionalCurrency': {
-            'code': s.functionalCurrency.code,
-            'name': s.functionalCurrency.name,
-          },
-          'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
-              ? null
-              : {
-                  'code': s.defaultSaleDocCurrency!.code,
-                  'name': s.defaultSaleDocCurrency!.name,
-                },
-          'store': {
-            'name': s.storeName,
-            'type': s.storeType,
-          },
+      await widget.localPrefs.saveBusinessSettingsCache(widget.storeId, {
+        'id': s.id,
+        'storeId': s.storeId,
+        'defaultMarginPercent': s.defaultMarginPercent,
+        'functionalCurrency': {
+          'code': s.functionalCurrency.code,
+          'name': s.functionalCurrency.name,
         },
-      );
+        'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
+            ? null
+            : {
+                'code': s.defaultSaleDocCurrency!.code,
+                'name': s.defaultSaleDocCurrency!.name,
+              },
+        'store': {'name': s.storeName, 'type': s.storeType},
+      });
       if (mounted) setState(() => _settings = s);
     } on ApiError catch (e) {
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (!mounted) return;
       if (cached != null) {
         setState(() => _settings = cached);
@@ -201,7 +200,9 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
         setState(() => _error = e.userMessageForSupport);
       }
     } catch (e) {
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(widget.storeId);
+      final cached = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
       if (!mounted) return;
       if (cached != null) {
         setState(() => _settings = cached);
@@ -271,7 +272,9 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       if (mounted) {
         setState(() {
           _fxPair = pair;
-          _fxLoadError = pair == null ? 'No hay tasa del día para $func/$doc.' : null;
+          _fxLoadError = pair == null
+              ? 'No hay tasa del día para $func/$doc.'
+              : null;
         });
       }
     } catch (e) {
@@ -298,8 +301,10 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
   Future<void> _loadSale() async {
     var id = _saleIdController.text.trim();
     if (id.isEmpty) {
-      setState(() => _error =
-          'Ingresá el número de ticket (historial de hoy) o el UUID de la venta.');
+      setState(
+        () => _error =
+            'Ingresá el número de ticket (historial de hoy) o el UUID de la venta.',
+      );
       return;
     }
     if (RegExp(r'^\d{1,5}$').hasMatch(id)) {
@@ -385,7 +390,8 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       setState(() => _error = 'Primero cargá la venta.');
       return;
     }
-    final originalSaleId = sale['id']?.toString() ?? _saleIdController.text.trim();
+    final originalSaleId =
+        sale['id']?.toString() ?? _saleIdController.text.trim();
     if (originalSaleId.isEmpty) {
       setState(() => _error = 'Venta sin id.');
       return;
@@ -397,14 +403,15 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       final q = r.controller.text.trim();
       if (q.isEmpty) continue;
       if (!_quantityOk(q, r.line.quantitySold)) {
-        setState(() => _error =
-            'Cantidad inválida en "${r.line.label}" (máx. vendido: ${r.line.quantitySold}).');
+        setState(
+          () => _error =
+              'Cantidad inválida en "${r.line.label}" (máx. vendido: ${r.line.quantitySold}).',
+        );
         return;
       }
-      linePayload.add(SaleReturnPayload.lineRow(
-        saleLineId: r.line.saleLineId,
-        quantity: q,
-      ));
+      linePayload.add(
+        SaleReturnPayload.lineRow(saleLineId: r.line.saleLineId, quantity: q),
+      );
       if (r.line.productId.isNotEmpty) productIds.add(r.line.productId);
     }
     if (linePayload.isEmpty) {
@@ -413,19 +420,22 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
     }
 
     final func = _functionalCode;
-    final doc = _documentFromSale ?? _settings?.defaultSaleDocCurrency?.code ?? '';
+    final doc =
+        _documentFromSale ?? _settings?.defaultSaleDocCurrency?.code ?? '';
     if (func.isEmpty || doc.isEmpty) {
       setState(() => _error = 'Falta configuración de monedas de la tienda.');
       return;
     }
 
-    final fxPolicy =
-        _useSpotFx ? SaleReturnPayload.fxPolicySpot : SaleReturnPayload.fxPolicyInherit;
+    final fxPolicy = _useSpotFx
+        ? SaleReturnPayload.fxPolicySpot
+        : SaleReturnPayload.fxPolicyInherit;
     Map<String, dynamic>? fxSnap;
     if (_useSpotFx) {
       if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
         setState(() {
-          _error = _fxLoadError ??
+          _error =
+              _fxLoadError ??
               'Con tasa al momento necesitás la tasa del día funcional→documento.';
         });
         return;
@@ -474,9 +484,9 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
           doFlush: true,
         ),
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Devolución registrada.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Devolución registrada.')));
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -538,9 +548,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
   Widget build(BuildContext context) {
     final docLabel = _documentFromSale ?? '—';
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Devolución de venta'),
-      ),
+      appBar: AppBar(title: const Text('Devolución de venta')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -598,7 +606,10 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
             if (_useSpotFx && _fxLoadError != null)
               Text(
                 _fxLoadError!,
-                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                style: const TextStyle(
+                  color: Colors.orangeAccent,
+                  fontSize: 12,
+                ),
               ),
             const SizedBox(height: 8),
             const Text(
@@ -661,10 +672,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
           ],
           if (_error != null) ...[
             const SizedBox(height: 16),
-            Text(
-              _error!,
-              style: const TextStyle(color: Colors.orangeAccent),
-            ),
+            Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
           ],
         ],
       ),

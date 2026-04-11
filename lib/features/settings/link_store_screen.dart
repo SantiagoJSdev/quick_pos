@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
-import '../../core/config/app_config.dart';
-import '../../core/network/backend_origin_resolver.dart';
 import '../../core/storage/local_prefs.dart';
 import 'create_store_screen.dart';
 
@@ -35,7 +33,6 @@ class LinkStoreScreen extends StatefulWidget {
 class _LinkStoreScreenState extends State<LinkStoreScreen> {
   late final TextEditingController _controller;
   bool _loading = false;
-  bool _cloudBusy = false;
   String? _error;
 
   @override
@@ -82,67 +79,14 @@ class _LinkStoreScreenState extends State<LinkStoreScreen> {
     }
   }
 
-  Future<void> _refreshUrlFromCloud() async {
-    setState(() {
-      _cloudBusy = true;
-      _error = null;
-    });
-    try {
-      final r = await BackendOriginResolver().fetchFromVercel();
-      if (!mounted) return;
-      String? origin;
-      if (r != null) {
-        await widget.localPrefs.setPersistedApiOrigin(r.baseUrl, r.updatedAt);
-        if (!mounted) return;
-        origin = r.baseUrl;
-      } else {
-        origin = await widget.localPrefs.getPersistedApiOrigin();
-        if (origin == null || origin.isEmpty) {
-          setState(() {
-            _error =
-                'No se pudo leer la URL desde Vercel y no hay origen guardado.';
-          });
-          return;
-        }
-      }
-      final apiV1 = apiV1BaseFromOrigin(origin);
-      if (apiV1.isEmpty) {
-        setState(() => _error = 'Respuesta del resolver inválida.');
-        return;
-      }
-      final ok = await probeApiV1Reachable(apiV1);
-      if (!mounted) return;
-      if (!ok) {
-        setState(() {
-          _error =
-              'La URL obtenida no responde; revisá ngrok o el servidor local.';
-        });
-        return;
-      }
-      await widget.localPrefs.setApiBaseUrlOverride(
-        apiV1,
-        followCloudResolver: true,
-      );
-      AppConfig.setRuntimeApiBaseUrlOverride(apiV1);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('URL del backend actualizada desde la nube.'),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _cloudBusy = false);
-    }
-  }
-
   Future<void> _openCreateStore() async {
     final id = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (ctx) => CreateStoreScreen(
-              storesApi: widget.storesApi,
-              exchangeRatesApi: widget.exchangeRatesApi,
-            ),
+          storesApi: widget.storesApi,
+          exchangeRatesApi: widget.exchangeRatesApi,
+        ),
       ),
     );
     if (!mounted || id == null) return;
@@ -166,10 +110,11 @@ class _LinkStoreScreenState extends State<LinkStoreScreen> {
               const SizedBox(height: 8),
               Text(
                 'Pega el UUID de la tienda. Se validará con el servidor '
-                '(business-settings).',
+                '(business-settings). La URL del API es la de compilación o la '
+                'que guardaste en Configuración (clave).',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 24),
               TextField(
@@ -180,7 +125,7 @@ class _LinkStoreScreenState extends State<LinkStoreScreen> {
                 ),
                 keyboardType: TextInputType.text,
                 autocorrect: false,
-                enabled: !_loading && !_cloudBusy,
+                enabled: !_loading,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 16),
@@ -190,22 +135,8 @@ class _LinkStoreScreenState extends State<LinkStoreScreen> {
                 ),
               ],
               const SizedBox(height: 24),
-              OutlinedButton.icon(
-                onPressed: (_loading || _cloudBusy) ? null : _refreshUrlFromCloud,
-                icon: _cloudBusy
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.cloud_download_outlined),
-                label: Text(
-                  _cloudBusy ? 'Actualizando URL…' : 'Actualizar URL desde la nube',
-                ),
-              ),
-              const SizedBox(height: 12),
               FilledButton(
-                onPressed: (_loading || _cloudBusy) ? null : _connect,
+                onPressed: _loading ? null : _connect,
                 child: _loading
                     ? const SizedBox(
                         height: 22,

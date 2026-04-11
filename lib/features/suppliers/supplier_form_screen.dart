@@ -131,10 +131,7 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
           _editBody(),
         );
       } else {
-        await widget.suppliersApi.createSupplier(
-          widget.storeId,
-          _createBody(),
-        );
+        await widget.suppliersApi.createSupplier(widget.storeId, _createBody());
       }
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -267,9 +264,7 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
                 'hasta reactivarlo.',
               ),
               value: _active,
-              onChanged: _saving
-                  ? null
-                  : (v) => setState(() => _active = v),
+              onChanged: _saving ? null : (v) => setState(() => _active = v),
             ),
           ],
           if (_error != null) ...[

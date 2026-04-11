@@ -107,7 +107,9 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
     String? unitCost;
     if (_type == _inType && cost.isNotEmpty) {
       if (!_decimalPositive.hasMatch(cost)) {
-        setState(() => _error = 'Costo unitario (func.): número decimal válido.');
+        setState(
+          () => _error = 'Costo unitario (func.): número decimal válido.',
+        );
         return;
       }
       unitCost = cost;
@@ -126,7 +128,10 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
 
     setState(() => _loading = true);
     try {
-      final res = await widget.inventoryApi.postAdjustment(widget.storeId, body);
+      final res = await widget.inventoryApi.postAdjustment(
+        widget.storeId,
+        body,
+      );
       if (!mounted) return;
       widget.catalogInvalidationBus?.invalidateFromLocalMutation(
         productIds: {widget.productId},
@@ -192,8 +197,8 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
           Text(
             'UUID: ${widget.productId}',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           if (_failedAwaitingRetry && _opId != null) ...[
             const SizedBox(height: 12),
@@ -201,15 +206,12 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
               'Podés reintentar: se reenvía el mismo opId para no duplicar el '
               'ajuste si el servidor ya lo aplicó.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
           const SizedBox(height: 24),
-          Text(
-            'Tipo',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
+          Text('Tipo', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 8),
           SegmentedButton<String>(
             segments: const [
@@ -263,7 +265,8 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
             controller: _unitCost,
             decoration: const InputDecoration(
               labelText: 'Costo unitario (funcional), opcional',
-              hintText: 'Solo aplica a entradas; si falta usa costo medio o producto',
+              hintText:
+                  'Solo aplica a entradas; si falta usa costo medio o producto',
               border: OutlineInputBorder(),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -285,7 +288,11 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
                     height: 22,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(_failedAwaitingRetry ? 'Reintentar envío' : 'Registrar ajuste'),
+                : Text(
+                    _failedAwaitingRetry
+                        ? 'Reintentar envío'
+                        : 'Registrar ajuste',
+                  ),
           ),
         ],
       ),

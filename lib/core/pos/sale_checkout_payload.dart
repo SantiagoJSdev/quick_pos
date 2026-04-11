@@ -49,17 +49,20 @@ class SaleCheckoutPayload {
       documentCode: doc,
       pair: fxPair,
     );
-    final effectiveDate = fxPair == null || func.toUpperCase() == doc.toUpperCase()
+    final effectiveDate =
+        fxPair == null || func.toUpperCase() == doc.toUpperCase()
         ? _todayYyyyMmDd()
         : fxPair.rate.effectiveDate.trim().isEmpty
-            ? _todayYyyyMmDd()
-            : fxPair.rate.effectiveDate.trim();
+        ? _todayYyyyMmDd()
+        : fxPair.rate.effectiveDate.trim();
 
     final fxSnapshot = <String, dynamic>{
       'baseCurrencyCode': func,
       'quoteCurrencyCode': doc,
       'rateQuotePerBase': rateForSnapshot,
-      'effectiveDate': effectiveDate.length >= 10 ? effectiveDate.substring(0, 10) : effectiveDate,
+      'effectiveDate': effectiveDate.length >= 10
+          ? effectiveDate.substring(0, 10)
+          : effectiveDate,
     };
     if (fxSource != null && fxSource.isNotEmpty) {
       fxSnapshot['fxSource'] = fxSource;

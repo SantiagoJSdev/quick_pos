@@ -183,9 +183,9 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo reintentar: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('No se pudo reintentar: $e')));
     } finally {
       if (mounted) setState(() => _flushBusy = false);
     }
@@ -216,167 +216,167 @@ class _PendingPhotoUploadsScreenState extends State<PendingPhotoUploadsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _error!,
-                          style: const TextStyle(color: PosSaleUi.text),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton(
-                          onPressed: _load,
-                          child: const Text('Reintentar'),
-                        ),
-                      ],
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _error!,
+                      style: const TextStyle(color: PosSaleUi.text),
+                      textAlign: TextAlign.center,
                     ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: () => _flushQueue(showSummarySnack: false),
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _load,
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: () => _flushQueue(showSummarySnack: false),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          ChoiceChip(
-                            label: const Text('Todas'),
-                            selected: _filter == 'ALL',
-                            onSelected: (_) => setState(() => _filter = 'ALL'),
-                          ),
-                          ChoiceChip(
-                            label: const Text('Retryable'),
-                            selected: _filter == 'RETRY',
-                            onSelected: (_) => setState(() => _filter = 'RETRY'),
-                          ),
-                          ChoiceChip(
-                            label: const Text('Revisión manual'),
-                            selected: _filter == 'MANUAL',
-                            onSelected: (_) =>
-                                setState(() => _filter = 'MANUAL'),
-                          ),
-                        ],
+                      ChoiceChip(
+                        label: const Text('Todas'),
+                        selected: _filter == 'ALL',
+                        onSelected: (_) => setState(() => _filter = 'ALL'),
                       ),
-                      const SizedBox(height: 12),
-                      if (_filtered.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 26),
-                          child: Text(
-                            'No hay fotos pendientes para este filtro.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: PosSaleUi.textMuted),
-                          ),
-                        )
-                      else
-                        ..._filtered.map((e) {
-                          final created = DateTime.tryParse(e.createdAtIso)
-                              ?.toLocal()
-                              .toString();
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: PosSaleUi.surface2,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          e.manualReview
-                                              ? 'REVISIÓN MANUAL'
-                                              : 'RETRYABLE',
-                                          style: TextStyle(
-                                            color: e.manualReview
-                                                ? Colors.orangeAccent
-                                                : PosSaleUi.text,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Copiar opId',
-                                        onPressed: () {
-                                          Clipboard.setData(
-                                            ClipboardData(text: e.opId),
-                                          );
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
-                                            const SnackBar(
-                                              content: Text('opId copiado'),
-                                            ),
-                                          );
-                                        },
-                                        icon: const Icon(
-                                          Icons.copy,
-                                          size: 18,
-                                          color: PosSaleUi.textMuted,
-                                        ),
-                                      ),
-                                      TextButton(
-                                        onPressed: _flushBusy
-                                            ? null
-                                            : () => _retryRow(e),
-                                        child: const Text('Reintentar'),
-                                      ),
-                                    ],
-                                  ),
-                                  Text(
-                                    'productId: ${e.productId}',
-                                    style: const TextStyle(
-                                      color: PosSaleUi.textMuted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'archivo: ${e.localFilePath}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: PosSaleUi.textFaint,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'intentos: ${e.attemptCount} · creada: ${created ?? e.createdAtIso}',
-                                    style: const TextStyle(
-                                      color: PosSaleUi.textFaint,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                  if ((e.lastError ?? '').trim().isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      e.lastError!,
-                                      maxLines: 4,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.orangeAccent,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
+                      ChoiceChip(
+                        label: const Text('Retryable'),
+                        selected: _filter == 'RETRY',
+                        onSelected: (_) => setState(() => _filter = 'RETRY'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Revisión manual'),
+                        selected: _filter == 'MANUAL',
+                        onSelected: (_) => setState(() => _filter = 'MANUAL'),
+                      ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  if (_filtered.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 26),
+                      child: Text(
+                        'No hay fotos pendientes para este filtro.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: PosSaleUi.textMuted),
+                      ),
+                    )
+                  else
+                    ..._filtered.map((e) {
+                      final created = DateTime.tryParse(
+                        e.createdAtIso,
+                      )?.toLocal().toString();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: PosSaleUi.surface2,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      e.manualReview
+                                          ? 'REVISIÓN MANUAL'
+                                          : 'RETRYABLE',
+                                      style: TextStyle(
+                                        color: e.manualReview
+                                            ? Colors.orangeAccent
+                                            : PosSaleUi.text,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Copiar opId',
+                                    onPressed: () {
+                                      Clipboard.setData(
+                                        ClipboardData(text: e.opId),
+                                      );
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('opId copiado'),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.copy,
+                                      size: 18,
+                                      color: PosSaleUi.textMuted,
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _flushBusy
+                                        ? null
+                                        : () => _retryRow(e),
+                                    child: const Text('Reintentar'),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                'productId: ${e.productId}',
+                                style: const TextStyle(
+                                  color: PosSaleUi.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'archivo: ${e.localFilePath}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: PosSaleUi.textFaint,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'intentos: ${e.attemptCount} · creada: ${created ?? e.createdAtIso}',
+                                style: const TextStyle(
+                                  color: PosSaleUi.textFaint,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              if ((e.lastError ?? '').trim().isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  e.lastError!,
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.orangeAccent,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
     );
   }
 }

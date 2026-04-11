@@ -25,7 +25,8 @@ class ExchangeRateTodayScreen extends StatefulWidget {
   final String? initialQuote;
 
   @override
-  State<ExchangeRateTodayScreen> createState() => _ExchangeRateTodayScreenState();
+  State<ExchangeRateTodayScreen> createState() =>
+      _ExchangeRateTodayScreenState();
 }
 
 class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
@@ -173,8 +174,8 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
             Text(
               'Referencia para la tienda',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
             Row(
@@ -202,11 +203,16 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
             const SizedBox(height: 32),
             if (_fromCache) ...[
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.35),
+                  ),
                 ),
                 child: const Text(
                   'Mostrando tasa cacheada (modo offline).',
@@ -313,8 +319,8 @@ class _ResultCard extends StatelessWidget {
               Text(
                 data.notes!,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],

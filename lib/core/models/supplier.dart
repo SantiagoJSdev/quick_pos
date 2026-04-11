@@ -45,10 +45,7 @@ class Supplier {
 
 /// Página de `GET /suppliers` con `items` + `nextCursor`.
 class SupplierListPage {
-  const SupplierListPage({
-    required this.items,
-    this.nextCursor,
-  });
+  const SupplierListPage({required this.items, this.nextCursor});
 
   final List<Supplier> items;
   final String? nextCursor;

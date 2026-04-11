@@ -26,14 +26,15 @@ class RecentSaleTicket {
   final String? displayCode;
 
   Map<String, dynamic> toJson() => {
-        'storeId': storeId,
-        'saleId': saleId,
-        'totalDocument': totalDocument,
-        'documentCurrencyCode': documentCurrencyCode,
-        'recordedAtIso': recordedAtIso,
-        'status': status,
-        if (displayCode != null && displayCode!.isNotEmpty) 'displayCode': displayCode,
-      };
+    'storeId': storeId,
+    'saleId': saleId,
+    'totalDocument': totalDocument,
+    'documentCurrencyCode': documentCurrencyCode,
+    'recordedAtIso': recordedAtIso,
+    'status': status,
+    if (displayCode != null && displayCode!.isNotEmpty)
+      'displayCode': displayCode,
+  };
 
   static RecentSaleTicket? tryFromJson(Map<String, dynamic> json) {
     final storeId = json['storeId'] as String?;

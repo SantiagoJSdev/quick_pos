@@ -38,9 +38,6 @@ const _kInventoryCachePrefix = 'inventory_cache_v1_';
 const _kSalesGeneralCachePrefix = 'sales_general_cache_v1_';
 const _kLatestRateCachePrefix = 'latest_rate_cache_v1_';
 const _kApiBaseUrlOverrideV1 = 'api_base_url_override_v1';
-const _kApiFollowCloudResolverV1 = 'api_follow_cloud_resolver_v1';
-const _kPosApiOrigin = 'pos_api_origin';
-const _kPosApiOriginUpdatedAt = 'pos_api_origin_updated_at';
 const _kPendingProductPhotoUploadsV1 = 'pending_product_photo_uploads_v1';
 
 class LocalPrefs {
@@ -63,54 +60,20 @@ class LocalPrefs {
     return trimmed;
   }
 
-  /// [followCloudResolver]: si es `true`, [MainShell] puede actualizar la URL desde Vercel en segundo plano
-  /// cuando el backend no responde (túnel ngrok nuevo). Manual / «Usar default» → `false`.
-  Future<void> setApiBaseUrlOverride(
-    String url, {
-    required bool followCloudResolver,
-  }) async {
+  Future<void> setApiBaseUrlOverride(String url) async {
     await _prefs.setString(_kApiBaseUrlOverrideV1, url.trim());
-    await _prefs.setBool(_kApiFollowCloudResolverV1, followCloudResolver);
   }
-
-  Future<bool> getApiBaseFollowsCloudResolver() async =>
-      _prefs.getBool(_kApiFollowCloudResolverV1) ?? false;
 
   Future<void> clearApiBaseUrlOverride() async {
     await _prefs.remove(_kApiBaseUrlOverrideV1);
-    await _prefs.remove(_kApiFollowCloudResolverV1);
+    // Versiones anteriores (resolver Vercel / ngrok).
+    await _prefs.remove('api_follow_cloud_resolver_v1');
+    await _prefs.remove('pos_api_origin');
+    await _prefs.remove('pos_api_origin_updated_at');
   }
 
-  /// Origen del API sin path (p. ej. `https://….ngrok-free.dev`). Solo “último conocido” del resolver.
-  Future<void> setPersistedApiOrigin(String origin, DateTime? updatedAt) async {
-    final o = origin.trim().replaceAll(RegExp(r'/+$'), '');
-    if (o.isEmpty) {
-      await _prefs.remove(_kPosApiOrigin);
-      await _prefs.remove(_kPosApiOriginUpdatedAt);
-      return;
-    }
-    await _prefs.setString(_kPosApiOrigin, o);
-    if (updatedAt != null) {
-      await _prefs.setString(
-        _kPosApiOriginUpdatedAt,
-        updatedAt.toUtc().toIso8601String(),
-      );
-    }
-  }
-
-  Future<String?> getPersistedApiOrigin() async {
-    final s = _prefs.getString(_kPosApiOrigin)?.trim();
-    if (s == null || s.isEmpty) return null;
-    return s;
-  }
-
-  Future<DateTime?> getPersistedApiOriginUpdatedAt() async {
-    final s = _prefs.getString(_kPosApiOriginUpdatedAt);
-    if (s == null || s.isEmpty) return null;
-    return DateTime.tryParse(s);
-  }
-
-  Future<List<PendingProductPhotoUploadEntry>> loadPendingProductPhotoUploads() async {
+  Future<List<PendingProductPhotoUploadEntry>>
+  loadPendingProductPhotoUploads() async {
     final raw = _prefs.getString(_kPendingProductPhotoUploadsV1);
     if (raw == null || raw.isEmpty) return [];
     try {
@@ -259,7 +222,8 @@ class LocalPrefs {
     return list.where((e) => e.storeId == storeId).length;
   }
 
-  Future<List<PendingInventoryAdjustEntry>> loadPendingInventoryAdjusts() async {
+  Future<List<PendingInventoryAdjustEntry>>
+  loadPendingInventoryAdjusts() async {
     final raw = _prefs.getString(_kPendingInvAdjustV1);
     if (raw == null || raw.isEmpty) return [];
     try {
@@ -299,7 +263,8 @@ class LocalPrefs {
     return list.where((e) => e.storeId == storeId).length;
   }
 
-  Future<List<PendingPurchaseReceiveEntry>> loadPendingPurchaseReceives() async {
+  Future<List<PendingPurchaseReceiveEntry>>
+  loadPendingPurchaseReceives() async {
     final raw = _prefs.getString(_kPendingPurchaseReceiveV1);
     if (raw == null || raw.isEmpty) return [];
     try {
@@ -359,7 +324,9 @@ class LocalPrefs {
     }
   }
 
-  Future<void> savePendingSaleReturns(List<PendingSaleReturnEntry> items) async {
+  Future<void> savePendingSaleReturns(
+    List<PendingSaleReturnEntry> items,
+  ) async {
     final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
     await _prefs.setString(_kPendingSaleReturnV1, encoded);
   }
@@ -402,8 +369,10 @@ class LocalPrefs {
   }
 
   Future<void> saveCatalogProductsCache(List<CatalogProduct> items) async {
-    final encoded = jsonEncode(items
-        .map((e) => {
+    final encoded = jsonEncode(
+      items
+          .map(
+            (e) => {
               'id': e.id,
               'sku': e.sku,
               'name': e.name,
@@ -422,12 +391,15 @@ class LocalPrefs {
               'marginComputedPercent': e.marginComputedPercent,
               'suggestedPrice': e.suggestedPrice,
               'imageUrl': e.imageUrl,
-            })
-        .toList());
+            },
+          )
+          .toList(),
+    );
     await _prefs.setString(_kCatalogProductsCacheV1, encoded);
   }
 
-  Future<List<PendingCatalogMutationEntry>> loadPendingCatalogMutations() async {
+  Future<List<PendingCatalogMutationEntry>>
+  loadPendingCatalogMutations() async {
     final raw = _prefs.getString(_kPendingCatalogMutationsV1);
     if (raw == null || raw.isEmpty) return [];
     try {
@@ -478,7 +450,9 @@ class LocalPrefs {
   }
 
   Future<BusinessSettings?> loadBusinessSettingsCache(String storeId) async {
-    final raw = _prefs.getString('$_kBusinessSettingsCachePrefix${storeId.trim()}');
+    final raw = _prefs.getString(
+      '$_kBusinessSettingsCachePrefix${storeId.trim()}',
+    );
     if (raw == null || raw.isEmpty) return null;
     try {
       final decoded = jsonDecode(raw);
@@ -529,7 +503,9 @@ class LocalPrefs {
       if (decoded is! Map) return null;
       final rateRaw = decoded['rate'];
       if (rateRaw is! Map) return null;
-      final rate = LatestExchangeRate.fromJson(Map<String, dynamic>.from(rateRaw));
+      final rate = LatestExchangeRate.fromJson(
+        Map<String, dynamic>.from(rateRaw),
+      );
       final inverted = decoded['inverted'] == true;
       return SaleFxPair(rate: rate, inverted: inverted);
     } catch (_) {
@@ -595,15 +571,17 @@ class LocalPrefs {
       'dateTo': dateTo,
       'onlyThisDevice': onlyThisDevice,
       'rows': rows
-          .map((r) => {
-                'id': r.id,
-                'createdAt': r.createdAt,
-                'documentCurrencyCode': r.documentCurrencyCode,
-                'totalDocument': r.totalDocument,
-                'totalFunctional': r.totalFunctional,
-                'deviceId': r.deviceId,
-                'status': r.status,
-              })
+          .map(
+            (r) => {
+              'id': r.id,
+              'createdAt': r.createdAt,
+              'documentCurrencyCode': r.documentCurrencyCode,
+              'totalDocument': r.totalDocument,
+              'totalFunctional': r.totalFunctional,
+              'deviceId': r.deviceId,
+              'status': r.status,
+            },
+          )
           .toList(),
       'meta': meta == null
           ? null
@@ -623,13 +601,16 @@ class LocalPrefs {
     );
   }
 
-  Future<({
-    List<SalesListItem> rows,
-    SalesListMeta? meta,
-    String? dateFrom,
-    String? dateTo,
-    bool? onlyThisDevice
-  })?> loadSalesGeneralCache(String storeId) async {
+  Future<
+    ({
+      List<SalesListItem> rows,
+      SalesListMeta? meta,
+      String? dateFrom,
+      String? dateTo,
+      bool? onlyThisDevice,
+    })?
+  >
+  loadSalesGeneralCache(String storeId) async {
     final raw = _prefs.getString('$_kSalesGeneralCachePrefix${storeId.trim()}');
     if (raw == null || raw.isEmpty) return null;
     try {
@@ -812,8 +793,9 @@ class LocalPrefs {
         final t = RecentSaleTicket.tryFromJson(Map<String, dynamic>.from(e));
         if (t != null) out.add(t);
       }
-      final windowed =
-          out.where((t) => t.isRecordedOnLocalDeviceHistoryWindow).toList();
+      final windowed = out
+          .where((t) => t.isRecordedOnLocalDeviceHistoryWindow)
+          .toList();
       if (windowed.length != out.length) {
         await saveRecentSaleTickets(windowed);
       }
@@ -863,7 +845,9 @@ class LocalPrefs {
   }
 
   /// Si ya no hay venta en cola local con ese [clientSaleId], el ticket no debería seguir como "pendiente".
-  Future<void> reconcileRecentQueuedTicketsWithPendingSales(String storeId) async {
+  Future<void> reconcileRecentQueuedTicketsWithPendingSales(
+    String storeId,
+  ) async {
     final pending = await loadPendingSales();
     final pendingSaleIds = <String>{};
     for (final e in pending) {

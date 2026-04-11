@@ -60,8 +60,9 @@ Future<PullSyncResult> pullSyncAdvanceWatermark({
 
     if (hadProductPullMutation && catalogInvalidation != null) {
       catalogInvalidation.invalidateFromPull(
-        productIds:
-            accumulatedProductIds.isEmpty ? null : accumulatedProductIds,
+        productIds: accumulatedProductIds.isEmpty
+            ? null
+            : accumulatedProductIds,
       );
     }
 
@@ -72,14 +73,8 @@ Future<PullSyncResult> pullSyncAdvanceWatermark({
       catalogInvalidated: hadProductPullMutation,
     );
   } on ApiError catch (e) {
-    return PullSyncResult(
-      ok: false,
-      errorMessage: e.userMessageForSupport,
-    );
+    return PullSyncResult(ok: false, errorMessage: e.userMessageForSupport);
   } catch (e) {
-    return PullSyncResult(
-      ok: false,
-      errorMessage: e.toString(),
-    );
+    return PullSyncResult(ok: false, errorMessage: e.toString());
   }
 }

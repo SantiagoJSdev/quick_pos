@@ -20,9 +20,6 @@ class PosTerminalInfo {
   static Future<PosTerminalInfo> load(LocalPrefs prefs) async {
     final deviceId = await prefs.getOrCreateDeviceId();
     final pkg = await PackageInfo.fromPlatform();
-    return PosTerminalInfo(
-      deviceId: deviceId,
-      appVersion: pkg.version,
-    );
+    return PosTerminalInfo(deviceId: deviceId, appVersion: pkg.version);
   }
 }

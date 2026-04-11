@@ -142,9 +142,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       if (next == null || next.isEmpty) break;
       cursor = next;
     }
-    all.sort(
-      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-    );
+    all.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return all;
   }
 
@@ -279,23 +277,22 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   Future<void> _bootstrapOfflineLoad() async {
     final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
     final active = cachedCatalog.where((p) => p.active).toList()
-      ..sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final local = await widget.localPrefs.getLocalSuppliers();
-    final mapped = local
-        .map(
-          (x) => Supplier(
-            id: x.id,
-            storeId: widget.storeId,
-            name: x.name,
-            active: true,
-          ),
-        )
-        .toList()
-      ..sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-      );
+    final mapped =
+        local
+            .map(
+              (x) => Supplier(
+                id: x.id,
+                storeId: widget.storeId,
+                name: x.name,
+                active: true,
+              ),
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
     final cached = await widget.localPrefs.loadBusinessSettingsCache(
       widget.storeId,
     );
@@ -307,8 +304,9 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _products = active;
         _contextError = null;
         final opts = _documentCurrencyOptions;
-        _selectedDocumentCurrency =
-            opts.isNotEmpty ? opts.first : cached.functionalCurrency.code;
+        _selectedDocumentCurrency = opts.isNotEmpty
+            ? opts.first
+            : cached.functionalCurrency.code;
         _selectedSupplier = mapped.isNotEmpty ? mapped.first : null;
         _reconcileSupplierDropdown();
         _selectedProduct = null;
@@ -341,15 +339,15 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return;
     }
     try {
-      final settings =
-          await widget.storesApi.getBusinessSettings(widget.storeId);
+      final settings = await widget.storesApi.getBusinessSettings(
+        widget.storeId,
+      );
       final products = await widget.productsApi.listProducts(
         widget.storeId,
         includeInactive: false,
       );
       final suppliers = await _loadAllSuppliers();
-      final active =
-          products.where((p) => p.active).toList(growable: false);
+      final active = products.where((p) => p.active).toList(growable: false);
       active.sort(
         (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       );
@@ -359,8 +357,9 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _settings = settings;
         _products = active;
         final opts = _documentCurrencyOptions;
-        _selectedDocumentCurrency =
-            opts.isNotEmpty ? opts.first : settings.functionalCurrency.code;
+        _selectedDocumentCurrency = opts.isNotEmpty
+            ? opts.first
+            : settings.functionalCurrency.code;
         _selectedSupplier = suppliers.isNotEmpty ? suppliers.first : null;
         _reconcileSupplierDropdown();
         _selectedProduct = null;
@@ -399,7 +398,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     final prod = _effectiveProduct();
     if (prod == null) {
       setState(() {
-        _formError = 'Producto no identificado: tocá una opción de la lista o '
+        _formError =
+            'Producto no identificado: tocá una opción de la lista o '
             'dejá una sola coincidencia al filtrar.';
       });
       return;
@@ -461,14 +461,18 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return;
     }
     if (_lines.isEmpty) {
-      setState(() => _formError = 'Agregá al menos una línea (producto, cantidad y costo).');
+      setState(
+        () => _formError =
+            'Agregá al menos una línea (producto, cantidad y costo).',
+      );
       return;
     }
     final func = s.functionalCurrency.code;
     if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
       setState(() {
         _formError =
-            _fxLoadError ?? 'Definí la tasa del día antes de registrar la compra.';
+            _fxLoadError ??
+            'Definí la tasa del día antes de registrar la compra.';
       });
       return;
     }
@@ -535,7 +539,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       if (e.statusCode == 400) {
         final blob = '${e.error} ${e.messages.join(' ')}'.toLowerCase();
         if (blob.contains('inactive') || blob.contains('inactivo')) {
-          msg = 'El proveedor está dado de baja. Elegí otro activo o reactivalo '
+          msg =
+              'El proveedor está dado de baja. Elegí otro activo o reactivalo '
               'en Proveedores (editar y activar).\n$msg';
         }
       }
@@ -602,332 +607,324 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _contextError != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_contextError!),
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          onPressed: _load,
-                          child: const Text('Reintentar'),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(24),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_suppliers.isEmpty)
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(
-                                'No hay proveedores cargados para esta tienda. '
-                                'Creá uno desde Proveedores o con el botón de abajo.',
-                                style: Theme.of(context).textTheme.bodyLarge,
-                              ),
-                              const SizedBox(height: 12),
-                              FilledButton.tonal(
-                                onPressed: () async {
-                                  final ok = await Navigator.of(context)
-                                      .push<bool>(
-                                    MaterialPageRoute(
-                                      builder: (ctx) => SupplierFormScreen(
-                                        storeId: widget.storeId,
-                                        suppliersApi: widget.suppliersApi,
-                                      ),
-                                    ),
-                                  );
-                                  if (ok == true && mounted) await _load();
-                                },
-                                child: const Text('Nuevo proveedor'),
-                              ),
-                            ],
+                    Text(_contextError!),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _load,
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                if (_suppliers.isEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'No hay proveedores cargados para esta tienda. '
+                            'Creá uno desde Proveedores o con el botón de abajo.',
+                            style: Theme.of(context).textTheme.bodyLarge,
                           ),
-                        ),
-                      )
-                    else ...[
-                      Text(
-                        'Proveedor (todos en esta tienda)',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButton<Supplier>(
-                        isExpanded: true,
-                        value: _selectedSupplier,
-                        hint: const Text('Elegí proveedor'),
-                        items: _suppliers
-                            .map(
-                              (s) => DropdownMenuItem<Supplier>(
-                                value: s,
-                                child: Text(
-                                  '${_supplierDisplay(s)}${s.active ? '' : ' (inactivo)'}',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                          const SizedBox(height: 12),
+                          FilledButton.tonal(
+                            onPressed: () async {
+                              final ok = await Navigator.of(context).push<bool>(
+                                MaterialPageRoute(
+                                  builder: (ctx) => SupplierFormScreen(
+                                    storeId: widget.storeId,
+                                    suppliersApi: widget.suppliersApi,
+                                  ),
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _submitting
-                            ? null
-                            : (s) =>
-                                setState(() => _selectedSupplier = s),
-                      ),
-                    ],
-                    if (_suppliers.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _invoiceRef,
-                        enabled: !_submitting,
-                        decoration: const InputDecoration(
-                          labelText: 'Nº factura o referencia del proveedor',
-                          hintText: 'Opcional',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _purchaseNotes,
-                        enabled: !_submitting,
-                        decoration: const InputDecoration(
-                          labelText: 'Notas del documento',
-                          hintText: 'Opcional',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 2,
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    if (_documentCurrencyOptions.length > 1) ...[
-                      Text(
-                        'Moneda del documento',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButton<String>(
-                        value: _selectedDocumentCurrency,
-                        items: _documentCurrencyOptions
-                            .map(
-                              (c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(c),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _submitting ? null : _onDocumentCurrencyChanged,
-                      ),
-                    ],
-                    if (_functionalCode.isNotEmpty &&
-                        _selectedDocumentCurrency != null &&
-                        _functionalCode.toUpperCase() !=
-                            _selectedDocumentCurrency!.toUpperCase()) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _fxPair == null
-                            ? (_fxLoadError ?? 'Sin tasa de cambio.')
-                            : 'Ref.: 1 $_functionalCode = ${SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(functionalCode: _functionalCode, documentCode: _selectedDocumentCurrency!, pair: _fxPair)} ${_selectedDocumentCurrency!}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Text(
-                      'Líneas de la recepción',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Como en el POS: buscá cada producto, cantidad y costo unitario '
-                      '(moneda del documento), tocá «Agregar línea». Un solo registro envía '
-                      'todas las líneas al servidor.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
+                              );
+                              if (ok == true && mounted) await _load();
+                            },
+                            child: const Text('Nuevo proveedor'),
                           ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    if (_lines.isNotEmpty) ...[
-                      ..._lines.map(
-                        (L) => Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            title: Text(
-                              L.product.name,
-                              maxLines: 1,
+                  )
+                else ...[
+                  Text(
+                    'Proveedor (todos en esta tienda)',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButton<Supplier>(
+                    isExpanded: true,
+                    value: _selectedSupplier,
+                    hint: const Text('Elegí proveedor'),
+                    items: _suppliers
+                        .map(
+                          (s) => DropdownMenuItem<Supplier>(
+                            value: s,
+                            child: Text(
+                              '${_supplierDisplay(s)}${s.active ? '' : ' (inactivo)'}',
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Text(
-                              '${L.quantity} u. × ${L.unitCost} ${_selectedDocumentCurrency ?? ''}',
-                            ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: _submitting
-                                  ? null
-                                  : () => _removeLineByKey(L.lineKey),
-                            ),
                           ),
+                        )
+                        .toList(),
+                    onChanged: _submitting
+                        ? null
+                        : (s) => setState(() => _selectedSupplier = s),
+                  ),
+                ],
+                if (_suppliers.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _invoiceRef,
+                    enabled: !_submitting,
+                    decoration: const InputDecoration(
+                      labelText: 'Nº factura o referencia del proveedor',
+                      hintText: 'Opcional',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _purchaseNotes,
+                    enabled: !_submitting,
+                    decoration: const InputDecoration(
+                      labelText: 'Notas del documento',
+                      hintText: 'Opcional',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 2,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (_documentCurrencyOptions.length > 1) ...[
+                  Text(
+                    'Moneda del documento',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButton<String>(
+                    value: _selectedDocumentCurrency,
+                    items: _documentCurrencyOptions
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .toList(),
+                    onChanged: _submitting ? null : _onDocumentCurrencyChanged,
+                  ),
+                ],
+                if (_functionalCode.isNotEmpty &&
+                    _selectedDocumentCurrency != null &&
+                    _functionalCode.toUpperCase() !=
+                        _selectedDocumentCurrency!.toUpperCase()) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _fxPair == null
+                        ? (_fxLoadError ?? 'Sin tasa de cambio.')
+                        : 'Ref.: 1 $_functionalCode = ${SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(functionalCode: _functionalCode, documentCode: _selectedDocumentCurrency!, pair: _fxPair)} ${_selectedDocumentCurrency!}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text(
+                  'Líneas de la recepción',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Como en el POS: buscá cada producto, cantidad y costo unitario '
+                  '(moneda del documento), tocá «Agregar línea». Un solo registro envía '
+                  'todas las líneas al servidor.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_lines.isNotEmpty) ...[
+                  ..._lines.map(
+                    (L) => Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        title: Text(
+                          L.product.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          '${L.quantity} u. × ${L.unitCost} ${_selectedDocumentCurrency ?? ''}',
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: _submitting
+                              ? null
+                              : () => _removeLineByKey(L.lineKey),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (_products.isEmpty)
-                      const Text('No hay productos activos en catálogo.')
-                    else ...[
-                      Text(
-                        'Agregar producto',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      RawAutocomplete<CatalogProduct>(
-                        textEditingController: _productField,
-                        focusNode: _productFocus,
-                        displayStringForOption: _productDisplay,
-                        optionsBuilder: (TextEditingValue tv) {
-                          final q = tv.text.trim().toLowerCase();
-                          if (q.isEmpty) return _products.take(45);
-                          return _products.where((p) {
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (_products.isEmpty)
+                  const Text('No hay productos activos en catálogo.')
+                else ...[
+                  Text(
+                    'Agregar producto',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  RawAutocomplete<CatalogProduct>(
+                    textEditingController: _productField,
+                    focusNode: _productFocus,
+                    displayStringForOption: _productDisplay,
+                    optionsBuilder: (TextEditingValue tv) {
+                      final q = tv.text.trim().toLowerCase();
+                      if (q.isEmpty) return _products.take(45);
+                      return _products
+                          .where((p) {
                             final n = p.name.toLowerCase();
                             final s = p.sku.toLowerCase();
                             final b = (p.barcode ?? '').toLowerCase();
                             return n.contains(q) ||
                                 s.contains(q) ||
                                 b.contains(q);
-                          }).take(80);
-                        },
-                        onSelected: (p) {
-                          setState(() {
-                            _selectedProduct = p;
-                            _productField.text = _productDisplay(p);
-                          });
-                        },
-                        fieldViewBuilder:
-                            (context, controller, focusNode, onFieldSubmitted) {
+                          })
+                          .take(80);
+                    },
+                    onSelected: (p) {
+                      setState(() {
+                        _selectedProduct = p;
+                        _productField.text = _productDisplay(p);
+                      });
+                    },
+                    fieldViewBuilder:
+                        (context, controller, focusNode, onFieldSubmitted) {
                           return TextField(
                             controller: controller,
                             focusNode: focusNode,
                             enabled: !_submitting,
                             decoration: const InputDecoration(
-                              hintText:
-                                  'Nombre, SKU o código de barras',
+                              hintText: 'Nombre, SKU o código de barras',
                               border: OutlineInputBorder(),
                               isDense: true,
                             ),
                             onSubmitted: (_) => onFieldSubmitted(),
                           );
                         },
-                        optionsViewBuilder:
-                            (context, onSelected, options) {
-                          final opts = options.toList();
-                          return Align(
-                            alignment: Alignment.topLeft,
-                            child: Material(
-                              elevation: 6,
-                              borderRadius: BorderRadius.circular(8),
-                              child: ConstrainedBox(
-                                constraints:
-                                    const BoxConstraints(maxHeight: 280),
-                                child: opts.isEmpty
-                                    ? const SizedBox.shrink()
-                                    : ListView.builder(
-                                        padding: EdgeInsets.zero,
-                                        shrinkWrap: true,
-                                        itemCount: opts.length,
-                                        itemBuilder: (context, index) {
-                                          final p = opts[index];
-                                          return ListTile(
-                                            dense: true,
-                                            title: Text(
-                                              p.name,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            subtitle: Text(
-                                              '${p.sku}${p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : ''}',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            onTap: () => onSelected(p),
-                                          );
-                                        },
-                                      ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _quantity,
-                        enabled: !_submitting,
-                        decoration: const InputDecoration(
-                          labelText: 'Cantidad',
-                          hintText: 'ej. 24',
-                          border: OutlineInputBorder(),
+                    optionsViewBuilder: (context, onSelected, options) {
+                      final opts = options.toList();
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 6,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 280),
+                            child: opts.isEmpty
+                                ? const SizedBox.shrink()
+                                : ListView.builder(
+                                    padding: EdgeInsets.zero,
+                                    shrinkWrap: true,
+                                    itemCount: opts.length,
+                                    itemBuilder: (context, index) {
+                                      final p = opts[index];
+                                      return ListTile(
+                                        dense: true,
+                                        title: Text(
+                                          p.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        subtitle: Text(
+                                          '${p.sku}${p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : ''}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        onTap: () => onSelected(p),
+                                      );
+                                    },
+                                  ),
+                          ),
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _unitCost,
-                        enabled: !_submitting,
-                        decoration: InputDecoration(
-                          labelText:
-                              'Costo unitario (${_selectedDocumentCurrency ?? "—"})',
-                          hintText: 'ej. 85.00',
-                          border: const OutlineInputBorder(),
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _submitting ? null : _addLineToReceipt,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Agregar línea'),
-                      ),
-                    ],
-                    if (_formError != null) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        _formError!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: _suppliers.isEmpty ||
-                              _products.isEmpty ||
-                              _lines.isEmpty ||
-                              _submitting
-                          ? null
-                          : _submit,
-                      child: _submitting
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(
-                              _lines.isEmpty
-                                  ? 'Registrar compra'
-                                  : 'Registrar compra (${_lines.length} ${_lines.length == 1 ? 'línea' : 'líneas'})',
-                            ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _quantity,
+                    enabled: !_submitting,
+                    decoration: const InputDecoration(
+                      labelText: 'Cantidad',
+                      hintText: 'ej. 24',
+                      border: OutlineInputBorder(),
                     ),
-                  ],
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _unitCost,
+                    enabled: !_submitting,
+                    decoration: InputDecoration(
+                      labelText:
+                          'Costo unitario (${_selectedDocumentCurrency ?? "—"})',
+                      hintText: 'ej. 85.00',
+                      border: const OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _submitting ? null : _addLineToReceipt,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Agregar línea'),
+                  ),
+                ],
+                if (_formError != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _formError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed:
+                      _suppliers.isEmpty ||
+                          _products.isEmpty ||
+                          _lines.isEmpty ||
+                          _submitting
+                      ? null
+                      : _submit,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          _lines.isEmpty
+                              ? 'Registrar compra'
+                              : 'Registrar compra (${_lines.length} ${_lines.length == 1 ? 'línea' : 'líneas'})',
+                        ),
                 ),
+              ],
+            ),
     );
   }
 }

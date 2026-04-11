@@ -54,7 +54,11 @@ class InventoryApi {
     String storeId,
     Map<String, dynamic> body,
   ) async {
-    final json = await _client.postJson('/inventory/adjustments', storeId, body);
+    final json = await _client.postJson(
+      '/inventory/adjustments',
+      storeId,
+      body,
+    );
     return InventoryAdjustmentResult.fromJson(json);
   }
 }

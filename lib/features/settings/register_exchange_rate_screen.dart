@@ -74,7 +74,9 @@ class _RegisterExchangeRateScreenState
     final source = _sourceController.text.trim();
 
     if (rate.isEmpty || !_decimalPositive.hasMatch(rate)) {
-      setState(() => _error = 'Indica la tasa como número decimal (ej. 36.50).');
+      setState(
+        () => _error = 'Indica la tasa como número decimal (ej. 36.50).',
+      );
       return;
     }
     if (!_isoDate.hasMatch(date)) {
@@ -104,9 +106,9 @@ class _RegisterExchangeRateScreenState
             : _notesController.text.trim(),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tasa registrada')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Tasa registrada')));
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -123,9 +125,7 @@ class _RegisterExchangeRateScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Registrar tasa'),
-      ),
+      appBar: AppBar(title: const Text('Registrar tasa')),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -133,8 +133,8 @@ class _RegisterExchangeRateScreenState
             'Alta manual de tasa (append-only en servidor). '
             'Requiere par de monedas existente en la tienda.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 20),
           Row(

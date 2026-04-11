@@ -123,9 +123,7 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           )
           .toList();
       if (q.isNotEmpty) {
-        mapped = mapped
-            .where((s) => s.name.toLowerCase().contains(q))
-            .toList();
+        mapped = mapped.where((s) => s.name.toLowerCase().contains(q)).toList();
       }
       setState(() {
         _list = mapped;
@@ -148,9 +146,7 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
       );
       if (!mounted) return;
       await widget.localPrefs.saveLocalSuppliers(
-        page.items
-            .map((e) => LocalSupplier(id: e.id, name: e.name))
-            .toList(),
+        page.items.map((e) => LocalSupplier(id: e.id, name: e.name)).toList(),
       );
       setState(() {
         if (reset) {
@@ -292,9 +288,9 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
       if (mounted) await _load(reset: true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.userMessageForSupport)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.userMessageForSupport)));
     }
   }
 
@@ -313,9 +309,9 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
             Text(
               'Proveedores',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: PosSaleUi.text,
-                    fontWeight: FontWeight.w700,
-                  ),
+                color: PosSaleUi.text,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -365,106 +361,99 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null && _list.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _error!,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _error!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            onPressed: () => _load(reset: true),
+                            child: const Text('Reintentar'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : _list.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'No hay proveedores para esta tienda.\n\n'
+                        'Creá uno con el botón + (POST /suppliers). '
+                        'Cada tienda tiene su propia lista.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: PosSaleUi.textMuted,
+                        ),
+                      ),
+                    ),
+                  )
+                : NotificationListener<ScrollNotification>(
+                    onNotification: (n) {
+                      if (n.metrics.pixels > n.metrics.maxScrollExtent - 120 &&
+                          !_loadingMore &&
+                          _nextCursor != null) {
+                        _load(reset: false);
+                      }
+                      return false;
+                    },
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(0, 0, 0, 88),
+                      itemCount: _list.length + (_loadingMore ? 1 : 0),
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1, color: PosSaleUi.divider),
+                      itemBuilder: (context, i) {
+                        if (i >= _list.length) {
+                          return const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        final s = _list[i];
+                        return ListTile(
+                          title: Text(
+                            s.name,
+                            style: const TextStyle(
+                              color: PosSaleUi.text,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            _subtitleFor(s),
+                            style: const TextStyle(
+                              color: PosSaleUi.textMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                          onTap: () => _openForm(existing: s),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (v) {
+                              if (v == 'deactivate' && s.active) {
+                                _confirmDeactivate(s);
+                              }
+                            },
+                            itemBuilder: (ctx) => [
+                              if (s.active)
+                                const PopupMenuItem(
+                                  value: 'deactivate',
+                                  child: Text('Dar de baja'),
                                 ),
-                              ),
-                              const SizedBox(height: 16),
-                              FilledButton(
-                                onPressed: () => _load(reset: true),
-                                child: const Text('Reintentar'),
-                              ),
                             ],
                           ),
-                        ),
-                      )
-                    : _list.isEmpty
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Text(
-                                'No hay proveedores para esta tienda.\n\n'
-                                'Creá uno con el botón + (POST /suppliers). '
-                                'Cada tienda tiene su propia lista.',
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.copyWith(color: PosSaleUi.textMuted),
-                              ),
-                            ),
-                          )
-                        : NotificationListener<ScrollNotification>(
-                            onNotification: (n) {
-                              if (n.metrics.pixels >
-                                      n.metrics.maxScrollExtent - 120 &&
-                                  !_loadingMore &&
-                                  _nextCursor != null) {
-                                _load(reset: false);
-                              }
-                              return false;
-                            },
-                            child: ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(0, 0, 0, 88),
-                              itemCount: _list.length + (_loadingMore ? 1 : 0),
-                              separatorBuilder: (context, index) =>
-                                  const Divider(
-                                height: 1,
-                                color: PosSaleUi.divider,
-                              ),
-                              itemBuilder: (context, i) {
-                                if (i >= _list.length) {
-                                  return const Padding(
-                                    padding: EdgeInsets.all(16),
-                                    child: Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                  );
-                                }
-                                final s = _list[i];
-                                return ListTile(
-                                  title: Text(
-                                    s.name,
-                                    style: const TextStyle(
-                                      color: PosSaleUi.text,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    _subtitleFor(s),
-                                    style: const TextStyle(
-                                      color: PosSaleUi.textMuted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  onTap: () => _openForm(existing: s),
-                                  trailing: PopupMenuButton<String>(
-                                    onSelected: (v) {
-                                      if (v == 'deactivate' && s.active) {
-                                        _confirmDeactivate(s);
-                                      }
-                                    },
-                                    itemBuilder: (ctx) => [
-                                      if (s.active)
-                                        const PopupMenuItem(
-                                          value: 'deactivate',
-                                          child: Text('Dar de baja'),
-                                        ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
+                        );
+                      },
+                    ),
+                  ),
           ),
         ],
       ),

@@ -1,4 +1,3 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 import 'core/api/api_client.dart';
@@ -15,8 +14,6 @@ import 'core/api/uploads_api.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
 import 'core/config/app_config.dart';
 import 'core/network/api_connectivity_debug.dart';
-import 'core/network/backend_origin_resolver.dart';
-import 'core/network/connectivity_util.dart';
 import 'core/storage/local_prefs.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/quickmarket_shell_theme.dart';
@@ -66,112 +63,17 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _bootstrap();
   }
 
-  Future<void> _tryAutoResolveApiBaseIfNeeded() async {
-    final existing = await widget.localPrefs.getApiBaseUrlOverride();
-    if (existing != null && existing.isNotEmpty) {
-      traceApiConnectivity(
-        'Auto-resolve omitido: ya hay API_BASE override → $existing',
-      );
-      return;
-    }
-
-    List<ConnectivityResult> conn;
-    try {
-      conn = await Connectivity().checkConnectivity();
-    } catch (e) {
-      traceApiConnectivity(
-        'Auto-resolve omitido: checkConnectivity error → $e',
-      );
-      return;
-    }
-    if (!connectivityAppearsOnline(conn)) {
-      traceApiConnectivity(
-        'Auto-resolve omitido: sin conectividad aparente → $conn',
-      );
-      return;
-    }
-
-    final resolver = BackendOriginResolver();
-    final vercel = await resolver.fetchFromVercel();
-    if (vercel != null) {
-      await widget.localPrefs.setPersistedApiOrigin(
-        vercel.baseUrl,
-        vercel.updatedAt,
-      );
-    } else {
-      traceApiConnectivity(
-        'Vercel no devolvió URL (timeout/red/JSON); se usa origen guardado si hay',
-      );
-    }
-
-    final origin =
-        vercel?.baseUrl ?? await widget.localPrefs.getPersistedApiOrigin();
-    if (origin == null || origin.isEmpty) {
-      traceApiConnectivity('Sin origen (Vercel + prefs vacíos)');
-      return;
-    }
-
-    final apiV1 = apiV1BaseFromOrigin(origin);
-    if (apiV1.isEmpty) return;
-
-    final storeRaw = await widget.localPrefs.getStoreId();
-    final storeId = storeRaw?.trim();
-    var ok = false;
-    if (storeId != null && storeId.isNotEmpty) {
-      traceApiConnectivity(
-        'Validando API con GET business-settings (storeId presente)…',
-      );
-      final c = ApiClient(baseUrl: apiV1);
-      try {
-        await StoresApi(c).getBusinessSettings(storeId);
-        ok = true;
-        traceApiConnectivity('business-settings OK → se guarda override');
-      } catch (e) {
-        traceApiConnectivity('business-settings falló: $e');
-      }
-      c.close();
-    } else {
-      ok = await probeApiV1Reachable(apiV1);
-      if (!ok) {
-        traceApiConnectivity(
-          'Probe falló (p. ej. ngrok caído); el origen igual quedó en prefs',
-        );
-      }
-    }
-
-    if (ok) {
-      await widget.localPrefs.setApiBaseUrlOverride(
-        apiV1,
-        followCloudResolver: true,
-      );
-      AppConfig.setRuntimeApiBaseUrlOverride(apiV1);
-    }
-  }
-
   Future<void> _bootstrap() async {
     await widget.localPrefs.getOrCreateDeviceId();
-    await _tryAutoResolveApiBaseIfNeeded();
     final apiOverride = await widget.localPrefs.getApiBaseUrlOverride();
     if (apiOverride != null && apiOverride.isNotEmpty) {
       AppConfig.setRuntimeApiBaseUrlOverride(apiOverride);
-      traceApiConnectivity('Efectiva: override prefs → $apiOverride');
+      traceApiConnectivity('API base (prefs): $apiOverride');
     } else {
-      final origin = await widget.localPrefs.getPersistedApiOrigin();
-      final derived = (origin != null && origin.isNotEmpty)
-          ? apiV1BaseFromOrigin(origin)
-          : '';
-      if (derived.isNotEmpty) {
-        AppConfig.setRuntimeApiBaseUrlOverride(derived);
-        traceApiConnectivity(
-          'Efectiva: origen nube persistido → $derived '
-          '(probe/settings no confirmaron; misma base que Postman/ngrok)',
-        );
-      } else {
-        AppConfig.setRuntimeApiBaseUrlOverride(null);
-        traceApiConnectivity(
-          'Efectiva: dart-define/default → ${AppConfig.effectiveApiBaseUrl}',
-        );
-      }
+      AppConfig.setRuntimeApiBaseUrlOverride(null);
+      traceApiConnectivity(
+        'API base (default): ${AppConfig.effectiveApiBaseUrl}',
+      );
     }
     final id = await widget.localPrefs.getStoreId();
     final trimmed = id?.trim();

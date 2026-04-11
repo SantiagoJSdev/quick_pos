@@ -155,8 +155,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           uploadsApi: widget.uploadsApi,
           shellOnline: widget.shellOnline,
           existing: existing,
-          initialBarcode:
-              existing == null ? prefilledBarcode : null,
+          initialBarcode: existing == null ? prefilledBarcode : null,
         ),
       ),
     );
@@ -229,9 +228,9 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       await widget.localPrefs.saveCatalogProductsCache(cached);
       if (!mounted) return;
       setState(() => _all = cached);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Producto desactivado')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Producto desactivado')));
       unawaited(_load());
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -254,13 +253,15 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         setState(() => _all = cached);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Sin conexión: desactivación en cola para sincronizar.'),
+            content: Text(
+              'Sin conexión: desactivación en cola para sincronizar.',
+            ),
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.userMessageForSupport)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.userMessageForSupport)));
       }
     }
   }
@@ -296,15 +297,12 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
               child: Text(
                 'Alta de producto sin proveedor: el API no lo exige. Los proveedores se usan en compras (más adelante).',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: _load,
-                child: _buildBody(),
-              ),
+              child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
             ),
           ],
         ),
@@ -366,8 +364,8 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
                   : 'Sin resultados.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],
@@ -379,13 +377,11 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final p = items[i];
-        final bc =
-            p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : '';
+        final bc = p.barcode != null && p.barcode!.isNotEmpty
+            ? ' · ${p.barcode}'
+            : '';
         final subChildren = <Widget>[
-          Text(
-            'SKU ${p.sku}$bc',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          Text('SKU ${p.sku}$bc', style: Theme.of(context).textTheme.bodySmall),
           Text(
             'Lista ${p.price} ${p.currency}',
             style: Theme.of(context).textTheme.bodySmall,
@@ -394,8 +390,9 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         final sugTrim = p.suggestedPrice?.trim();
         if (sugTrim != null && sugTrim.isNotEmpty) {
           final em = p.effectiveMarginPercent?.trim();
-          final mPart =
-              (em != null && em.isNotEmpty) ? ' (margen efectivo $em%)' : '';
+          final mPart = (em != null && em.isNotEmpty)
+              ? ' (margen efectivo $em%)'
+              : '';
           subChildren.add(
             Text(
               'Sugerido API $sugTrim ${p.currency}$mPart',
@@ -408,8 +405,8 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
             Text(
               'Precio manual: una compra no cambia la lista en el servidor.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           );
         }

@@ -7,10 +7,7 @@ import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
 
 const _kCurrencyCodes = ['USD', 'VES', 'EUR'];
-const _kStoreTypes = [
-  ('main', 'Principal'),
-  ('branch', 'Sucursal'),
-];
+const _kStoreTypes = [('main', 'Principal'), ('branch', 'Sucursal')];
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
 
@@ -208,7 +205,8 @@ class _CreateStoreScreenState extends State<CreateStoreScreen> {
             'STORE_ONBOARDING_ENABLED=1 (o true) en .env y reiniciad.';
       }
       setState(() {
-        _error = '$msg\n\nContrato: docs/BACKEND_STORE_ONBOARDING.md · §13.0 FRONTEND_INTEGRATION_CONTEXT.md';
+        _error =
+            '$msg\n\nContrato: docs/BACKEND_STORE_ONBOARDING.md · §13.0 FRONTEND_INTEGRATION_CONTEXT.md';
       });
     } catch (e) {
       if (!mounted) return;
@@ -241,8 +239,8 @@ class _CreateStoreScreenState extends State<CreateStoreScreen> {
               'Se genera un UUID en este dispositivo. El mismo valor se usa '
               'como recurso en el servidor y en la cabecera X-Store-Id.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
