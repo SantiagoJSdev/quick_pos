@@ -15,8 +15,6 @@ String _posLeadingInitial(String name) {
 class PosSaleTopBar extends StatelessWidget {
   const PosSaleTopBar({
     super.key,
-    required this.rateHeadline,
-    required this.rateSub,
     required this.onRefresh,
     required this.onSync,
     this.syncBusy = false,
@@ -24,8 +22,6 @@ class PosSaleTopBar extends StatelessWidget {
     this.onBack,
   });
 
-  final String rateHeadline;
-  final String rateSub;
   final VoidCallback onRefresh;
   final VoidCallback onSync;
   final bool syncBusy;
@@ -35,101 +31,52 @@ class PosSaleTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 12),
+      padding: const EdgeInsets.fromLTRB(8, 4, 4, 6),
       decoration: const BoxDecoration(
         color: PosSaleUi.surface,
         border: Border(bottom: BorderSide(color: PosSaleUi.divider)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           if (onBack != null) ...[
             IconButton(
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               onPressed: onBack,
               icon: const Icon(
                 Icons.arrow_back_ios_new_rounded,
-                size: 18,
+                size: 16,
                 color: PosSaleUi.text,
               ),
               tooltip: 'Volver',
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 2),
           ],
-          const QuickMarketWordmark(),
-          const Spacer(),
-          Expanded(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: PosSaleUi.goldDim,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: const Color(0x33E8C34A)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 5,
-                        height: 5,
-                        decoration: const BoxDecoration(
-                          color: PosSaleUi.gold,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          rateHeadline,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: PosSaleUi.gold,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                          maxLines: 2,
-                          textAlign: TextAlign.end,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  rateSub,
-                  style: const TextStyle(
-                    fontSize: 9,
-                    color: PosSaleUi.textMuted,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+          const QuickMarketWordmark(
+            logoSize: 22,
+            fontSize: 12,
+            gap: 6,
           ),
+          const Spacer(),
           IconButton(
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             onPressed: onRefresh,
-            icon: const Icon(Icons.refresh, color: PosSaleUi.textMuted),
+            icon: const Icon(Icons.refresh, color: PosSaleUi.textMuted, size: 20),
             tooltip: 'Recargar catálogo',
           ),
           Stack(
             clipBehavior: Clip.none,
             children: [
               IconButton(
+                padding: const EdgeInsets.all(8),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 onPressed: syncBusy ? null : onSync,
                 icon: syncBusy
                     ? const SizedBox(
-                        width: 22,
-                        height: 22,
+                        width: 20,
+                        height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           color: PosSaleUi.primary,
@@ -138,20 +85,21 @@ class PosSaleTopBar extends StatelessWidget {
                     : const Icon(
                         Icons.cloud_sync_outlined,
                         color: PosSaleUi.textMuted,
+                        size: 20,
                       ),
                 tooltip: 'Sincronizar',
               ),
               if (showSyncDot)
                 Positioned(
-                  right: 8,
-                  top: 8,
+                  right: 6,
+                  top: 6,
                   child: Container(
-                    width: 8,
-                    height: 8,
+                    width: 7,
+                    height: 7,
                     decoration: BoxDecoration(
                       color: PosSaleUi.primary,
                       shape: BoxShape.circle,
-                      border: Border.all(color: PosSaleUi.surface, width: 1.5),
+                      border: Border.all(color: PosSaleUi.surface, width: 1),
                     ),
                   ),
                 ),
@@ -447,6 +395,7 @@ class PosSaleCartLineTile extends StatelessWidget {
     required this.onPlus,
     required this.onQtyTap,
     required this.onDismissed,
+    this.onShowPriceDetail,
   });
 
   final PosCartLine line;
@@ -459,6 +408,7 @@ class PosSaleCartLineTile extends StatelessWidget {
   final VoidCallback onPlus;
   final VoidCallback onQtyTap;
   final VoidCallback onDismissed;
+  final VoidCallback? onShowPriceDetail;
 
   @override
   Widget build(BuildContext context) {
@@ -473,20 +423,20 @@ class PosSaleCartLineTile extends StatelessWidget {
       ),
       onDismissed: (_) => onDismissed(),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: 32,
+              height: 32,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: PosSaleUi.surface3,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
                 child: () {
                   final img = imageUrl?.trim();
                   if (img == null || img.isEmpty) {
@@ -494,7 +444,7 @@ class PosSaleCartLineTile extends StatelessWidget {
                       child: Text(
                         _posLeadingInitial(line.name),
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: PosSaleUi.text,
                         ),
@@ -503,12 +453,14 @@ class PosSaleCartLineTile extends StatelessWidget {
                   }
                   return Image.network(
                     img,
+                    width: 32,
+                    height: 32,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) => Center(
                       child: Text(
                         _posLeadingInitial(line.name),
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: PosSaleUi.text,
                         ),
@@ -518,58 +470,46 @@ class PosSaleCartLineTile extends StatelessWidget {
                 }(),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    line.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: PosSaleUi.text,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text.rich(
-                    TextSpan(
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontFeatures: [FontFeature.tabularFigures()],
-                      ),
-                      children: [
-                        if (line.isByWeight && line.displayGrams != null)
-                          TextSpan(
-                            text: '${line.displayGrams} g  ·  ',
+              child: onShowPriceDetail != null
+                  ? Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: onShowPriceDetail,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Text(
+                            line.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: PosSaleUi.primary,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: PosSaleUi.text,
+                              height: 1.2,
                             ),
                           ),
-                        TextSpan(
-                          text: '$unitFunctional $functionalCode',
-                          style: const TextStyle(
-                            color: PosSaleUi.text,
-                            fontWeight: FontWeight.w600,
-                          ),
                         ),
-                        const TextSpan(
-                          text: ' · ',
-                          style: TextStyle(color: PosSaleUi.textMuted),
+                      ),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        line.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: PosSaleUi.text,
+                          height: 1.2,
                         ),
-                        TextSpan(
-                          text: '${line.documentUnitPrice} $documentCode',
-                          style: const TextStyle(color: PosSaleUi.textMuted),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
             ),
+            const SizedBox(width: 6),
             _QtyPill(
               quantity: line.quantity,
               quantityDisplay: line.isByWeight && line.displayGrams != null
@@ -578,29 +518,6 @@ class PosSaleCartLineTile extends StatelessWidget {
               onMinus: onMinus,
               onPlus: onPlus,
               onQtyTap: onQtyTap,
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '$lineTotalFunctional $functionalCode',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: PosSaleUi.text,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                Text(
-                  '${line.lineTotalDocument} $documentCode',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: PosSaleUi.textMuted,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -885,69 +802,6 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 6),
-            if (onOpenMixedPayment != null) ...[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: mixedPaymentDetailLine != null
-                        ? Text(
-                            mixedPaymentDetailLine!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 11,
-                              height: 1.2,
-                              color: canChargeWithPayments
-                                  ? PosSaleUi.text
-                                  : PosSaleUi.error,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          )
-                        : Text(
-                            'Cobro $functionalCode / $documentCode',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: PosSaleUi.textMuted,
-                            ),
-                          ),
-                  ),
-                  TextButton(
-                    onPressed: onOpenMixedPayment,
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    child: Text(
-                      'Pago $functionalCode',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (onClearMixedPayment != null)
-                    IconButton(
-                      onPressed: onClearMixedPayment,
-                      tooltip: 'Limpiar pago',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 32,
-                        minHeight: 32,
-                      ),
-                      iconSize: 18,
-                      icon: const Icon(Icons.clear),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 4),
-            ],
             Row(
               children: [
                 IconButton.filledTonal(
@@ -990,6 +844,48 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                   icon: const Icon(Icons.pause_circle_outline, size: 20),
                   tooltip: 'Poner ticket en espera',
                 ),
+                if (onOpenMixedPayment != null) ...[
+                  const SizedBox(width: 6),
+                  IconButton.filledTonal(
+                    onPressed: cartNotEmpty ? onOpenMixedPayment : null,
+                    style: IconButton.styleFrom(
+                      backgroundColor: mixedPaymentDetailLine != null
+                          ? PosSaleUi.primary.withValues(alpha: 0.2)
+                          : PosSaleUi.surface3,
+                      foregroundColor: canChargeWithPayments
+                          ? PosSaleUi.text
+                          : PosSaleUi.error,
+                      padding: const EdgeInsets.all(6),
+                      minimumSize: const Size(36, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Icon(
+                      Icons.attach_money,
+                      size: 20,
+                      color: mixedPaymentDetailLine != null
+                          ? PosSaleUi.primary
+                          : PosSaleUi.textMuted,
+                    ),
+                    tooltip: 'Pago $functionalCode',
+                  ),
+                  if (mixedPaymentDetailLine != null &&
+                      onClearMixedPayment != null) ...[
+                    IconButton(
+                      onPressed: onClearMixedPayment,
+                      tooltip: 'Quitar pago $functionalCode',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 30,
+                        minHeight: 36,
+                      ),
+                      icon: const Icon(
+                        Icons.backspace_outlined,
+                        size: 18,
+                        color: PosSaleUi.textMuted,
+                      ),
+                    ),
+                  ],
+                ],
                 const SizedBox(width: 6),
                 Expanded(
                   child: FilledButton(

@@ -178,6 +178,31 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     return '${p.name} · ${p.sku}';
   }
 
+  /// Hay datos del usuario que no deben borrarse si [_load] vuelve a correr
+  /// (p. ej. shell offline→online): si solo queda factura/notas y el producto se
+  /// limpia, «Agregar línea» deja de funcionar hasta re-elegir producto.
+  bool get _preserveReceiptDraft =>
+      _lines.isNotEmpty ||
+      _invoiceRef.text.trim().isNotEmpty ||
+      _purchaseNotes.text.trim().isNotEmpty ||
+      _productField.text.trim().isNotEmpty ||
+      _quantity.text.trim().isNotEmpty ||
+      _unitCost.text.trim().isNotEmpty ||
+      _selectedProduct != null;
+
+  void _reconcileSelectedProductAfterCatalogReload() {
+    final id = _selectedProduct?.id.trim() ?? '';
+    if (id.isEmpty) return;
+    for (final p in _products) {
+      if (p.id == id) {
+        _selectedProduct = p;
+        _productField.text = _productDisplay(p);
+        return;
+      }
+    }
+    _selectedProduct = null;
+  }
+
   /// Texto = último seleccionado, o filtro con una sola coincidencia; si no, null.
   CatalogProduct? _effectiveProduct() {
     if (_products.isEmpty) return null;
@@ -307,10 +332,13 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _selectedDocumentCurrency = opts.isNotEmpty
             ? opts.first
             : cached.functionalCurrency.code;
-        _selectedSupplier = mapped.isNotEmpty ? mapped.first : null;
         _reconcileSupplierDropdown();
-        _selectedProduct = null;
-        _productField.text = '';
+        if (!_preserveReceiptDraft) {
+          _selectedProduct = null;
+          _productField.text = '';
+        } else {
+          _reconcileSelectedProductAfterCatalogReload();
+        }
       });
       await _reloadFxForDocumentCurrency();
     } else {
@@ -322,8 +350,12 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
             'Sin configuración en caché. Conectate para cargar la tienda.';
         _selectedDocumentCurrency = null;
         _selectedSupplier = null;
-        _selectedProduct = null;
-        _productField.text = '';
+        if (!_preserveReceiptDraft) {
+          _selectedProduct = null;
+          _productField.text = '';
+        } else {
+          _reconcileSelectedProductAfterCatalogReload();
+        }
       });
     }
   }
@@ -360,10 +392,13 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _selectedDocumentCurrency = opts.isNotEmpty
             ? opts.first
             : settings.functionalCurrency.code;
-        _selectedSupplier = suppliers.isNotEmpty ? suppliers.first : null;
         _reconcileSupplierDropdown();
-        _selectedProduct = null;
-        _productField.text = '';
+        if (!_preserveReceiptDraft) {
+          _selectedProduct = null;
+          _productField.text = '';
+        } else {
+          _reconcileSelectedProductAfterCatalogReload();
+        }
       });
       await _reloadFxForDocumentCurrency();
       if (mounted) setState(() => _loading = false);

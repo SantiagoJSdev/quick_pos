@@ -119,6 +119,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   bool _shellOnline = true;
   bool _shellManualForceOffline = false;
   bool _shellBackendReachable = true;
+  /// Evita saltar [_load] en el primer [didChangeDependencies]: el estado local
+  /// (`_shellOnline == true`) coincidía con el shell antes de que exista un cambio
+  /// real y el POS quedaba en `_loading` eterno.
+  bool _shellScopeBound = false;
 
   /// Borde inferior del bloque buscador (+ aviso FX): el overlay de sugerencias empieza debajo.
   final GlobalKey _posSearchAnchorKey = GlobalKey(debugLabel: 'pos_search_anchor');
@@ -148,14 +152,21 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final nextOnline = scope?.isOnline ?? true;
     final nextManual = scope?.manualForceOffline ?? false;
     final nextBackend = scope?.backendReachable ?? true;
-    if (_shellOnline == nextOnline &&
+    final unchanged = _shellScopeBound &&
+        _shellOnline == nextOnline &&
         _shellManualForceOffline == nextManual &&
-        _shellBackendReachable == nextBackend) {
+        _shellBackendReachable == nextBackend;
+    if (unchanged) {
       return;
     }
+    _shellScopeBound = true;
     _shellOnline = nextOnline;
     _shellManualForceOffline = nextManual;
     _shellBackendReachable = nextBackend;
+    debugPrint(
+      '[POS load] didChangeDependencies → _load() '
+      'online=$nextOnline manualOffline=$nextManual backendOk=$nextBackend',
+    );
     unawaited(_load());
   }
 
@@ -173,7 +184,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   /// [doPull]: actualiza watermark con `GET /sync/pull`; [doFlush]: envía cola mixta.
   Future<void> _runSyncCycle({bool silent = false, bool doPull = true}) async {
+    debugPrint(
+      '[POS sync] tap/start silent=$silent doPull=$doPull '
+      'shellOnline=$_shellOnline flushBusy=$_flushBusy store=${widget.storeId}',
+    );
     if (!_shellOnline) {
+      debugPrint('[POS sync] abort: no shell online');
       if (!silent && mounted) {
         _showCheckoutPanelMessage(
           'Modo offline: la sincronización se hará al volver online.',
@@ -183,48 +199,69 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       }
       return;
     }
-    if (_flushBusy) return;
+    if (_flushBusy) {
+      debugPrint('[POS sync] abort: ya hay un sync en curso');
+      return;
+    }
     final pendingN = await widget.localPrefs.countPendingSyncOpsForStore(
       widget.storeId,
     );
-    if (pendingN == 0 && !doPull) return;
+    debugPrint('[POS sync] pendingOps=$pendingN');
+    if (pendingN == 0 && !doPull) {
+      debugPrint('[POS sync] skip: sin pendientes y doPull=false');
+      return;
+    }
 
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
     if (!mounted) return;
 
     setState(() => _flushBusy = true);
-    final cycle = await runSyncCycle(
-      storeId: widget.storeId,
-      prefs: widget.localPrefs,
-      syncApi: widget.syncApi,
-      deviceId: _terminal!.deviceId,
-      appVersion: _terminal!.appVersion,
-      catalogInvalidation: widget.catalogInvalidationBus,
-      doPull: doPull,
-      doFlush: true,
-    );
-    if (!mounted) return;
-    setState(() => _flushBusy = false);
-    await _refreshPendingCount();
-    if (!mounted) return;
+    try {
+      final cycle = await runSyncCycle(
+        storeId: widget.storeId,
+        prefs: widget.localPrefs,
+        syncApi: widget.syncApi,
+        deviceId: _terminal!.deviceId,
+        appVersion: _terminal!.appVersion,
+        catalogInvalidation: widget.catalogInvalidationBus,
+        doPull: doPull,
+        doFlush: true,
+      );
+      if (!mounted) return;
+      debugPrint(
+        '[POS sync] ok pullErr=${cycle.pullError} pullOps=${cycle.pullOpsReceived} '
+        'flushSent=${cycle.flush.sentCount} removed=${cycle.flush.removedCount}',
+      );
 
-    if (!silent && cycle.pullError != null) {
-      _showCheckoutPanelMessage('Sync pull: ${cycle.pullError}', error: true);
-    }
-
-    final r = cycle.flush;
-    if (r.removedCount > 0) {
-      final msg = r.removedCount == 1
-          ? '1 operación de la cola sincronizada.'
-          : '${r.removedCount} operaciones de la cola sincronizadas.';
-      if (!silent) {
-        _showCheckoutPanelMessage(msg);
+      if (!silent && cycle.pullError != null) {
+        _showCheckoutPanelMessage('Sync pull: ${cycle.pullError}', error: true);
       }
-    } else if (!silent && r.apiMessage != null && pendingN > 0) {
-      final suffix = r.hadManualReviewFailure
-          ? '\nRequiere revisión manual (error de validación/negocio).'
-          : (r.hadRetryableFailure ? '\nSe reintentará automáticamente.' : '');
-      _showCheckoutPanelMessage('${r.apiMessage!}$suffix', error: true);
+
+      final r = cycle.flush;
+      if (r.removedCount > 0) {
+        final msg = r.removedCount == 1
+            ? '1 operación de la cola sincronizada.'
+            : '${r.removedCount} operaciones de la cola sincronizadas.';
+        if (!silent) {
+          _showCheckoutPanelMessage(msg);
+        }
+      } else if (!silent && r.apiMessage != null && pendingN > 0) {
+        final suffix = r.hadManualReviewFailure
+            ? '\nRequiere revisión manual (error de validación/negocio).'
+            : (r.hadRetryableFailure ? '\nSe reintentará automáticamente.' : '');
+        _showCheckoutPanelMessage('${r.apiMessage!}$suffix', error: true);
+      }
+    } catch (e, st) {
+      debugPrint('[POS sync] EXCEPCIÓN: $e');
+      debugPrint('$st');
+      if (!silent && mounted) {
+        _showCheckoutPanelMessage('Sync: $e', error: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _flushBusy = false);
+      }
+      await _refreshPendingCount();
     }
   }
 
@@ -843,6 +880,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   Future<void> _load() async {
+    debugPrint(
+      '[POS load] start online=$_shellOnline loadingWas=$_loading',
+    );
     setState(() {
       _loading = true;
       _error = null;
@@ -853,6 +893,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       setState(() => _loading = false);
       await _refreshPendingCount();
       await _refreshHeldCount();
+      debugPrint('[POS load] end offline branch');
       return;
     }
 
@@ -868,6 +909,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       setState(() => _loading = false);
       await _refreshPendingCount();
       await _refreshHeldCount();
+      debugPrint('[POS load] end online timeout→cache branch');
       return;
     }
 
@@ -877,6 +919,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       await _refreshPendingCount();
       await _refreshHeldCount();
     }
+    debugPrint(
+      '[POS load] end mounted=$mounted loading=$_loading '
+      'finalize=$shouldFinalizeLoading err=$_error',
+    );
   }
 
   Map<String, dynamic> _businessSettingsToCacheMap(BusinessSettings s) {
@@ -1209,7 +1255,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
 
     _pendingSaleId ??= ClientMutationId.newId();
-    setState(() => _checkoutBusy = true);
+    if (!_shellOnline) {
+      setState(() => _checkoutBusy = true);
+    }
     final restBody = SaleCheckoutPayload.build(
       documentCurrencyCode: doc,
       functionalCurrencyCode: func,
@@ -1235,47 +1283,166 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       );
       return;
     }
+
+    // Online: vaciar ticket al instante; POST /sales en segundo plano.
+    final totalDoc = _cartTotalDocument;
+    final cartSnapshot = _cart.map(_cloneCartLine).toList();
+    final heldId = _activeHeldTicketId;
+    final pendingClientId = _pendingSaleId;
+    final mixedPaymentText = _paymentFunctionalCtrl.text;
+    final mixedPaymentApplied = _appliedFunctionalPayment;
+
+    setState(() {
+      _cart.clear();
+      _pendingSaleId = null;
+      _checkoutBusy = false;
+      _activeHeldTicketId = null;
+    });
+    _clearMixedPaymentInputs();
+
+    if (!mounted) return;
+    _showCheckoutPanelMessage(
+      'Venta aceptada.',
+      error: false,
+      duration: const Duration(seconds: 2),
+    );
+
+    unawaited(
+      _finalizeOnlineSaleInBackground(
+        restBody: restBody,
+        doc: doc,
+        cartSnapshot: cartSnapshot,
+        heldId: heldId,
+        pendingClientSaleId: pendingClientId,
+        totalDocument: totalDoc,
+        mixedPaymentTextSnapshot: mixedPaymentText,
+        mixedPaymentAppliedSnapshot: mixedPaymentApplied,
+      ),
+    );
+  }
+
+  void _restoreCartAfterFailedOnlineCheckout(
+    List<PosCartLine> cartSnapshot, {
+    required String? heldId,
+    required String? pendingClientSaleId,
+    required String mixedPaymentText,
+    required double mixedPaymentApplied,
+  }) {
+    setState(() {
+      _cart
+        ..clear()
+        ..addAll(cartSnapshot.map(_cloneCartLine));
+      _pendingSaleId = pendingClientSaleId;
+      _activeHeldTicketId = heldId;
+      _paymentFunctionalCtrl.text = mixedPaymentText;
+      _appliedFunctionalPayment = mixedPaymentApplied;
+    });
+  }
+
+  PosCartLine _cloneCartLine(PosCartLine l) {
+    return PosCartLine(
+      productId: l.productId,
+      name: l.name,
+      sku: l.sku,
+      catalogUnitPrice: l.catalogUnitPrice,
+      catalogCurrency: l.catalogCurrency,
+      documentUnitPrice: l.documentUnitPrice,
+      documentCurrencyCode: l.documentCurrencyCode,
+      quantity: l.quantity,
+      isByWeight: l.isByWeight,
+      displayGrams: l.displayGrams,
+      pricePerKgFunctional: l.pricePerKgFunctional,
+      lineAmountFunctional: l.lineAmountFunctional,
+      lineAmountDocument: l.lineAmountDocument,
+    );
+  }
+
+  /// Encola venta y ticket local sin tocar el carrito (tras cobro optimista).
+  Future<void> _persistQueuedSaleNoCartClear({
+    required Map<String, dynamic> restBody,
+    required String doc,
+    required String? clientSaleId,
+    required String? totalDocument,
+  }) async {
+    final syncOpId = ClientMutationId.newId();
+    final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
+      restBody,
+      widget.storeId,
+      fxSource: 'POS_OFFLINE',
+    );
+    await widget.localPrefs.appendPendingSale(
+      PendingSaleEntry(
+        opId: syncOpId,
+        storeId: widget.storeId,
+        sale: saleMap,
+        opTimestampIso: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+    if (clientSaleId != null &&
+        clientSaleId.isNotEmpty &&
+        totalDocument != null) {
+      final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
+      await widget.localPrefs.prependRecentSaleTicket(
+        RecentSaleTicket(
+          storeId: widget.storeId,
+          saleId: clientSaleId,
+          totalDocument: totalDocument,
+          documentCurrencyCode: doc,
+          recordedAtIso: DateTime.now().toIso8601String(),
+          status: RecentSaleTicket.statusQueued,
+          displayCode: ticketNo,
+        ),
+      );
+    }
+    if (mounted) await _refreshPendingCount();
+  }
+
+  Future<void> _finalizeOnlineSaleInBackground({
+    required Map<String, dynamic> restBody,
+    required String doc,
+    required List<PosCartLine> cartSnapshot,
+    required String? heldId,
+    required String? pendingClientSaleId,
+    required String? totalDocument,
+    required String mixedPaymentTextSnapshot,
+    required double mixedPaymentAppliedSnapshot,
+  }) async {
+    debugPrint(
+      '[POS checkout] background createSale start clientSaleId=$pendingClientSaleId',
+    );
     try {
       final res = await widget.salesApi.createSale(widget.storeId, restBody);
       if (!mounted) return;
-      final totalDoc = _cartTotalDocument;
       var sid = res['id']?.toString().trim();
       if (sid == null || sid.isEmpty) {
-        sid = _pendingSaleId ?? '';
+        sid = pendingClientSaleId ?? '';
       }
-      if (sid.isNotEmpty && totalDoc != null) {
+      if (sid.isNotEmpty && totalDocument != null) {
         final ticketNo = await widget.localPrefs
             .allocateLocalTicketDisplayCode();
         await widget.localPrefs.prependRecentSaleTicket(
           RecentSaleTicket(
             storeId: widget.storeId,
             saleId: sid,
-            totalDocument: totalDoc,
+            totalDocument: totalDocument,
             documentCurrencyCode: doc,
-            // Calendario «hoy» del historial local usa día local; UTC podía caer en otro día.
             recordedAtIso: DateTime.now().toIso8601String(),
             status: RecentSaleTicket.statusSynced,
             displayCode: ticketNo,
           ),
         );
-        if (!mounted) return;
       }
-      final heldId = _activeHeldTicketId;
-      setState(() {
-        _cart.clear();
-        _pendingSaleId = null;
-        _checkoutBusy = false;
-        _activeHeldTicketId = null;
-      });
-      _clearMixedPaymentInputs();
       if (heldId != null) {
         await widget.localPrefs.deleteHeldTicket(heldId);
-        await _refreshHeldCount();
+        if (mounted) await _refreshHeldCount();
       }
-      if (!mounted) return;
-      _showCheckoutPanelMessage('Venta registrada.');
+      if (mounted) await _refreshPendingCount();
+      debugPrint('[POS checkout] createSale OK saleId=$sid');
       unawaited(_runSyncCycle(silent: true, doPull: false));
     } on ApiError catch (e) {
+      debugPrint(
+        '[POS checkout] ApiError ${e.statusCode} ${e.userMessageForSupport}',
+      );
       if (!mounted) return;
       final lower = e.userMessageForSupport.toLowerCase();
       final shouldQueueOffline =
@@ -1285,10 +1452,27 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           lower.contains('connection') ||
           lower.contains('network');
       if (shouldQueueOffline) {
-        await _queueSaleOffline(restBody, doc);
+        await _persistQueuedSaleNoCartClear(
+          restBody: restBody,
+          doc: doc,
+          clientSaleId: pendingClientSaleId,
+          totalDocument: totalDocument,
+        );
+        if (!mounted) return;
+        _showCheckoutPanelMessage(
+          'Sin confirmación del servidor: la venta quedó en cola para enviar.',
+          error: false,
+          duration: const Duration(seconds: 5),
+        );
         return;
       }
-      setState(() => _checkoutBusy = false);
+      _restoreCartAfterFailedOnlineCheckout(
+        cartSnapshot,
+        heldId: heldId,
+        pendingClientSaleId: pendingClientSaleId,
+        mixedPaymentText: mixedPaymentTextSnapshot,
+        mixedPaymentApplied: mixedPaymentAppliedSnapshot,
+      );
       final raw = e.userMessageForSupport;
       final msg = raw.contains('PAYMENTS_TOTAL_MISMATCH')
           ? 'El total pagado no cuadra con el total del ticket.'
@@ -1300,15 +1484,41 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           ? 'Hay un monto de pago inválido. Revisá los campos de cobro.'
           : raw;
       _logPosCheckoutApiFailure(e, msg);
-      _showCheckoutPanelMessage(msg, error: true);
+      _showCheckoutPanelMessage(
+        'El servidor rechazó la venta. Ticket restaurado. $msg',
+        error: true,
+        duration: const Duration(seconds: 6),
+      );
     } catch (e) {
+      debugPrint('[POS checkout] createSale error: $e');
       if (!mounted) return;
       if (isLikelyNetworkFailure(e)) {
-        await _queueSaleOffline(restBody, doc);
+        await _persistQueuedSaleNoCartClear(
+          restBody: restBody,
+          doc: doc,
+          clientSaleId: pendingClientSaleId,
+          totalDocument: totalDocument,
+        );
+        if (!mounted) return;
+        _showCheckoutPanelMessage(
+          'Sin red: la venta quedó en cola para enviar.',
+          error: false,
+          duration: const Duration(seconds: 5),
+        );
         return;
       }
-      setState(() => _checkoutBusy = false);
-      _showCheckoutPanelMessage(e.toString(), error: true);
+      _restoreCartAfterFailedOnlineCheckout(
+        cartSnapshot,
+        heldId: heldId,
+        pendingClientSaleId: pendingClientSaleId,
+        mixedPaymentText: mixedPaymentTextSnapshot,
+        mixedPaymentApplied: mixedPaymentAppliedSnapshot,
+      );
+      _showCheckoutPanelMessage(
+        'Error al confirmar la venta. Ticket restaurado. $e',
+        error: true,
+        duration: const Duration(seconds: 5),
+      );
     }
   }
 
@@ -1627,40 +1837,118 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return MoneyStringMath.divide(documentAmount, r, fractionDigits: 2);
   }
 
-  String _rateBadgeHeadline() {
-    final doc = _selectedDocumentCurrency;
-    final func = _functionalCode;
-    if (doc == null || func.isEmpty) return 'Sin tasa';
-    if (func.toUpperCase() == doc.toUpperCase()) {
-      return '$func (sin conversión)';
-    }
-    if (_fxPair == null) return 'Sin tasa $func → $doc';
-    final r = SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(
-      functionalCode: func,
-      documentCode: doc,
-      pair: _fxPair,
+  Widget _posCartDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11,
+                color: PosSaleUi.textMuted,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                color: PosSaleUi.text,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
-    return '1 $func = $r $doc';
   }
 
-  String _rateBadgeSub() {
-    final r = _fxPair?.rate;
-    if (r == null) {
-      if (_functionalCode.isNotEmpty &&
-          _selectedDocumentCurrency != null &&
-          _functionalCode.toUpperCase() ==
-              _selectedDocumentCurrency!.toUpperCase()) {
-        return 'Misma moneda funcional y documento';
-      }
-      return 'Definí la tasa en Inicio';
-    }
-    final c = r.convention?.trim();
-    if (c != null && c.isNotEmpty) return c;
-    final s = r.source?.trim();
-    if (s != null && s.isNotEmpty) return s;
-    final d = r.effectiveDate.trim();
-    if (d.length >= 10) return d.substring(0, 10);
-    return 'Tasa tienda';
+  void _showCartLinePriceDetail({
+    required PosCartLine line,
+    required String unitFunctional,
+    required String lineTotalFunctional,
+    required String functionalCode,
+    required String documentCode,
+  }) {
+    if (!mounted) return;
+    var dialogOpen = true;
+    final docC = documentCode.trim();
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: PosSaleUi.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          titlePadding: const EdgeInsets.fromLTRB(16, 12, 4, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 8, 16, 12),
+          title: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  line.name,
+                  style: const TextStyle(
+                    color: PosSaleUi.text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(
+                  Icons.close,
+                  color: PosSaleUi.textMuted,
+                  size: 22,
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (line.isByWeight && line.displayGrams != null)
+                _posCartDetailRow('Peso', '${line.displayGrams} g'),
+              _posCartDetailRow('Unitario $functionalCode', unitFunctional),
+              _posCartDetailRow('Unitario $docC', line.documentUnitPrice),
+              _posCartDetailRow(
+                'Total $functionalCode',
+                '$lineTotalFunctional $functionalCode',
+              ),
+              _posCartDetailRow(
+                'Total $docC',
+                '${line.lineTotalDocument} $docC',
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'SKU ${line.sku}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: PosSaleUi.textMuted,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) {
+      dialogOpen = false;
+    });
+    Timer(const Duration(seconds: 2), () {
+      if (!mounted || !dialogOpen) return;
+      final nav = Navigator.of(context, rootNavigator: true);
+      if (nav.canPop()) nav.pop();
+    });
   }
 
   String _posCurrencyLabel(String code) {
@@ -1971,77 +2259,74 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 Material(
                   color: PosSaleUi.primaryDim,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Icon(
                           _pendingQueueServerAvailableHint
                               ? Icons.wifi_find
                               : Icons.cloud_upload_outlined,
                           color: PosSaleUi.primary,
-                          size: 20,
+                          size: 14,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _pendingQueueServerAvailableHint
-                                    ? 'Modo online disponible — conectar'
-                                    : '$_pendingSyncCount en cola',
-                                style: const TextStyle(
-                                  color: PosSaleUi.text,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              if (_pendingQueueServerAvailableHint)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    'En Inicio desactivá «Poner offline» para '
-                                    'sincronizar ($_pendingSyncCount pendiente'
-                                    '${_pendingSyncCount == 1 ? '' : 's'}).',
-                                    style: TextStyle(
-                                      color: PosSaleUi.text.withValues(
-                                        alpha: 0.85,
-                                      ),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w400,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        if (_flushBusy)
-                          const SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: Padding(
-                              padding: EdgeInsets.all(4),
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: PosSaleUi.primary,
+                        const SizedBox(width: 6),
+                        if (_pendingQueueServerAvailableHint)
+                          Expanded(
+                            child: Text(
+                              'Online: desactivá offline en Inicio ($_pendingSyncCount)',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: PosSaleUi.text,
+                                fontSize: 10,
                               ),
                             ),
                           )
                         else
-                          TextButton(
-                            onPressed: () =>
-                                _runSyncCycle(silent: false, doPull: true),
-                            child: const Text('Sincronizar'),
+                          Text(
+                            '$_pendingSyncCount',
+                            style: const TextStyle(
+                              color: PosSaleUi.text,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
+                        TextButton(
+                          onPressed: _flushBusy
+                              ? null
+                              : () =>
+                                    _runSyncCycle(silent: false, doPull: true),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 0,
+                            ),
+                            minimumSize: const Size(0, 26),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: _flushBusy
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: PosSaleUi.primary,
+                                  ),
+                                )
+                              : const Text(
+                                  'Sincronizar',
+                                  style: TextStyle(fontSize: 11),
+                                ),
+                        ),
                       ],
                     ),
                   ),
                 ),
               PosSaleTopBar(
-                rateHeadline: _rateBadgeHeadline(),
-                rateSub: _rateBadgeSub(),
                 onRefresh: _load,
                 onSync: () => _runSyncCycle(silent: false, doPull: true),
                 syncBusy: _flushBusy,
@@ -2262,6 +2547,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                           _functionalFromDocument(
                                                             l.lineTotalDocument,
                                                           );
+                                                      final dCode =
+                                                          doc ??
+                                                          l.documentCurrencyCode;
                                                       return PosSaleCartLineTile(
                                                         line: l,
                                                         imageUrl:
@@ -2271,9 +2559,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                         unitFunctional: uf,
                                                         lineTotalFunctional: lf,
                                                         functionalCode: func,
-                                                        documentCode:
-                                                            doc ??
-                                                            l.documentCurrencyCode,
+                                                        documentCode: dCode,
                                                         onMinus: () =>
                                                             _bumpLine(i, -1),
                                                         onPlus: () =>
@@ -2283,6 +2569,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                         onDismissed: () =>
                                                             _removeLineByProductId(
                                                               l.productId,
+                                                            ),
+                                                        onShowPriceDetail: () =>
+                                                            _showCartLinePriceDetail(
+                                                              line: l,
+                                                              unitFunctional: uf,
+                                                              lineTotalFunctional:
+                                                                  lf,
+                                                              functionalCode:
+                                                                  func,
+                                                              documentCode:
+                                                                  dCode,
                                                             ),
                                                       );
                                                     },
