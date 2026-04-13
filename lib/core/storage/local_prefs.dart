@@ -20,6 +20,7 @@ import '../sync/pending_sale_entry.dart';
 import '../sync/pending_sale_return_entry.dart';
 
 const _kStoreId = 'store_id';
+const _kManualForceOfflineV1 = 'manual_force_offline_v1';
 const _kDeviceId = 'device_id';
 const _kLocalSuppliers = 'local_suppliers_v1';
 const _kPendingSalesV1 = 'pending_sales_v1';
@@ -52,6 +53,13 @@ class LocalPrefs {
       _prefs.setString(_kStoreId, storeId.trim());
 
   Future<void> clearStoreId() => _prefs.remove(_kStoreId);
+
+  /// Modo offline forzado desde Inicio: persiste hasta que el usuario vuelva a activar online.
+  Future<bool> getManualForceOffline() async =>
+      _prefs.getBool(_kManualForceOfflineV1) ?? false;
+
+  Future<void> setManualForceOffline(bool value) async =>
+      _prefs.setBool(_kManualForceOfflineV1, value);
 
   Future<String?> getApiBaseUrlOverride() async {
     final raw = _prefs.getString(_kApiBaseUrlOverrideV1);
@@ -510,6 +518,44 @@ class LocalPrefs {
       return SaleFxPair(rate: rate, inverted: inverted);
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Cuando en Inicio consultás/registrás una tasa, actualiza la misma clave que el POS usa offline
+  /// (`funcional` → `moneda documento` de la tienda en caché), si el par coincide con lo obtenido.
+  Future<void> syncPosFxPairCacheFromFetchedRate({
+    required String storeId,
+    required String fetchedBase,
+    required String fetchedQuote,
+    required LatestExchangeRate rate,
+  }) async {
+    final settings = await loadBusinessSettingsCache(storeId);
+    if (settings == null) return;
+    final func = settings.functionalCurrency.code.trim();
+    final doc = (settings.defaultSaleDocCurrency?.code ?? func).trim();
+    if (func.toUpperCase() == doc.toUpperCase()) return;
+
+    final b = fetchedBase.trim().toUpperCase();
+    final q = fetchedQuote.trim().toUpperCase();
+    final fu = func.toUpperCase();
+    final du = doc.toUpperCase();
+
+    if (b == fu && q == du) {
+      await savePosFxPairCache(
+        storeId: storeId,
+        functionalCode: func,
+        documentCode: doc,
+        pair: SaleFxPair(rate: rate, inverted: false),
+      );
+      return;
+    }
+    if (b == du && q == fu) {
+      await savePosFxPairCache(
+        storeId: storeId,
+        functionalCode: func,
+        documentCode: doc,
+        pair: SaleFxPair(rate: rate, inverted: true),
+      );
     }
   }
 

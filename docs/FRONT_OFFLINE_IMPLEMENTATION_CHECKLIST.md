@@ -79,6 +79,15 @@ Checklist operativo consolidado con estado real de implementacion.
 - [x] Propagacion offline de `payments[]` (cola local -> sync/push).
 - [x] Manejo de errores de contrato de cobro mixto (`PAYMENTS_*`) en UI POS.
 
-## 8) Cierre del checklist (implementacion)
+## 8) Modo offline — reglas de producto (shell)
 
-El alcance de implementacion frontend para offline-first descrito en este documento se considera **cerrado**. Cualquier verificacion adicional en dispositivo (evidencia, reconexion prolongada, idempotencia en campo, etc.) se registra solo en `docs/MANUAL_TESTS.md` si el equipo lo ejecuta.
+- [x] POS: si `ShellOnlineScope.isOnline` es false, el cobro **no** llama `POST /sales`; encola local (`appendPendingSale`) como única ruta.
+- [x] «Poner offline» en Inicio persiste en prefs (`manual_force_offline_v1`); la app **no** sale sola de ese modo por red/probe hasta que el usuario lo desactive.
+- [x] Health probe (`GET .../business-settings`) sigue ejecutándose con offline forzado para mantener `backendReachable` y UX (p. ej. banner en POS); el sync automático sigue bloqueado mientras el forzado esté activo.
+- [x] **Decisión de producto adoptada:** offline forzado **con** aviso automático: se acepta el tráfico periódico del probe (con red) para poder mostrar «Modo online disponible» sin que el usuario salga del modo offline; no se apaga el probe en forzado salvo un requerimiento explícito futuro de «cero HTTP».
+- [x] Banner POS con cola: si hay pendientes y el servidor responde al probe pero sigue offline forzado, mensaje **«Modo online disponible — conectar»** (ir a Inicio y desactivar offline) en lugar de solo «N en cola».
+- [ ] Auditoría residual: repasar otros flujos (devoluciones, compras, inventario, catálogo) para confirmar que con `shellOnline == false` no queden llamadas HTTP de mutación «optimistas» sin cola (registro en PR si se encuentran).
+
+## 9) Cierre del checklist (implementacion)
+
+El alcance de implementacion frontend para offline-first descrito en este documento se considera **cerrado salvo** el ítem de auditoría residual de la sección 8. Cualquier verificacion adicional en dispositivo (evidencia, reconexion prolongada, idempotencia en campo, etc.) se registra solo en `docs/MANUAL_TESTS.md` si el equipo lo ejecuta.

@@ -61,6 +61,7 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
         builder: (ctx) => RegisterExchangeRateScreen(
           storeId: widget.storeId,
           exchangeRatesApi: widget.exchangeRatesApi,
+          localPrefs: widget.localPrefs,
           initialBase: _base,
           initialQuote: _quote,
         ),
@@ -92,6 +93,12 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
         effectiveOn: effectiveOn.isEmpty ? null : effectiveOn,
         rate: data,
       );
+      await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
+        storeId: widget.storeId,
+        fetchedBase: _base,
+        fetchedQuote: _quote,
+        rate: data,
+      );
       if (!mounted) return;
       setState(() {
         _data = data;
@@ -108,6 +115,13 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
       );
       if (!mounted) return;
       if (cached != null) {
+        await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
+          storeId: widget.storeId,
+          fetchedBase: _base,
+          fetchedQuote: _quote,
+          rate: cached,
+        );
+        if (!mounted) return;
         setState(() {
           _data = cached;
           _error = null;
@@ -131,6 +145,13 @@ class _ExchangeRateTodayScreenState extends State<ExchangeRateTodayScreen> {
       );
       if (!mounted) return;
       if (cached != null) {
+        await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
+          storeId: widget.storeId,
+          fetchedBase: _base,
+          fetchedQuote: _quote,
+          rate: cached,
+        );
+        if (!mounted) return;
         setState(() {
           _data = cached;
           _error = null;

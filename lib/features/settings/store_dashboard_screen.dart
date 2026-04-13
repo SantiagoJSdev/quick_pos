@@ -477,6 +477,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                         builder: (ctx) => RegisterExchangeRateScreen(
                           storeId: widget.storeId,
                           exchangeRatesApi: widget.exchangeRatesApi,
+                          localPrefs: widget.localPrefs,
                           initialBase: s.functionalCurrency.code,
                           initialQuote: doc?.code,
                         ),

@@ -96,10 +96,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_restoreManualOfflineThenStart());
+  }
+
+  Future<void> _restoreManualOfflineThenStart() async {
+    final forced = await widget.localPrefs.getManualForceOffline();
+    if (!mounted) return;
+    setState(() {
+      _manualForceOffline = forced;
+      _recomputeOnlineFlag();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_runAutoSync(reason: 'startup'));
     });
-    unawaited(_initConnectivityHooks());
+    await _initConnectivityHooks();
   }
 
   Future<void> _initConnectivityHooks() async {
@@ -128,7 +138,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _probeBackendHealth() async {
-    if (!mounted || _manualForceOffline) return;
+    if (!mounted) return;
     final hasNetwork = connectivityAppearsOnline(
       _lastConn ?? const [ConnectivityResult.none],
     );
@@ -264,6 +274,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return ShellOnlineScope(
       isOnline: _isOnline,
+      manualForceOffline: _manualForceOffline,
+      backendReachable: _backendReachable,
       child: Scaffold(
         body: IndexedStack(
           index: _index,
@@ -297,6 +309,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                       _manualForceOffline = true;
                       _recomputeOnlineFlag();
                     });
+                    unawaited(widget.localPrefs.setManualForceOffline(true));
                     messenger?.showSnackBar(
                       const SnackBar(
                         content: Text('Modo offline forzado.'),
@@ -315,6 +328,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     _backendReachable = false;
                     _recomputeOnlineFlag();
                   });
+                  unawaited(widget.localPrefs.setManualForceOffline(false));
                   messenger?.showSnackBar(
                     const SnackBar(
                       content: Text('Reintentando conexión con el servidor…'),

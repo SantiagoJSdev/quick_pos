@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderStack;
 
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
@@ -78,6 +79,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   static const double _kSearchRowExtent = 72;
   static const int _kSearchVisibleRows = 5;
 
+  /// Si el servidor no responde a tiempo, dejamos de mostrar el spinner y usamos caché (como offline).
+  static const Duration _kPosOnlineLoadBudget = Duration(seconds: 8);
+
   /// Min vertical space kept for ticket + list; search suggestions use the rest (up to 5 rows).
   static const double _kSearchCartReserveMin = 96;
   static const double _kSearchCartReserveMax = 168;
@@ -113,7 +117,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   int _heldTicketsCount = 0;
   String? _activeHeldTicketId;
   bool _shellOnline = true;
-  bool? _shellOnlineBound;
+  bool _shellManualForceOffline = false;
+  bool _shellBackendReachable = true;
+
+  /// Borde inferior del bloque buscador (+ aviso FX): el overlay de sugerencias empieza debajo.
+  final GlobalKey _posSearchAnchorKey = GlobalKey(debugLabel: 'pos_search_anchor');
 
   @override
   void initState() {
@@ -136,10 +144,18 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final next = ShellOnlineScope.of(context);
-    if (_shellOnlineBound == next) return;
-    _shellOnlineBound = next;
-    _shellOnline = next;
+    final scope = context.dependOnInheritedWidgetOfExactType<ShellOnlineScope>();
+    final nextOnline = scope?.isOnline ?? true;
+    final nextManual = scope?.manualForceOffline ?? false;
+    final nextBackend = scope?.backendReachable ?? true;
+    if (_shellOnline == nextOnline &&
+        _shellManualForceOffline == nextManual &&
+        _shellBackendReachable == nextBackend) {
+      return;
+    }
+    _shellOnline = nextOnline;
+    _shellManualForceOffline = nextManual;
+    _shellBackendReachable = nextBackend;
     unawaited(_load());
   }
 
@@ -214,6 +230,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   bool get _checkoutPanelVisible =>
       !_loading && _error == null && _selectedDocumentCurrency != null;
+
+  /// Servidor alcanzable pero la app sigue en offline (p. ej. «Poner offline» en Inicio).
+  bool get _pendingQueueServerAvailableHint =>
+      !_shellOnline &&
+      _shellManualForceOffline &&
+      _shellBackendReachable &&
+      _pendingSyncCount > 0;
 
   void _logPosCheckoutApiFailure(ApiError e, String uiMessage) {
     final summary = _cart
@@ -714,49 +737,38 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     _rebuildCartDocumentPrices();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    if (!_shellOnline) {
-      await _bootstrapShellOfflineLoad();
-      if (!mounted) return;
-      setState(() => _loading = false);
-      await _refreshPendingCount();
-      await _refreshHeldCount();
-      return;
-    }
+  /// `true` → [_load] debe hacer `loading=false` y refrescos; `false` → ya se cerró el loading (p. ej. catálogo vacío).
+  Future<bool> _loadFromNetworkWithCacheFallback() async {
     try {
       final list = await widget.productsApi.listProducts(
         widget.storeId,
         includeInactive: false,
       );
       await widget.localPrefs.saveCatalogProductsCache(list);
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _all = list);
     } on ApiError catch (e) {
       final cached = await widget.localPrefs.loadCatalogProductsCache();
-      if (!mounted) return;
+      if (!mounted) return false;
       if (cached.isEmpty) {
         setState(() {
           _all = [];
           _error = e.userMessageForSupport;
           _loading = false;
         });
-        return;
+        return false;
       }
       setState(() => _all = cached);
     } catch (e) {
       final cached = await widget.localPrefs.loadCatalogProductsCache();
-      if (!mounted) return;
+      if (!mounted) return false;
       if (cached.isEmpty) {
         setState(() {
           _all = [];
           _error = e.toString();
           _loading = false;
         });
-        return;
+        return false;
       }
       setState(() => _all = cached);
     }
@@ -769,7 +781,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         widget.storeId,
         _businessSettingsToCacheMap(settings),
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       final doc =
           settings.defaultSaleDocCurrency?.code ??
           settings.functionalCurrency.code;
@@ -783,7 +795,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       final cached = await widget.localPrefs.loadBusinessSettingsCache(
         widget.storeId,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       if (cached != null) {
         final doc =
             cached.defaultSaleDocCurrency?.code ??
@@ -806,7 +818,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       final cached = await widget.localPrefs.loadBusinessSettingsCache(
         widget.storeId,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       if (cached != null) {
         final doc =
             cached.defaultSaleDocCurrency?.code ??
@@ -827,10 +839,44 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       }
     }
 
+    return true;
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    if (!_shellOnline) {
+      await _bootstrapShellOfflineLoad();
+      if (!mounted) return;
+      setState(() => _loading = false);
+      await _refreshPendingCount();
+      await _refreshHeldCount();
+      return;
+    }
+
+    var shouldFinalizeLoading = true;
+    try {
+      shouldFinalizeLoading = await _loadFromNetworkWithCacheFallback().timeout(
+        _kPosOnlineLoadBudget,
+      );
+    } on TimeoutException {
+      if (!mounted) return;
+      await _bootstrapShellOfflineLoad();
+      if (!mounted) return;
+      setState(() => _loading = false);
+      await _refreshPendingCount();
+      await _refreshHeldCount();
+      return;
+    }
+
     if (!mounted) return;
-    setState(() => _loading = false);
-    await _refreshPendingCount();
-    await _refreshHeldCount();
+    if (shouldFinalizeLoading) {
+      setState(() => _loading = false);
+      await _refreshPendingCount();
+      await _refreshHeldCount();
+    }
   }
 
   Map<String, dynamic> _businessSettingsToCacheMap(BusinessSettings s) {
@@ -1181,6 +1227,14 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       ),
       clientSaleId: _pendingSaleId,
     );
+    if (!_shellOnline) {
+      await _queueSaleOffline(
+        restBody,
+        doc,
+        queuedBecauseShellOffline: true,
+      );
+      return;
+    }
     try {
       final res = await widget.salesApi.createSale(widget.storeId, restBody);
       if (!mounted) return;
@@ -1260,8 +1314,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   Future<void> _queueSaleOffline(
     Map<String, dynamic> restBody,
-    String doc,
-  ) async {
+    String doc, {
+    bool queuedBecauseShellOffline = false,
+  }) async {
     final syncOpId = ClientMutationId.newId();
     final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
       restBody,
@@ -1309,8 +1364,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     await _refreshPendingCount();
     if (!mounted) return;
     _showCheckoutPanelMessage(
-      'Se perdió conexión con el servidor. POS pasó a modo offline y la venta '
-      'quedó en cola para sincronizar automáticamente al reconectar.',
+      queuedBecauseShellOffline
+          ? 'Modo offline: la venta quedó guardada en el dispositivo y se '
+              'sincronizará cuando vuelvas a conectar con el servidor.'
+          : 'Se perdió conexión con el servidor. La venta quedó en cola para '
+              'sincronizar automáticamente al reconectar.',
       duration: const Duration(seconds: 6),
     );
   }
@@ -1407,6 +1465,16 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   String get _remainingMixedLabel =>
       '$_remainingFunctionalLabel · $_remainingDocumentLabel';
+
+  /// Una línea compacta para el panel de cobro (pago mixto).
+  String? get _mixedPaymentDetailLine {
+    if (!_hasAnyMixedPaymentInput) return null;
+    final func = _functionalCode;
+    final doc = _selectedDocumentCurrency ?? '';
+    final remDoc = _cartTotalDocumentAmount - _paymentTotalInDocument;
+    final remDocClamped = remDoc < 0 ? 0.0 : remDoc;
+    return '$func: ${_fmt2(_paymentFunctionalAmount)} · resta $doc: ${_fmt2(remDocClamped)}';
+  }
 
   double get _mixedChangeFunctional {
     final change = _paymentFunctionalAmount - _cartTotalFunctionalAmount;
@@ -1630,12 +1698,22 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return null;
   }
 
-  /// Con teclado abierto el cuerpo del scaffold se encoge y la lista inline queda
-  /// sin altura; mostramos sugerencias en un panel encima del teclado.
+  /// Teléfono / layout estrecho: evita sugerencias inline y depender solo de `viewInsets`
+  /// (en muchos Android el IME reporta 0 o tarde → el panel «Moneda del ticket» sube al buscador).
+  bool _isCompactPosLayout(BuildContext context) =>
+      MediaQuery.sizeOf(context).shortestSide < 600;
+
+  /// En móvil, al enfocar el buscador ocultamos el panel de cobro para que no compita
+  /// por altura con el ticket y no quede pegado al input.
+  bool _hideCheckoutWhileSearchFocused(BuildContext context) =>
+      _isCompactPosLayout(context) && _searchFocus.hasFocus;
+
+  /// Panel modal a pantalla completa en el Stack raíz (no dentro del `Expanded`).
   bool _keyboardSuggestionOverlayActive(BuildContext context) {
     if (!_searchFocus.hasFocus) return false;
     if (_loading || _error != null) return false;
     if (_search.text.trim().isEmpty) return false;
+    if (_isCompactPosLayout(context)) return true;
     return MediaQuery.viewInsetsOf(context).bottom > 0;
   }
 
@@ -1643,11 +1721,29 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (_search.text.trim().isEmpty || _loading || _error != null) {
       return false;
     }
+    if (_isCompactPosLayout(context)) return false;
     return !_keyboardSuggestionOverlayActive(context);
   }
 
   void _dismissSearchSuggestionOverlay() {
     _searchFocus.unfocus();
+  }
+
+  double _posSearchOverlayTopInset(BuildContext stackDescendantContext) {
+    final anchorCtx = _posSearchAnchorKey.currentContext;
+    if (anchorCtx == null) return 168;
+    final anchorBox = anchorCtx.findRenderObject() as RenderBox?;
+    final stackBox = stackDescendantContext
+        .findAncestorRenderObjectOfType<RenderStack>();
+    if (anchorBox == null ||
+        stackBox == null ||
+        !anchorBox.hasSize ||
+        !anchorBox.attached) {
+      return 168;
+    }
+    final a = anchorBox.localToGlobal(Offset.zero);
+    final s = stackBox.localToGlobal(Offset.zero);
+    return (a.dy - s.dy + anchorBox.size.height).clamp(0.0, 8000.0);
   }
 
   Widget _buildSearchSuggestionsScrollable() {
@@ -1685,66 +1781,79 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     );
   }
 
-  Widget _buildKeyboardSuggestionOverlay(BuildContext context) {
-    final screenH = MediaQuery.sizeOf(context).height;
-    final panelH = min(400.0, max(200.0, screenH * 0.46));
+  Widget _buildKeyboardSuggestionOverlay(
+    BuildContext context,
+    BoxConstraints stackConstraints,
+  ) {
+    final mq = MediaQuery.of(context);
+    final kb = mq.viewInsets.bottom;
+    final safeBottom = mq.padding.bottom;
+    final liftBottom = kb > 0 ? kb : safeBottom;
+    final top = _posSearchOverlayTopInset(context);
+    final availH = stackConstraints.maxHeight - top - liftBottom;
+    if (availH < 100) return const SizedBox.shrink();
+    final panelH = min(480.0, max(220.0, availH * 0.52));
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: _dismissSearchSuggestionOverlay,
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.45),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: GestureDetector(
-            onTap: () {},
-            child: Material(
-              color: PosSaleUi.searchSuggestionsSurface,
-              elevation: 16,
-              shadowColor: Colors.black,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(16),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: SizedBox(
-                width: double.infinity,
-                height: panelH,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 6, 4, 4),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Productos',
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(
-                                    color: PosSaleUi.text,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Cerrar',
-                            onPressed: _dismissSearchSuggestionOverlay,
-                            icon: const Icon(
-                              Icons.close,
-                              color: PosSaleUi.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1, color: PosSaleUi.divider),
-                    Expanded(child: _buildSearchSuggestionsScrollable()),
-                  ],
-                ),
+    return Padding(
+      padding: EdgeInsets.only(top: top, bottom: liftBottom),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _dismissSearchSuggestionOverlay,
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.45),
               ),
             ),
           ),
-        ),
+          Material(
+            color: PosSaleUi.searchSuggestionsSurface,
+            elevation: 16,
+            shadowColor: Colors.black,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(16),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: double.infinity,
+              height: panelH,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 4, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Productos',
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  color: PosSaleUi.text,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Cerrar',
+                          onPressed: _dismissSearchSuggestionOverlay,
+                          icon: const Icon(
+                            Icons.close,
+                            color: PosSaleUi.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1, color: PosSaleUi.divider),
+                  Expanded(child: _buildSearchSuggestionsScrollable()),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1834,11 +1943,19 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       ),
       child: Scaffold(
         backgroundColor: PosSaleUi.bg,
+        resizeToAvoidBottomInset: false,
         body: SafeArea(
           bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.viewInsetsOf(context).bottom,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
               if (_contextError != null)
                 Material(
                   color: PosSaleUi.error.withValues(alpha: 0.2),
@@ -1858,20 +1975,46 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Icon(
-                          Icons.cloud_upload_outlined,
+                        Icon(
+                          _pendingQueueServerAvailableHint
+                              ? Icons.wifi_find
+                              : Icons.cloud_upload_outlined,
                           color: PosSaleUi.primary,
                           size: 20,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            '$_pendingSyncCount en cola',
-                            style: const TextStyle(
-                              color: PosSaleUi.text,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _pendingQueueServerAvailableHint
+                                    ? 'Modo online disponible — conectar'
+                                    : '$_pendingSyncCount en cola',
+                                style: const TextStyle(
+                                  color: PosSaleUi.text,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (_pendingQueueServerAvailableHint)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    'En Inicio desactivá «Poner offline» para '
+                                    'sincronizar ($_pendingSyncCount pendiente'
+                                    '${_pendingSyncCount == 1 ? '' : 's'}).',
+                                    style: TextStyle(
+                                      color: PosSaleUi.text.withValues(
+                                        alpha: 0.85,
+                                      ),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                         if (_flushBusy)
@@ -1905,38 +2048,44 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                 showSyncDot: _pendingSyncCount > 0,
                 onBack: widget.onRequestExit,
               ),
-              PosSaleSearchBlock(
-                controller: _search,
-                focusNode: _searchFocus,
-                onScanTap: _openScanner,
-                onScanLongPress: _simulateRandomScan,
-                onClear: () {
-                  _search.clear();
-                  setState(() {});
-                },
-              ),
-              if (_fxLoadError != null &&
-                  doc != null &&
-                  func.isNotEmpty &&
-                  func.toUpperCase() != doc.toUpperCase())
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  child: Text(
-                    _fxLoadError!,
-                    style: const TextStyle(
-                      color: PosSaleUi.error,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              Expanded(
-                child: Stack(
-                  clipBehavior: Clip.none,
+              KeyedSubtree(
+                key: _posSearchAnchorKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    LayoutBuilder(
+                    PosSaleSearchBlock(
+                      controller: _search,
+                      focusNode: _searchFocus,
+                      onScanTap: _openScanner,
+                      onScanLongPress: _simulateRandomScan,
+                      onClear: () {
+                        _search.clear();
+                        setState(() {});
+                      },
+                    ),
+                    if (_fxLoadError != null &&
+                        doc != null &&
+                        func.isNotEmpty &&
+                        func.toUpperCase() != doc.toUpperCase())
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        child: Text(
+                          _fxLoadError!,
+                          style: const TextStyle(
+                            color: PosSaleUi.error,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: LayoutBuilder(
                       builder: (context, constraints) {
                         final idealSearchH =
                             _kSearchRowExtent * _kSearchVisibleRows +
@@ -2005,9 +2154,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                         Padding(
                                           padding: const EdgeInsets.fromLTRB(
                                             16,
-                                            10,
-                                            16,
                                             6,
+                                            16,
+                                            4,
                                           ),
                                           child: Row(
                                             children: [
@@ -2021,8 +2170,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                               Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 2,
+                                                      horizontal: 6,
+                                                      vertical: 1,
                                                     ),
                                                 decoration: BoxDecoration(
                                                   color: PosSaleUi.primary,
@@ -2035,7 +2184,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                   _cartQtySummary(),
                                                   style: const TextStyle(
                                                     color: Colors.white,
-                                                    fontSize: 10,
+                                                    fontSize: 9,
                                                     fontWeight: FontWeight.w700,
                                                   ),
                                                 ),
@@ -2147,14 +2296,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                         );
                       },
                     ),
-                    if (_keyboardSuggestionOverlayActive(context))
-                      Positioned.fill(
-                        child: _buildKeyboardSuggestionOverlay(context),
-                      ),
-                  ],
-                ),
               ),
-              if (!_loading && _error == null && doc != null)
+              if (!_loading &&
+                  _error == null &&
+                  doc != null &&
+                  !_hideCheckoutWhileSearchFocused(context))
                 PosSaleCheckoutPanel(
                   functionalCode: func,
                   documentCode: doc,
@@ -2162,7 +2308,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                   documentTotalLabel: _posCurrencyLabel(doc),
                   totalFunctional: tf,
                   totalDocument: td,
-                  subtotalLabel: '$td $doc',
                   itemsSummary:
                       '${_cart.length} líneas · ${_cartQtySummary()} u.',
                   cartNotEmpty: !cartEmpty,
@@ -2172,9 +2317,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                   onClearMixedPayment: _appliedFunctionalPayment > 0
                       ? () => setState(_clearMixedPaymentInputs)
                       : null,
-                  mixedPaymentAppliedLabel:
-                      'Pago USD aplicado: ${_fmt2(_paymentFunctionalAmount)} $func',
-                  mixedPaymentRemainingLabel: _remainingMixedLabel,
+                  mixedPaymentDetailLine: _mixedPaymentDetailLine,
                   canChargeWithPayments: _canChargeWithMixedPayments,
                   onClear: _clearCart,
                   onCharge: _onCheckout,
@@ -2189,42 +2332,60 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                       ? Row(
                           children: [
                             const Text(
-                              'Moneda del ticket',
+                              'Moneda ticket',
                               style: TextStyle(
                                 color: PosSaleUi.textMuted,
-                                fontSize: 12,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                            const Spacer(),
-                            DropdownButton<String>(
-                              value: () {
-                                final sel = _selectedDocumentCurrency!;
-                                for (final c in _documentCurrencyOptions) {
-                                  if (c.toUpperCase() == sel.toUpperCase()) {
-                                    return c;
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DropdownButton<String>(
+                                isDense: true,
+                                isExpanded: true,
+                                value: () {
+                                  final sel = _selectedDocumentCurrency!;
+                                  for (final c in _documentCurrencyOptions) {
+                                    if (c.toUpperCase() == sel.toUpperCase()) {
+                                      return c;
+                                    }
                                   }
-                                }
-                                return _documentCurrencyOptions.first;
-                              }(),
-                              dropdownColor: PosSaleUi.surface3,
-                              underline: const SizedBox.shrink(),
-                              style: const TextStyle(
-                                color: PosSaleUi.text,
-                                fontSize: 13,
+                                  return _documentCurrencyOptions.first;
+                                }(),
+                                dropdownColor: PosSaleUi.surface3,
+                                underline: const SizedBox.shrink(),
+                                style: const TextStyle(
+                                  color: PosSaleUi.text,
+                                  fontSize: 12,
+                                ),
+                                items: _documentCurrencyOptions
+                                    .map(
+                                      (c) => DropdownMenuItem(
+                                        value: c,
+                                        child: Text(
+                                          c,
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: _onDocumentCurrencyChanged,
                               ),
-                              items: _documentCurrencyOptions
-                                  .map(
-                                    (c) => DropdownMenuItem(
-                                      value: c,
-                                      child: Text(c),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: _onDocumentCurrencyChanged,
                             ),
                           ],
                         )
                       : null,
+                ),
+                  ],
+                ),
+              ),
+              if (_keyboardSuggestionOverlayActive(context))
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (ctx, constraints) =>
+                        _buildKeyboardSuggestionOverlay(ctx, constraints),
+                  ),
                 ),
             ],
           ),

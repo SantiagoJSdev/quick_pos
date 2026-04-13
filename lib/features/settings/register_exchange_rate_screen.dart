@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
+import '../../core/storage/local_prefs.dart';
 
 const _kPairs = ['USD', 'VES', 'EUR'];
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
@@ -20,12 +21,14 @@ class RegisterExchangeRateScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.exchangeRatesApi,
+    this.localPrefs,
     this.initialBase,
     this.initialQuote,
   });
 
   final String storeId;
   final ExchangeRatesApi exchangeRatesApi;
+  final LocalPrefs? localPrefs;
   final String? initialBase;
   final String? initialQuote;
 
@@ -105,6 +108,23 @@ class _RegisterExchangeRateScreenState
             ? null
             : _notesController.text.trim(),
       );
+      final prefs = widget.localPrefs;
+      if (prefs != null) {
+        try {
+          final latest = await widget.exchangeRatesApi.getLatest(
+            widget.storeId,
+            baseCurrencyCode: _base,
+            quoteCurrencyCode: _quote,
+            effectiveOn: date,
+          );
+          await prefs.syncPosFxPairCacheFromFetchedRate(
+            storeId: widget.storeId,
+            fetchedBase: _base,
+            fetchedQuote: _quote,
+            rate: latest,
+          );
+        } catch (_) {}
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
