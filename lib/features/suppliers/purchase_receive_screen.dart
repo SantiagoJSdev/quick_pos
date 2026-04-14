@@ -17,6 +17,7 @@ import '../../core/models/supplier.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/pos/pos_terminal_info.dart';
+import '../../core/pos/purchase_unit_cost_convert.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_purchase_receive_entry.dart';
@@ -482,6 +483,45 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     setState(() => _lines.removeWhere((e) => e.lineKey == lineKey));
   }
 
+  /// Alinea `Product.cost` con el costo unitario **real** de esta recepción (no el promedio de stock).
+  Future<List<String>> _applyCatalogCostFromPurchaseLines({
+    required String documentCode,
+    required String functionalCode,
+  }) async {
+    final failures = <String>[];
+    for (final draft in _lines) {
+      final p = draft.product;
+      final costStr = purchaseUnitCostInProductCurrency(
+        unitCostDocument: draft.unitCost,
+        documentCurrencyCode: documentCode,
+        functionalCurrencyCode: functionalCode,
+        fxPair: _fxPair,
+        productCurrencyCode: p.currency,
+      );
+      if (costStr == null) {
+        failures.add('${p.name} (${p.currency} ≠ documento/funcional)');
+        continue;
+      }
+      try {
+        await widget.productsApi.updateProduct(
+          widget.storeId,
+          p.id,
+          {
+            'cost': costStr,
+            'applySuggestedListPrice': true,
+          },
+        );
+      } on ApiError catch (e) {
+        debugPrint('[Purchase] PATCH cost ${p.id}: ${e.userMessageForSupport}');
+        failures.add(p.name);
+      } catch (e) {
+        debugPrint('[Purchase] PATCH cost ${p.id}: $e');
+        failures.add(p.name);
+      }
+    }
+    return failures;
+  }
+
   Future<void> _submit() async {
     setState(() => _formError = null);
     final s = _settings;
@@ -512,6 +552,22 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return;
     }
 
+    final supplierInvoiceRef =
+        PurchaseReceivePayload.buildSupplierInvoiceReferenceForApi(
+          invoiceRef: _invoiceRef.text,
+          documentNotes: _purchaseNotes.text,
+        );
+    if (supplierInvoiceRef.length >
+        PurchaseReceivePayload.maxSupplierInvoiceReferenceLength) {
+      setState(
+        () => _formError =
+            'Factura + notas: máximo '
+            '${PurchaseReceivePayload.maxSupplierInvoiceReferenceLength} '
+            'caracteres (límite del servidor).',
+      );
+      return;
+    }
+
     _purchaseClientId ??= ClientMutationId.newId();
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
     if (!mounted) return;
@@ -530,21 +586,30 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           ),
         )
         .toList();
-    final ref = _invoiceRef.text.trim();
-    final notes = _purchaseNotes.text.trim();
     final restBody = PurchaseReceivePayload.toRestBody(
       supplierId: sup.id,
       documentCurrencyCode: doc,
       lines: lines,
-      fxSnapshot: Map<String, dynamic>.from(fxSnap)..remove('fxSource'),
+      fxSnapshot: fxSnap,
       clientPurchaseId: _purchaseClientId,
-      reference: ref.isEmpty ? null : ref,
-      notes: notes.isEmpty ? null : notes,
+      supplierInvoiceReference:
+          supplierInvoiceRef.isEmpty ? null : supplierInvoiceRef,
+    );
+    debugPrint(
+      '[Purchase] POST /purchases lines=${lines.length} '
+      'supplierInvoiceRefLen=${supplierInvoiceRef.length} '
+      'bodyKeys=${restBody.keys.join(",")} '
+      'hasSupplierInvoiceReference=${restBody.containsKey("supplierInvoiceReference")}',
     );
 
     setState(() => _submitting = true);
     try {
       await widget.purchasesApi.createPurchase(widget.storeId, restBody);
+      if (!mounted) return;
+      final costFailures = await _applyCatalogCostFromPurchaseLines(
+        documentCode: doc,
+        functionalCode: func,
+      );
       if (!mounted) return;
       widget.catalogInvalidationBus.invalidateFromLocalMutation(
         productIds: _lines.map((e) => e.product.id).toSet(),
@@ -561,10 +626,21 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           doFlush: true,
         ),
       );
+      final String snackText;
+      if (costFailures.isEmpty) {
+        snackText =
+            PostPurchasePriceHint.afterPurchaseWithCatalogCostUpdatedSnackMessage;
+      } else {
+        snackText =
+            'Compra registrada.\n\n'
+            'Se actualizó el costo en ficha donde fue posible. '
+            'No aplica o falló para: ${costFailures.join(", ")}.\n\n'
+            'El precio de lista no se modifica solo; revisalo en Catálogo si aplica.';
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          duration: const Duration(seconds: 6),
-          content: Text(PostPurchasePriceHint.afterPurchaseSnackMessage),
+          duration: Duration(seconds: costFailures.isEmpty ? 8 : 12),
+          content: Text(snackText),
         ),
       );
       Navigator.of(context).pop(true);
@@ -592,8 +668,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           fxSnapshot: fxSnap,
           clientPurchaseId: _purchaseClientId,
           fxSource: 'POS_OFFLINE',
-          reference: ref.isEmpty ? null : ref,
-          notes: notes.isEmpty ? null : notes,
+          supplierInvoiceReference:
+              supplierInvoiceRef.isEmpty ? null : supplierInvoiceRef,
         );
         await widget.localPrefs.appendPendingPurchaseReceive(
           PendingPurchaseReceiveEntry(
@@ -724,10 +800,14 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                   TextField(
                     controller: _invoiceRef,
                     enabled: !_submitting,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Nº factura o referencia del proveedor',
                       hintText: 'Opcional',
-                      border: OutlineInputBorder(),
+                      helperText:
+                          'Se envía como supplierInvoiceReference. Con notas: '
+                          'máx. ${PurchaseReceivePayload.maxSupplierInvoiceReferenceLength} '
+                          'caracteres en total.',
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -736,7 +816,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     enabled: !_submitting,
                     decoration: const InputDecoration(
                       labelText: 'Notas del documento',
-                      hintText: 'Opcional',
+                      hintText: 'Opcional (mismo campo API que la factura)',
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 2,

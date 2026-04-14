@@ -245,11 +245,20 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         if (!silent) {
           _showCheckoutPanelMessage(msg);
         }
-      } else if (!silent && r.apiMessage != null && pendingN > 0) {
+      }
+      final flushMsg = r.apiMessage?.trim();
+      if (!silent &&
+          flushMsg != null &&
+          flushMsg.isNotEmpty &&
+          (pendingN > 0 || r.hadManualReviewFailure)) {
         final suffix = r.hadManualReviewFailure
-            ? '\nRequiere revisión manual (error de validación/negocio).'
+            ? '\nRequiere revisión manual o nueva opId si el servidor rechazó la operación.'
             : (r.hadRetryableFailure ? '\nSe reintentará automáticamente.' : '');
-        _showCheckoutPanelMessage('${r.apiMessage!}$suffix', error: true);
+        _showCheckoutPanelMessage(
+          '$flushMsg$suffix',
+          error: r.hadManualReviewFailure || r.hadRetryableFailure,
+          duration: Duration(seconds: r.hadManualReviewFailure ? 12 : 6),
+        );
       }
     } catch (e, st) {
       debugPrint('[POS sync] EXCEPCIÓN: $e');
@@ -1813,7 +1822,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         'amount': _fmt2(_paymentFunctionalAppliedToSale),
         'currencyCode': functionalCode.toUpperCase(),
         if (functionalCode.toUpperCase() != documentCode.toUpperCase())
-          'fxSnapshot': fx,
+          'fxSnapshot': Map<String, dynamic>.from(fx),
       });
     }
     return payments.isEmpty ? null : payments;

@@ -2,11 +2,17 @@ import '../pos/sale_checkout_payload.dart';
 
 /// Cuerpo `POST /api/v1/purchases` y objeto `payload.purchase` en `sync/push`.
 ///
-/// Contrato: `FRONTEND_INTEGRATION_CONTEXT.md` §13.10, `SYNC_CONTRACTS.md` — `PURCHASE_RECEIVE`.
+/// Contrato Quick Market (lista blanca en servidor):
+/// - REST: `supplierInvoiceReference` (no usar `reference`).
+/// - sync `payload.purchase`: preferido `supplierInvoiceReference`; alias `reference`
+///   solo por compatibilidad (este cliente envía solo el canónico).
 class PurchaseReceivePayload {
   PurchaseReceivePayload._();
 
-  /// Misma forma que ventas (`fxSnapshot` en §13.10).
+  /// Límite REST (>120 →400). En sync el servidor puede truncar.
+  static const int maxSupplierInvoiceReferenceLength = 120;
+
+  /// Misma forma que ventas / sync (`fxSnapshot`).
   static Map<String, dynamic> buildFxSnapshot({
     required String documentCurrencyCode,
     required String functionalCurrencyCode,
@@ -50,6 +56,20 @@ class PurchaseReceivePayload {
     return '$y-$m-$d';
   }
 
+  /// Une «Nº factura» y «Notas del documento» en un solo valor para
+  /// [supplierInvoiceReference] (el body no incluye `notes` en lista blanca).
+  static String buildSupplierInvoiceReferenceForApi({
+    required String invoiceRef,
+    required String documentNotes,
+  }) {
+    final r = invoiceRef.trim();
+    final n = documentNotes.trim();
+    if (r.isEmpty && n.isEmpty) return '';
+    if (n.isEmpty) return r;
+    if (r.isEmpty) return n;
+    return '$r · $n';
+  }
+
   /// Body REST (sin `storeId`; va en `X-Store-Id`).
   static Map<String, dynamic> toRestBody({
     required String supplierId,
@@ -57,11 +77,9 @@ class PurchaseReceivePayload {
     required List<Map<String, dynamic>> lines,
     required Map<String, dynamic> fxSnapshot,
     String? clientPurchaseId,
-    String? reference,
-    String? notes,
+    String? supplierInvoiceReference,
   }) {
-    final ref = reference?.trim() ?? '';
-    final n = notes?.trim() ?? '';
+    final ref = supplierInvoiceReference?.trim() ?? '';
     return <String, dynamic>{
       if (clientPurchaseId != null && clientPurchaseId.isNotEmpty)
         'id': clientPurchaseId,
@@ -69,8 +87,7 @@ class PurchaseReceivePayload {
       'documentCurrencyCode': documentCurrencyCode.trim(),
       'lines': lines,
       'fxSnapshot': fxSnapshot,
-      if (ref.isNotEmpty) 'reference': ref,
-      if (n.isNotEmpty) 'notes': n,
+      if (ref.isNotEmpty) 'supplierInvoiceReference': ref,
     };
   }
 
@@ -83,15 +100,13 @@ class PurchaseReceivePayload {
     required Map<String, dynamic> fxSnapshot,
     String? clientPurchaseId,
     String? fxSource,
-    String? reference,
-    String? notes,
+    String? supplierInvoiceReference,
   }) {
     final fx = Map<String, dynamic>.from(fxSnapshot);
     if (fxSource != null && fxSource.isNotEmpty) {
       fx['fxSource'] = fxSource;
     }
-    final ref = reference?.trim() ?? '';
-    final n = notes?.trim() ?? '';
+    final ref = supplierInvoiceReference?.trim() ?? '';
     return <String, dynamic>{
       if (clientPurchaseId != null && clientPurchaseId.isNotEmpty)
         'id': clientPurchaseId,
@@ -100,8 +115,7 @@ class PurchaseReceivePayload {
       'documentCurrencyCode': documentCurrencyCode.trim(),
       'lines': lines,
       'fxSnapshot': fx,
-      if (ref.isNotEmpty) 'reference': ref,
-      if (n.isNotEmpty) 'notes': n,
+      if (ref.isNotEmpty) 'supplierInvoiceReference': ref,
     };
   }
 

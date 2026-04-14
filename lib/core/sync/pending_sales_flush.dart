@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
+
 import '../api/api_error.dart';
 import '../api/sync_api.dart';
+import '../pos/sale_checkout_payload.dart';
 import '../storage/local_prefs.dart';
 
 /// Resultado de `sync/push` sobre la cola local (ventas, ajustes, compras, devoluciones).
@@ -65,7 +68,11 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
       'opId': e.opId,
       'opType': 'SALE',
       'timestamp': e.opTimestampIso,
-      'payload': <String, dynamic>{'sale': e.sale},
+      'payload': <String, dynamic>{
+        'sale': SaleCheckoutPayload.coerceSalePayloadForSyncPush(
+          Map<String, dynamic>.from(e.sale),
+        ),
+      },
     });
   }
   for (final e in adjQueue) {
@@ -158,9 +165,39 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
       }
     }
 
+    String? pushFailedSummary;
+    var pushFailedCount = 0;
+    final failedRaw = res['failed'];
+    if (failedRaw is List && failedRaw.isNotEmpty) {
+      pushFailedCount = failedRaw.length;
+      final lines = <String>[];
+      for (final item in failedRaw) {
+        if (item is! Map) continue;
+        final id = item['opId']?.toString() ?? '?';
+        final details = item['details'];
+        final d = details == null ? '' : details.toString();
+        debugPrint('[sync/push] failed opId=$id details=$d');
+        if (d.isNotEmpty) {
+          lines.add('$id: $d');
+        } else {
+          lines.add(id);
+        }
+      }
+      if (lines.isNotEmpty) {
+        pushFailedSummary = lines.length <= 5
+            ? lines.join('\n')
+            : '${lines.take(5).join('\n')}\n… (+${lines.length - 5})';
+      } else if (pushFailedCount > 0) {
+        pushFailedSummary =
+            '$pushFailedCount operación(es) en failed[] (sin detalle en respuesta).';
+      }
+    }
+
     return SyncFlushResult(
       sentCount: batch.length,
       removedOpIds: remove.toList(),
+      hadManualReviewFailure: pushFailedCount > 0,
+      apiMessage: pushFailedSummary,
     );
   } on ApiError catch (e) {
     return SyncFlushResult(

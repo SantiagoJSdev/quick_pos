@@ -54,6 +54,12 @@ class CatalogProduct {
   /// Foto asociada al producto (URL relativa o absoluta según backend).
   final String? imageUrl;
 
+  /// `MANUAL_PRICE` fija lista a mano; el resto (incl. modo vacío / tienda) usa margen para orientar lista.
+  bool get listPriceFollowsMarginPolicy {
+    final m = pricingMode?.trim() ?? '';
+    return m != 'MANUAL_PRICE';
+  }
+
   static CatalogProduct fromJson(Map<String, dynamic> json) {
     return CatalogProduct(
       id: json['id']?.toString() ?? '',

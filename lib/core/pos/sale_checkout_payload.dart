@@ -76,16 +76,108 @@ class SaleCheckoutPayload {
       'lines': lines
           .map(
             (l) => <String, dynamic>{
-              'productId': l.productId,
+              'productId': l.productId.toString(),
               'quantity': l.quantity.toString(),
-              'price': l.documentUnitPrice,
+              'price': l.documentUnitPrice.toString(),
               'discount': '0',
             },
           )
           .toList(),
       'fxSnapshot': fxSnapshot,
-      if (payments != null && payments.isNotEmpty) 'payments': payments,
+      if (payments != null && payments.isNotEmpty)
+        'payments': _coercePaymentsForJson(payments),
     };
+  }
+
+  /// `sync/push` y validadores estrictos del backend exigen strings en JSON para
+  /// cantidades/importes; al rehidratar la cola desde prefs, `jsonDecode` puede
+  /// dejar `int`/`double`.
+  static String _scalarToJsonString(dynamic v) {
+    if (v == null) return '';
+    if (v is String) return v;
+    if (v is num) {
+      if (v is double && v == v.roundToDouble()) {
+        return v.round().toString();
+      }
+      return v.toString();
+    }
+    return v.toString();
+  }
+
+  static Map<String, dynamic> _stringifyFxSnapshotMap(Map<String, dynamic> fx) {
+    final out = <String, dynamic>{};
+    for (final e in fx.entries) {
+      out[e.key] = _scalarToJsonString(e.value);
+    }
+    return out;
+  }
+
+  static List<Map<String, dynamic>> _coercePaymentsForJson(
+    List<Map<String, dynamic>> payments,
+  ) {
+    return payments.map((raw) {
+      final p = Map<String, dynamic>.from(raw);
+      p['method'] = _scalarToJsonString(p['method']);
+      p['amount'] = _scalarToJsonString(p['amount']);
+      p['currencyCode'] = _scalarToJsonString(p['currencyCode']);
+      final nested = p['fxSnapshot'];
+      if (nested is Map) {
+        p['fxSnapshot'] = _stringifyFxSnapshotMap(
+          Map<String, dynamic>.from(nested),
+        );
+      }
+      return p;
+    }).toList();
+  }
+
+  /// Normaliza `payload.sale` antes de enviarlo en `POST /sync/push`.
+  static Map<String, dynamic> coerceSalePayloadForSyncPush(
+    Map<String, dynamic> sale,
+  ) {
+    final out = Map<String, dynamic>.from(sale);
+    if (out['id'] != null) {
+      out['id'] = _scalarToJsonString(out['id']);
+    }
+    out['storeId'] = _scalarToJsonString(out['storeId']);
+    out['documentCurrencyCode'] = _scalarToJsonString(
+      out['documentCurrencyCode'],
+    );
+    out['deviceId'] = _scalarToJsonString(out['deviceId']);
+    out['appVersion'] = _scalarToJsonString(out['appVersion']);
+
+    final lines = out['lines'];
+    if (lines is List) {
+      out['lines'] = lines.map((e) {
+        if (e is! Map) return e;
+        final m = Map<String, dynamic>.from(e);
+        m['productId'] = _scalarToJsonString(m['productId']);
+        m['quantity'] = _scalarToJsonString(m['quantity']);
+        m['price'] = _scalarToJsonString(m['price']);
+        if (m.containsKey('discount')) {
+          m['discount'] = _scalarToJsonString(m['discount']);
+        }
+        return m;
+      }).toList();
+    }
+
+    final fx = out['fxSnapshot'];
+    if (fx is Map) {
+      out['fxSnapshot'] = _stringifyFxSnapshotMap(
+        Map<String, dynamic>.from(fx),
+      );
+    }
+
+    final pays = out['payments'];
+    if (pays is List) {
+      out['payments'] = pays.map((p) {
+        if (p is! Map) return p;
+        return _coercePaymentsForJson([
+          Map<String, dynamic>.from(p),
+        ]).first;
+      }).toList();
+    }
+
+    return out;
   }
 
   /// `payload.sale` para `POST /api/v1/sync/push` (`SYNC_CONTRACTS.md`), misma forma FX que REST.
@@ -99,7 +191,7 @@ class SaleCheckoutPayload {
     if (fxSource != null && fxSource.isNotEmpty) {
       fx['fxSource'] = fxSource;
     }
-    return <String, dynamic>{
+    final sale = <String, dynamic>{
       if (restBody['id'] != null && '${restBody['id']}'.isNotEmpty)
         'id': restBody['id'],
       'storeId': storeId.trim(),
@@ -109,6 +201,7 @@ class SaleCheckoutPayload {
       'fxSnapshot': fx,
       if (restBody['payments'] is List) 'payments': restBody['payments'],
     };
+    return coerceSalePayloadForSyncPush(sale);
   }
 
   static String _todayYyyyMmDd() {

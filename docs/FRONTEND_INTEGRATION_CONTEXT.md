@@ -146,6 +146,60 @@ Notas de contrato vigentes para ventas:
   - `PAYMENTS_FX_PAIR_MISMATCH`
   - `PAYMENTS_TOTAL_MISMATCH`
 
+### Productos `PATCH /api/v1/products/:id` — costo, precio de lista y sugerido (M7)
+
+- **`suggestedPrice`**: valor **derivado** en la **respuesta** (`GET` / `PATCH`): reglas M7 (costo × (1 + margen efectivo/100) cuando aplica), junto con `effectiveMarginPercent`, `marginComputedPercent`, etc. El cliente **no** inventa este campo.
+
+#### Un solo request: costo + alinear `price` al sugerido (soportado en backend)
+
+**Opción A (recomendada)** — body JSON:
+
+```json
+{
+  "cost": "12.50",
+  "applySuggestedListPrice": true
+}
+```
+
+**Opción B** — misma semántica por query:  
+`PATCH /api/v1/products/:id?syncListPriceFromMargin=1` (o `=true`).
+
+**Qué hace el servidor**
+
+1. Aplica primero los campos del body habituales (`cost`, `pricingMode`, `marginPercentOverride`, etc.).
+2. Calcula `suggestedPrice` M7 con la misma regla que ya exponen en GET/PATCH.
+3. Si ese cálculo arroja un sugerido, **persiste `price`** con ese valor en la **misma** petición.
+4. Si **no** hay sugerido (`MANUAL_PRICE`, costo 0, sin margen en tienda/override, etc.), el flag/query **no** cambia `price`; solo aplica el resto del body. Caso borde: único cambio el flag y nada que aplicar ni sugerido → **400** con mensaje claro.
+
+**Restricciones**
+
+- **No** enviar `price` en el body si usan `applySuggestedListPrice: true` o `syncListPriceFromMargin` → **400**.
+- Lista blanca estricta: no propiedades fuera del DTO.
+
+**Respuesta**
+
+- Siguen recibiendo `suggestedPrice`, `effectiveMarginPercent`, `marginComputedPercent` coherentes con lo guardado tras el PATCH.
+
+**Cliente Quick POS (recepción / compra):** un solo `PATCH` con `cost` + `applySuggestedListPrice: true` tras registrar la compra (no hace falta segundo PATCH solo con `price`).
+
+### Compras `POST /purchases` y sync `PURCHASE_RECEIVE`
+
+- Lista blanca estricta: no enviar propiedades no definidas (p. ej. `reference` en REST → 400).
+- Factura / guia / nota del proveedor: campo **`supplierInvoiceReference`** (string opcional, max **120** en REST; sync puede truncar).
+- **`id`** opcional en body: idempotencia (UUID cliente).
+- **`documentCurrencyCode`** opcional; si falta, el servidor usa reglas de settings.
+- **`fxSnapshot`** opcional; misma forma que en sync (puede incluir `fxSource`).
+- **`GET /purchases/:id`**: respuesta incluye `supplierInvoiceReference` opcional.
+- Sync `payload.purchase`: mismos conceptos; preferido **`supplierInvoiceReference`**; alias **`reference`** solo en sync (si vienen ambos, gana `supplierInvoiceReference`). Alias **`fx`** = mismo contenido que `fxSnapshot`.
+
+### Sync `POST /sync/push` — ventas `SALE`
+
+- **`GET /ops/metrics`** es solo diagnóstico operativo; el POS **no** necesita `OPS_API_KEY` para sincronizar. Sync usa **`POST /api/v1/sync/push`** con `X-Store-Id` y body `deviceId` + `ops[]`.
+- En `payload.sale.lines[]`, **`productId`**, **`quantity`** y **`price`** deben ir como **strings** en el JSON (ej. `"quantity": "2"`). Si Dart serializa números nativos, el backend puede rechazar la validación.
+- Si hay **`payments[]`**: `method`, `amount`, `currencyCode` como strings; `fxSnapshot` anidado con campos requeridos también como strings.
+- Respuesta puede incluir **`failed[]`** con **`details`** por operación: conviene loguear/mostrar para depuración.
+- Si una **`opId`** ya quedó registrada como fallida en servidor, no se re-ejecuta con el mismo id: hace falta **nueva `opId`** (UUID v4) para reenviar la venta corregida.
+
 ## 7) Componentes Flutter relevantes
 
 ### Core

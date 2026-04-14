@@ -57,6 +57,14 @@ class PostPurchasePriceHint {
       'El precio de lista del catálogo no se actualiza solo. '
       'Revisá margen y precio en Catálogo si hace falta.';
 
+  /// Tras registrar compra online: costo + precio lista vía `suggestedPrice` del API (si aplica margen).
+  static String get afterPurchaseWithCatalogCostUpdatedSnackMessage =>
+      'Compra registrada.\n\n'
+      'Se actualizó el costo en ficha con el unitario de esta recepción. '
+      'Si el producto usa margen (tienda o propio), el precio de lista se alineó '
+      'al valor sugerido que devuelve el servidor tras el cambio de costo.\n\n'
+      'Los productos en precio manual solo actualizaron costo: revisá el precio de lista en Catálogo.';
+
   static String get stockDetailPolicyLine =>
       'Tras una compra el costo medio de depósito se actualiza aquí; '
       'el precio de lista se edita en Catálogo (el servidor no lo cambia en silencio).';
