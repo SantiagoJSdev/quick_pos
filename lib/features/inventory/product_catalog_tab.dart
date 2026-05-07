@@ -225,6 +225,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       if (!mounted) return;
       final cached = await widget.localPrefs.loadCatalogProductsCache();
       cached.removeWhere((x) => x.id == p.id);
+      if (!mounted) return;
       await widget.localPrefs.saveCatalogProductsCache(cached);
       if (!mounted) return;
       setState(() => _all = cached);
@@ -310,6 +311,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           right: 16,
           bottom: 16,
           child: FloatingActionButton.extended(
+            heroTag: 'fab_inventory_product_catalog',
             onPressed: _loading ? null : () => _openForm(),
             icon: const Icon(Icons.add),
             label: const Text('Nuevo producto'),

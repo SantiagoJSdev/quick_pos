@@ -504,6 +504,7 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'fab_suppliers_list',
         onPressed: () => _openForm(),
         icon: const Icon(Icons.add),
         label: const Text('Proveedor'),
