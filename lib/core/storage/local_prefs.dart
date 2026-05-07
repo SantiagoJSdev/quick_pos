@@ -56,6 +56,25 @@ class LocalPrefs {
 
   Future<void> clearStoreId() => _prefs.remove(_kStoreId);
 
+  /// Borra **toda** la persistencia local de Quick POS al desvincular el dispositivo.
+  ///
+  /// Conserva solo: [getOrCreateDeviceId] (`deviceId`) y override de URL API
+  /// ([_kApiBaseUrlOverrideV1]), para no perder identidad del terminal ni la config de backend.
+  Future<void> clearAllLocalQuickPosDataPreservingDeviceAndApiConfig() async {
+    // Sincroniza con disco (Android puede cachear lecturas hasta reload).
+    try {
+      await _prefs.reload();
+    } catch (_) {}
+    const keep = {_kDeviceId, _kApiBaseUrlOverrideV1};
+    for (final k in List<String>.from(_prefs.getKeys())) {
+      if (keep.contains(k)) continue;
+      await _prefs.remove(k);
+    }
+    try {
+      await _prefs.reload();
+    } catch (_) {}
+  }
+
   /// Modo offline forzado desde Inicio: persiste hasta que el usuario vuelva a activar online.
   Future<bool> getManualForceOffline() async =>
       _prefs.getBool(_kManualForceOfflineV1) ?? false;

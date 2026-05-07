@@ -61,7 +61,7 @@ class MainShell extends StatefulWidget {
   final SyncApi syncApi;
   final UploadsApi uploadsApi;
   final CatalogInvalidationBus catalogInvalidationBus;
-  final VoidCallback onChangeStore;
+  final Future<void> Function() onChangeStore;
   final LocalPrefs localPrefs;
 
   @override

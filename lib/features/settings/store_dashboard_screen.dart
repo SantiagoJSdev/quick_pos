@@ -32,7 +32,7 @@ class StoreDashboardScreen extends StatefulWidget {
   final String storeId;
   final StoresApi storesApi;
   final ExchangeRatesApi exchangeRatesApi;
-  final VoidCallback onChangeStore;
+  final Future<void> Function() onChangeStore;
   final LocalPrefs localPrefs;
   final bool forcedOffline;
   final bool onlineStatus;
@@ -188,7 +188,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       ),
     );
     if (ok == true && mounted) {
-      widget.onChangeStore();
+      await widget.onChangeStore();
     }
   }
 

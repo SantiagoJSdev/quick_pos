@@ -79,6 +79,16 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   @override
   void didUpdateWidget(covariant InventoryStockTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.storeId != widget.storeId) {
+      setState(() {
+        _all = [];
+        _loading = true;
+        _error = null;
+        _usingCachedData = false;
+      });
+      unawaited(_load());
+      unawaited(_loadStoreMargin());
+    }
     if (!oldWidget.shellOnline && widget.shellOnline) {
       unawaited(_load());
       unawaited(_loadStoreMargin());
@@ -153,6 +163,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     }
     try {
       final list = await widget.inventoryApi.listInventory(widget.storeId);
+      if (!mounted) return;
       await widget.localPrefs.saveInventoryCache(widget.storeId, list);
       List<CatalogProduct> catalog = const [];
       try {
@@ -160,6 +171,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           widget.storeId,
           includeInactive: false,
         );
+        if (!mounted) return;
         await widget.localPrefs.saveCatalogProductsCache(raw);
         catalog = raw.where((p) => p.active).toList();
       } catch (_) {

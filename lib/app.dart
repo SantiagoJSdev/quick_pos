@@ -83,6 +83,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
   }
 
   Future<void> _onChangeStore() async {
+    await widget.localPrefs.clearAllLocalQuickPosDataPreservingDeviceAndApiConfig();
     await widget.localPrefs.clearStoreId();
     if (!mounted) return;
     setState(() => _storeId = null);
@@ -112,6 +113,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
               localPrefs: widget.localPrefs,
             )
           : MainShell(
+              key: ValueKey<String>(_storeId!),
               storeId: _storeId!,
               storesApi: _storesApi,
               exchangeRatesApi: _exchangeRatesApi,

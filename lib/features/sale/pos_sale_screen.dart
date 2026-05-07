@@ -859,6 +859,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         widget.storeId,
         includeInactive: false,
       );
+      if (!mounted) return false;
       await widget.localPrefs.saveCatalogProductsCache(list);
       if (!mounted) return false;
       setState(() => _all = list);
@@ -892,6 +893,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       final settings = await widget.storesApi.getBusinessSettings(
         widget.storeId,
       );
+      if (!mounted) return false;
       await widget.localPrefs.saveBusinessSettingsCache(
         widget.storeId,
         _businessSettingsToCacheMap(settings),

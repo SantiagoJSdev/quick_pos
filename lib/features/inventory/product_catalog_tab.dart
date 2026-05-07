@@ -62,6 +62,14 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
   @override
   void didUpdateWidget(covariant ProductCatalogTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.storeId != widget.storeId) {
+      setState(() {
+        _all = [];
+        _loading = true;
+        _error = null;
+      });
+      unawaited(_load());
+    }
     if (!oldWidget.shellOnline && widget.shellOnline) {
       unawaited(_load());
     }
@@ -98,6 +106,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     }
     try {
       final list = await widget.productsApi.listProducts(widget.storeId);
+      if (!mounted) return;
       await widget.localPrefs.saveCatalogProductsCache(list);
       if (!mounted) return;
       setState(() {
@@ -249,6 +258,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         await widget.localPrefs.savePendingCatalogMutations(pending);
         final cached = await widget.localPrefs.loadCatalogProductsCache();
         cached.removeWhere((x) => x.id == p.id);
+        if (!mounted) return;
         await widget.localPrefs.saveCatalogProductsCache(cached);
         if (!mounted) return;
         setState(() => _all = cached);
