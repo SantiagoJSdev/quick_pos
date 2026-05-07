@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/suppliers_api.dart';
+import '../../core/idempotency/client_mutation_id.dart';
+import '../../core/models/local_supplier.dart';
 import '../../core/models/supplier.dart';
+import '../../core/network/network_errors.dart';
+import '../../core/storage/local_prefs.dart';
+import '../../core/sync/pending_supplier_mutation_entry.dart';
 
 /// Letras habituales de RIF en Venezuela (personas jurídicas suelen **J**).
 const _kRifPrefixChoices = ['J', 'G', 'V', 'E', 'P', 'C'];
@@ -13,11 +18,17 @@ class SupplierFormScreen extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.suppliersApi,
+    required this.localPrefs,
+    required this.shellOnline,
     this.existing,
   });
 
   final String storeId;
   final SuppliersApi suppliersApi;
+  final LocalPrefs localPrefs;
+
+  /// Desde shell: si es `false`, el guardado va a cola `sync/push` (`SUPPLIER_*`).
+  final bool shellOnline;
   final Supplier? existing;
 
   bool get isEdit => existing != null;
@@ -114,6 +125,81 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
     };
   }
 
+  bool get _useOfflineQueueFirst => !widget.shellOnline;
+
+  bool _shouldQueueAfterApiError(ApiError e) =>
+      widget.shellOnline && shouldTreatAsOfflineQueueable(e);
+
+  Map<String, dynamic> _syncCreateSupplierMap(String clientSupplierId) {
+    final m = <String, dynamic>{
+      'clientSupplierId': clientSupplierId,
+      'name': _name.text.trim(),
+    };
+    final p = _optOrNull(_phone);
+    final em = _optOrNull(_email);
+    final ad = _optOrNull(_address);
+    final tx = _composeTaxId();
+    final no = _optOrNull(_notes);
+    if (p != null) m['phone'] = p;
+    if (em != null) m['email'] = em;
+    if (ad != null) m['address'] = ad;
+    if (tx != null) m['taxId'] = tx;
+    if (no != null) m['notes'] = no;
+    return m;
+  }
+
+  Map<String, dynamic> _syncUpdateSupplierMap() {
+    return <String, dynamic>{
+      'supplierId': widget.existing!.id,
+      ..._editBody(),
+    };
+  }
+
+  Future<void> _enqueueSupplierMutation() async {
+    final ts = DateTime.now().toUtc().toIso8601String();
+    final opId = ClientMutationId.newId();
+    if (widget.isEdit) {
+      await widget.localPrefs.appendPendingSupplierMutation(
+        PendingSupplierMutationEntry(
+          opId: opId,
+          storeId: widget.storeId,
+          opTimestampIso: ts,
+          opType: 'SUPPLIER_UPDATE',
+          supplier: _syncUpdateSupplierMap(),
+        ),
+      );
+      await widget.localPrefs.upsertLocalSupplier(
+        LocalSupplier(id: widget.existing!.id, name: _name.text.trim()),
+      );
+    } else {
+      final clientSupplierId = ClientMutationId.newId();
+      await widget.localPrefs.appendPendingSupplierMutation(
+        PendingSupplierMutationEntry(
+          opId: opId,
+          storeId: widget.storeId,
+          opTimestampIso: ts,
+          opType: 'SUPPLIER_CREATE',
+          supplier: _syncCreateSupplierMap(clientSupplierId),
+        ),
+      );
+      await widget.localPrefs.upsertLocalSupplier(
+        LocalSupplier(id: clientSupplierId, name: _name.text.trim()),
+      );
+    }
+  }
+
+  Future<void> _saveViaApi() async {
+    if (widget.isEdit) {
+      await widget.suppliersApi.patchSupplier(
+        widget.storeId,
+        widget.existing!.id,
+        _editBody(),
+      );
+    } else {
+      await widget.suppliersApi.createSupplier(widget.storeId, _createBody());
+    }
+  }
+
   Future<void> _save() async {
     setState(() => _error = null);
     final name = _name.text.trim();
@@ -124,22 +210,54 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
 
     setState(() => _saving = true);
     try {
-      if (widget.isEdit) {
-        await widget.suppliersApi.patchSupplier(
-          widget.storeId,
-          widget.existing!.id,
-          _editBody(),
+      if (_useOfflineQueueFirst) {
+        await _enqueueSupplierMutation();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sin conexión: proveedor en cola. Se enviará con sincronización.',
+            ),
+          ),
         );
-      } else {
-        await widget.suppliersApi.createSupplier(widget.storeId, _createBody());
+        Navigator.of(context).pop(true);
+        return;
       }
+
+      await _saveViaApi();
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
+      if (_shouldQueueAfterApiError(e)) {
+        await _enqueueSupplierMutation();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Guardado en cola: se enviará al recuperar conexión.',
+            ),
+          ),
+        );
+        Navigator.of(context).pop(true);
+        return;
+      }
       setState(() => _error = e.userMessageForSupport);
     } catch (e) {
       if (!mounted) return;
+      if (shouldTreatAsOfflineQueueable(e)) {
+        await _enqueueSupplierMutation();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Guardado en cola; se enviará al sincronizar.',
+            ),
+          ),
+        );
+        Navigator.of(context).pop(true);
+        return;
+      }
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _saving = false);

@@ -471,9 +471,78 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final func = s.functionalCurrency.code;
     final next = <PosCartLine>[];
     for (final old in _cart) {
+      if (old.isByWeight) {
+        final p = _catalogByProductId(old.productId);
+        if (p != null) {
+          final docPrice = PosSalePricing.documentUnitPrice(
+            catalogPrice: p.price,
+            catalogCurrency: p.currency,
+            documentCurrencyCode: doc,
+            functionalCurrencyCode: func,
+            pair: _fxPair,
+          );
+          final funcPrice = _tryPerKgFunctionalPrice(p, func, doc);
+          if (docPrice != null &&
+              funcPrice != null &&
+              PosCartQuantity.parse(funcPrice) > 0) {
+            final qty = old.quantity;
+            next.add(
+              PosCartLine(
+                productId: p.id,
+                name: p.name,
+                sku: p.sku,
+                catalogUnitPrice: p.price,
+                catalogCurrency: p.currency,
+                documentUnitPrice: docPrice,
+                documentCurrencyCode: doc,
+                quantity: qty,
+                isByWeight: true,
+                displayGrams: old.displayGrams,
+                pricePerKgFunctional: funcPrice,
+                lineAmountFunctional:
+                    MoneyStringMath.multiply(funcPrice, qty),
+                lineAmountDocument: MoneyStringMath.multiply(docPrice, qty),
+              ),
+            );
+            continue;
+          }
+        }
+        final docPrice = PosSalePricing.documentUnitPrice(
+          catalogPrice: old.catalogUnitPrice,
+          catalogCurrency: old.catalogCurrency,
+          documentCurrencyCode: doc,
+          functionalCurrencyCode: func,
+          pair: _fxPair,
+        );
+        if (docPrice == null) continue;
+        next.add(
+          PosCartLine(
+            productId: old.productId,
+            name: old.name,
+            sku: old.sku,
+            catalogUnitPrice: old.catalogUnitPrice,
+            catalogCurrency: old.catalogCurrency,
+            documentUnitPrice: docPrice,
+            documentCurrencyCode: doc,
+            quantity: old.quantity,
+            isByWeight: true,
+            displayGrams: old.displayGrams,
+            pricePerKgFunctional: old.pricePerKgFunctional,
+            lineAmountFunctional: old.lineAmountFunctional,
+            lineAmountDocument: old.lineAmountDocument,
+          ),
+        );
+        continue;
+      }
+
+      final p = _catalogByProductId(old.productId);
+      final catalogPrice = p?.price ?? old.catalogUnitPrice;
+      final catalogCurrency = p?.currency ?? old.catalogCurrency;
+      final name = p?.name ?? old.name;
+      final sku = p?.sku ?? old.sku;
       final docPrice = PosSalePricing.documentUnitPrice(
-        catalogPrice: old.catalogUnitPrice,
-        catalogCurrency: old.catalogCurrency,
+        catalogPrice: catalogPrice,
+        catalogCurrency: catalogCurrency,
         documentCurrencyCode: doc,
         functionalCurrencyCode: func,
         pair: _fxPair,
@@ -482,14 +551,14 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       next.add(
         PosCartLine(
           productId: old.productId,
-          name: old.name,
-          sku: old.sku,
-          catalogUnitPrice: old.catalogUnitPrice,
-          catalogCurrency: old.catalogCurrency,
+          name: name,
+          sku: sku,
+          catalogUnitPrice: catalogPrice,
+          catalogCurrency: catalogCurrency,
           documentUnitPrice: docPrice,
           documentCurrencyCode: doc,
           quantity: old.quantity,
-          isByWeight: old.isByWeight,
+          isByWeight: false,
           displayGrams: old.displayGrams,
           pricePerKgFunctional: old.pricePerKgFunctional,
           lineAmountFunctional: old.lineAmountFunctional,
@@ -978,6 +1047,28 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     return null;
   }
 
+  /// Precio por kg en moneda funcional (líneas a peso), alineado con [_openWeightedAddSheet].
+  String? _tryPerKgFunctionalPrice(
+    CatalogProduct p,
+    String functionalCode,
+    String documentCode,
+  ) {
+    final func = functionalCode.toUpperCase();
+    final doc = documentCode.toUpperCase();
+    final pc = p.currency.toUpperCase();
+    if (pc == func) return p.price;
+    if (pc == doc) {
+      if (func == doc) return p.price;
+      if (_fxPair != null) {
+        final rate = _fxPair!.rate.rateQuotePerBase;
+        return _fxPair!.inverted
+            ? MoneyStringMath.multiply(p.price, rate)
+            : MoneyStringMath.divide(p.price, rate, fractionDigits: 2);
+      }
+    }
+    return null;
+  }
+
   String _gramsFromQuantity(String qty) {
     final q = PosCartQuantity.parse(qty);
     if (q <= 0) return '0';
@@ -1000,20 +1091,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       functionalCurrencyCode: func,
       pair: _fxPair,
     );
-    String? funcPrice;
-    final pc = p.currency.toUpperCase();
-    if (pc == func.toUpperCase()) {
-      funcPrice = p.price;
-    } else if (pc == doc.toUpperCase()) {
-      if (func.toUpperCase() == doc.toUpperCase()) {
-        funcPrice = p.price;
-      } else if (_fxPair != null) {
-        final rate = _fxPair!.rate.rateQuotePerBase;
-        funcPrice = _fxPair!.inverted
-            ? MoneyStringMath.multiply(p.price, rate)
-            : MoneyStringMath.divide(p.price, rate, fractionDigits: 2);
-      }
-    }
+    final funcPrice = _tryPerKgFunctionalPrice(p, func, doc);
     if (docPrice == null || funcPrice == null) {
       _showCheckoutPanelMessage(
         'No se puede abrir modo peso: revisá moneda del ticket y tasa.',

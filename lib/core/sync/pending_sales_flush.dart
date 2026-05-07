@@ -4,6 +4,7 @@ import '../api/api_error.dart';
 import '../api/sync_api.dart';
 import '../pos/sale_checkout_payload.dart';
 import '../storage/local_prefs.dart';
+import 'supplier_sync_remap.dart';
 
 /// Resultado de `sync/push` sobre la cola local (ventas, ajustes, compras, devoluciones).
 class SyncFlushResult {
@@ -29,7 +30,8 @@ class SyncFlushResult {
 /// Compatibilidad con código que aún nombre el tipo anterior.
 typedef PendingSalesFlushResult = SyncFlushResult;
 
-/// Mezcla `SALE`, `INVENTORY_ADJUST`, `PURCHASE_RECEIVE` y `SALE_RETURN` pendientes (orden por `timestamp`), hasta 200 ops.
+/// Mezcla `SALE`, `INVENTORY_ADJUST`, `PURCHASE_RECEIVE`, `SALE_RETURN` y
+/// `SUPPLIER_*` pendientes (orden por `timestamp`), hasta 200 ops.
 Future<SyncFlushResult> flushPendingSyncOpsForStore({
   required String storeId,
   required LocalPrefs prefs,
@@ -41,6 +43,7 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
   final allAdjusts = await prefs.loadPendingInventoryAdjusts();
   final allPurchases = await prefs.loadPendingPurchaseReceives();
   final allReturns = await prefs.loadPendingSaleReturns();
+  final allSupplierMutations = await prefs.loadPendingSupplierMutations();
 
   final saleQueue = allSales
       .where((e) => e.storeId == storeId)
@@ -54,11 +57,15 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
   final returnQueue = allReturns
       .where((e) => e.storeId == storeId)
       .toList(growable: false);
+  final supplierQueue = allSupplierMutations
+      .where((e) => e.storeId == storeId)
+      .toList(growable: false);
 
   if (saleQueue.isEmpty &&
       adjQueue.isEmpty &&
       purchaseQueue.isEmpty &&
-      returnQueue.isEmpty) {
+      returnQueue.isEmpty &&
+      supplierQueue.isEmpty) {
     return const SyncFlushResult(sentCount: 0, removedOpIds: []);
   }
 
@@ -97,6 +104,14 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
       'opType': 'SALE_RETURN',
       'timestamp': e.opTimestampIso,
       'payload': <String, dynamic>{'saleReturn': e.saleReturn},
+    });
+  }
+  for (final e in supplierQueue) {
+    merged.add({
+      'opId': e.opId,
+      'opType': e.opType,
+      'timestamp': e.opTimestampIso,
+      'payload': <String, dynamic>{'supplier': e.supplier},
     });
   }
   merged.sort(
@@ -140,6 +155,11 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     collectOpIds('acked');
     collectOpIds('skipped');
 
+    final ackedRaw = res['acked'];
+    final clientToServer = ackedRaw is List
+        ? supplierAckClientToServerIds(ackedRaw)
+        : <String, String>{};
+
     final remainingSales = allSales
         .where((e) => !remove.contains(e.opId))
         .toList(growable: false);
@@ -152,10 +172,25 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
     final remainingReturns = allReturns
         .where((e) => !remove.contains(e.opId))
         .toList(growable: false);
+    final remainingSuppliers = allSupplierMutations
+        .where((e) => !remove.contains(e.opId))
+        .toList(growable: false);
+
+    remapSupplierIdInPendingPurchases(
+      remainingPurchases.where((e) => e.storeId == storeId),
+      clientToServer,
+    );
+    remapSupplierIdInPendingSupplierMutations(
+      remainingSuppliers,
+      clientToServer,
+    );
+    await prefs.applySupplierProvisionalRemapToLocalCache(clientToServer);
+
     await prefs.savePendingSales(remainingSales);
     await prefs.savePendingInventoryAdjusts(remainingAdj);
     await prefs.savePendingPurchaseReceives(remainingPurchases);
     await prefs.savePendingSaleReturns(remainingReturns);
+    await prefs.savePendingSupplierMutations(remainingSuppliers);
 
     for (final e in saleQueue) {
       if (!remove.contains(e.opId)) continue;

@@ -18,6 +18,7 @@ import '../sync/pending_inventory_adjust_entry.dart';
 import '../sync/pending_purchase_receive_entry.dart';
 import '../sync/pending_sale_entry.dart';
 import '../sync/pending_sale_return_entry.dart';
+import '../sync/pending_supplier_mutation_entry.dart';
 
 const _kStoreId = 'store_id';
 const _kManualForceOfflineV1 = 'manual_force_offline_v1';
@@ -27,6 +28,7 @@ const _kPendingSalesV1 = 'pending_sales_v1';
 const _kPendingInvAdjustV1 = 'pending_inventory_adjusts_v1';
 const _kPendingPurchaseReceiveV1 = 'pending_purchase_receive_v1';
 const _kPendingSaleReturnV1 = 'pending_sale_return_v1';
+const _kPendingSupplierMutationsV1 = 'pending_supplier_mutations_v1';
 const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 const _kRecentSalesV1 = 'recent_sales_v1';
 const _kTicketDisplaySeqStateV1 = 'ticket_display_seq_state_v1';
@@ -181,6 +183,54 @@ class LocalPrefs {
   Future<void> saveLocalSuppliers(List<LocalSupplier> suppliers) async {
     final encoded = jsonEncode(suppliers.map((e) => e.toJson()).toList());
     await _prefs.setString(_kLocalSuppliers, encoded);
+  }
+
+  /// Inserta o reemplaza por [LocalSupplier.id] (p. ej. alta offline).
+  Future<void> upsertLocalSupplier(LocalSupplier s) async {
+    final list = await getLocalSuppliers();
+    final i = list.indexWhere((e) => e.id == s.id);
+    if (i >= 0) {
+      list[i] = s;
+    } else {
+      list.add(s);
+    }
+    await saveLocalSuppliers(list);
+  }
+
+  /// Quita de la caché local (p. ej. baja offline encolada).
+  Future<void> removeLocalSupplierById(String supplierId) async {
+    final id = supplierId.trim();
+    if (id.isEmpty) return;
+    final list =
+        (await getLocalSuppliers()).where((e) => e.id != id).toList();
+    await saveLocalSuppliers(list);
+  }
+
+  /// Tras `SUPPLIER_CREATE` ack en sync/push: `clientSupplierId` → id servidor.
+  Future<void> applySupplierProvisionalRemapToLocalCache(
+    Map<String, String> clientToServer,
+  ) async {
+    if (clientToServer.isEmpty) return;
+    final list = await getLocalSuppliers();
+    var changed = false;
+    final out = <LocalSupplier>[];
+    for (final e in list) {
+      final to = clientToServer[e.id];
+      if (to != null && to.isNotEmpty) {
+        changed = true;
+        out.add(LocalSupplier(id: to, name: e.name));
+      } else {
+        out.add(e);
+      }
+    }
+    final byId = <String, LocalSupplier>{};
+    for (final e in out) {
+      byId[e.id] = e;
+    }
+    final merged = byId.values.toList();
+    if (changed || merged.length != list.length) {
+      await saveLocalSuppliers(merged);
+    }
   }
 
   /// Watermark para `lastServerVersion` en `sync/push` (pull global — § SYNC_CONTRACTS).
@@ -350,13 +400,55 @@ class LocalPrefs {
     return list.where((e) => e.storeId == storeId).length;
   }
 
+  Future<List<PendingSupplierMutationEntry>>
+  loadPendingSupplierMutations() async {
+    final raw = _prefs.getString(_kPendingSupplierMutationsV1);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final out = <PendingSupplierMutationEntry>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final entry = PendingSupplierMutationEntry.tryFromJson(
+          Map<String, dynamic>.from(e),
+        );
+        if (entry != null) out.add(entry);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> savePendingSupplierMutations(
+    List<PendingSupplierMutationEntry> items,
+  ) async {
+    final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
+    await _prefs.setString(_kPendingSupplierMutationsV1, encoded);
+  }
+
+  Future<void> appendPendingSupplierMutation(
+    PendingSupplierMutationEntry entry,
+  ) async {
+    final list = await loadPendingSupplierMutations();
+    list.add(entry);
+    await savePendingSupplierMutations(list);
+  }
+
+  Future<int> countPendingSupplierMutationsForStore(String storeId) async {
+    final list = await loadPendingSupplierMutations();
+    return list.where((e) => e.storeId == storeId).length;
+  }
+
   Future<int> countPendingSyncOpsForStore(String storeId) async {
     final a = await countPendingSalesForStore(storeId);
     final b = await countPendingInventoryAdjustsForStore(storeId);
     final c = await countPendingPurchaseReceivesForStore(storeId);
     final d = await countPendingSaleReturnsForStore(storeId);
     final e = await countPendingCatalogMutationsForStore(storeId);
-    return a + b + c + d + e;
+    final f = await countPendingSupplierMutationsForStore(storeId);
+    return a + b + c + d + e + f;
   }
 
   Future<List<CatalogProduct>> loadCatalogProductsCache() async {
@@ -404,6 +496,25 @@ class LocalPrefs {
           .toList(),
     );
     await _prefs.setString(_kCatalogProductsCacheV1, encoded);
+  }
+
+  /// Reemplaza o agrega productos en la caché local sin borrar el resto (p. ej. tras PATCH en recepción).
+  ///
+  /// Si la caché está vacía no escribe nada: evita guardar un catálogo parcial antes del primer sync completo.
+  Future<void> upsertCatalogProductsInCache(
+    Iterable<CatalogProduct> updates,
+  ) async {
+    final list = updates.toList();
+    if (list.isEmpty) return;
+    final current = await loadCatalogProductsCache();
+    if (current.isEmpty) return;
+    final byId = <String, CatalogProduct>{for (final p in list) p.id: p};
+    final merged = <CatalogProduct>[];
+    for (final e in current) {
+      merged.add(byId.remove(e.id) ?? e);
+    }
+    merged.addAll(byId.values);
+    await saveCatalogProductsCache(merged);
   }
 
   Future<List<PendingCatalogMutationEntry>>

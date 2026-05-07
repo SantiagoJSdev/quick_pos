@@ -40,6 +40,7 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
       final adjusts = await widget.localPrefs.loadPendingInventoryAdjusts();
       final purchases = await widget.localPrefs.loadPendingPurchaseReceives();
       final returns = await widget.localPrefs.loadPendingSaleReturns();
+      final suppliers = await widget.localPrefs.loadPendingSupplierMutations();
 
       final rows = <_PendingOpRow>[
         ...sales
@@ -78,6 +79,15 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
                 timestampIso: e.opTimestampIso,
               ),
             ),
+        ...suppliers
+            .where((e) => e.storeId == widget.storeId)
+            .map(
+              (e) => _PendingOpRow(
+                opId: e.opId,
+                opType: e.opType,
+                timestampIso: e.opTimestampIso,
+              ),
+            ),
       ];
       rows.sort((a, b) => a.timestampIso.compareTo(b.timestampIso));
       if (!mounted) return;
@@ -98,6 +108,10 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filterType == 'ALL'
         ? _rows
+        : _filterType == 'SUPPLIER'
+        ? _rows
+              .where((r) => r.opType.startsWith('SUPPLIER_'))
+              .toList(growable: false)
         : _rows.where((r) => r.opType == _filterType).toList(growable: false);
     return Scaffold(
       appBar: AppBar(
@@ -186,6 +200,12 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
                               selected: _filterType == 'SALE_RETURN',
                               onSelected: (_) =>
                                   setState(() => _filterType = 'SALE_RETURN'),
+                            ),
+                            ChoiceChip(
+                              label: const Text('SUPPLIER_*'),
+                              selected: _filterType == 'SUPPLIER',
+                              onSelected: (_) =>
+                                  setState(() => _filterType = 'SUPPLIER'),
                             ),
                           ],
                         ),

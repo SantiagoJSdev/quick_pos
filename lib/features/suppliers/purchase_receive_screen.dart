@@ -489,6 +489,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     required String functionalCode,
   }) async {
     final failures = <String>[];
+    final refreshedProducts = <CatalogProduct>[];
     for (final draft in _lines) {
       final p = draft.product;
       final costStr = purchaseUnitCostInProductCurrency(
@@ -503,7 +504,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         continue;
       }
       try {
-        await widget.productsApi.updateProduct(
+        final updated = await widget.productsApi.updateProduct(
           widget.storeId,
           p.id,
           {
@@ -511,6 +512,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
             'applySuggestedListPrice': true,
           },
         );
+        refreshedProducts.add(updated);
       } on ApiError catch (e) {
         debugPrint('[Purchase] PATCH cost ${p.id}: ${e.userMessageForSupport}');
         failures.add(p.name);
@@ -518,6 +520,9 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         debugPrint('[Purchase] PATCH cost ${p.id}: $e');
         failures.add(p.name);
       }
+    }
+    if (refreshedProducts.isNotEmpty) {
+      await widget.localPrefs.upsertCatalogProductsInCache(refreshedProducts);
     }
     return failures;
   }
@@ -757,6 +762,8 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                                   builder: (ctx) => SupplierFormScreen(
                                     storeId: widget.storeId,
                                     suppliersApi: widget.suppliersApi,
+                                    localPrefs: widget.localPrefs,
+                                    shellOnline: _shellOnline,
                                   ),
                                 ),
                               );

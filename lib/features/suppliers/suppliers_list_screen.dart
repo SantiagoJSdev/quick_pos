@@ -10,9 +10,12 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/local_supplier.dart';
 import '../../core/models/supplier.dart';
+import '../../core/network/network_errors.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/sync/pending_supplier_mutation_entry.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'purchase_receive_screen.dart';
@@ -224,6 +227,8 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
         builder: (ctx) => SupplierFormScreen(
           storeId: widget.storeId,
           suppliersApi: widget.suppliersApi,
+          localPrefs: widget.localPrefs,
+          shellOnline: widget.shellOnline,
           existing: existing,
         ),
       ),
@@ -283,15 +288,56 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
       ),
     );
     if (go != true || !mounted) return;
+    if (!widget.shellOnline) {
+      await _deactivateQueuedOffline(s);
+      return;
+    }
     try {
       await widget.suppliersApi.deactivateSupplier(widget.storeId, s.id);
       if (mounted) await _load(reset: true);
     } on ApiError catch (e) {
       if (!mounted) return;
+      if (shouldTreatAsOfflineQueueable(e)) {
+        await _deactivateQueuedOffline(s);
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(e.userMessageForSupport)));
+    } catch (e) {
+      if (!mounted) return;
+      if (shouldTreatAsOfflineQueueable(e)) {
+        await _deactivateQueuedOffline(s);
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
     }
+  }
+
+  Future<void> _deactivateQueuedOffline(Supplier s) async {
+    final opId = ClientMutationId.newId();
+    final ts = DateTime.now().toUtc().toIso8601String();
+    await widget.localPrefs.appendPendingSupplierMutation(
+      PendingSupplierMutationEntry(
+        opId: opId,
+        storeId: widget.storeId,
+        opTimestampIso: ts,
+        opType: 'SUPPLIER_DEACTIVATE',
+        supplier: {'supplierId': s.id},
+      ),
+    );
+    await widget.localPrefs.removeLocalSupplierById(s.id);
+    if (!mounted) return;
+    setState(() {
+      _list = _list.where((x) => x.id != s.id).toList();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Baja en cola; se enviará al sincronizar.'),
+      ),
+    );
   }
 
   @override
