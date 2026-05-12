@@ -73,7 +73,7 @@ class CatalogProduct {
       currency: json['currency']?.toString() ?? 'USD',
       active: json['active'] as bool? ?? true,
       unit: json['unit'] as String?,
-      supplierId: _parseOptionalId(json['supplierId']),
+      supplierId: _supplierIdFromJson(json),
       pricingMode: _parseOptionalString(json['pricingMode']),
       marginPercentOverride: _parseOptionalString(
         json['marginPercentOverride'],
@@ -99,6 +99,46 @@ class CatalogProduct {
     if (v == null) return null;
     final s = v.toString().trim();
     return s.isEmpty ? null : s;
+  }
+
+  /// `supplierId` plano o relación `supplier: { id }` (según serialización Nest).
+  static String? _supplierIdFromJson(Map<String, dynamic> json) {
+    final flat = _parseOptionalId(json['supplierId']);
+    if (flat != null) return flat;
+    final raw = json['supplier'];
+    if (raw is Map) {
+      return _parseOptionalId(raw['id']);
+    }
+    return null;
+  }
+
+  /// Si la respuesta de PATCH/GET no trae `supplierId` pero el cliente envió uno,
+  /// conservarlo para caché y UI (evita que el desplegable “vuelva atrás”).
+  CatalogProduct withResolvedSupplierId(String? fromPatchOrRequest) {
+    final cur = supplierId?.trim();
+    if (cur != null && cur.isNotEmpty) return this;
+    final p = fromPatchOrRequest?.trim();
+    if (p == null || p.isEmpty) return this;
+    return CatalogProduct(
+      id: id,
+      sku: sku,
+      name: name,
+      barcode: barcode,
+      description: description,
+      type: type,
+      price: price,
+      cost: cost,
+      currency: currency,
+      active: active,
+      unit: unit,
+      supplierId: p,
+      pricingMode: pricingMode,
+      marginPercentOverride: marginPercentOverride,
+      effectiveMarginPercent: effectiveMarginPercent,
+      marginComputedPercent: marginComputedPercent,
+      suggestedPrice: suggestedPrice,
+      imageUrl: imageUrl,
+    );
   }
 
   /// `POST /products` — `docs/BACKEND_PRODUCT_SKU_BARCODE.md`: omitir `sku` vacío para que el backend asigne `SKU-000xxx`.

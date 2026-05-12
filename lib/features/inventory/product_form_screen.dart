@@ -561,15 +561,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       try {
         final hadLocalPhotoPick =
             _photoLocalPath != null && _photoLocalPath!.trim().isNotEmpty;
-        final updated = await widget.productsApi.updateProduct(
+        var updated = await widget.productsApi.updateProduct(
           widget.storeId,
           widget.existing!.id,
           product.toPatchBody(),
         );
-        final forCache = await _applyPhotoAfterSaveIfNeeded(
+        updated = updated.withResolvedSupplierId(product.supplierId);
+        var forCache = await _applyPhotoAfterSaveIfNeeded(
           updated,
           widget.existing!.id,
         );
+        forCache = forCache.withResolvedSupplierId(product.supplierId);
         if (!mounted) return;
         final cached = await widget.localPrefs.loadCatalogProductsCache();
         final i = cached.indexWhere((x) => x.id == widget.existing!.id);

@@ -75,7 +75,10 @@ Future<void> flushPendingCatalogMutations({
         final pid = e.productId?.trim() ?? '';
         final body = e.body;
         if (pid.isEmpty || body == null) continue;
-        final updated = await productsApi.updateProduct(storeId, pid, body);
+        var updated = await productsApi.updateProduct(storeId, pid, body);
+        updated = updated.withResolvedSupplierId(
+          body['supplierId']?.toString(),
+        );
         final i = cache.indexWhere((p) => p.id == updated.id);
         if (i >= 0) cache[i] = updated;
         catalogInvalidation?.invalidateFromLocalMutation(
