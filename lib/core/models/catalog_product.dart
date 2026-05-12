@@ -137,37 +137,45 @@ class CatalogProduct {
     return m;
   }
 
-  /// `PATCH /products/:id` — `sku` no puede ir vacío si se envía; `barcode` null limpia el código.
+  /// `PATCH /products/:id` — `sku` no puede ir vacío si se envía.
+  ///
+  /// No incluir claves con valor JSON `null` para strings opcionales: varios
+  /// backends hacen `dto.campo.trim()` y rompen con 500 si el cuerpo trae
+  /// `"campo": null`. `barcode` vacío se envía como `""` (misma intención que
+  /// limpiar sin usar `null`). Sin proveedor: se omite `supplierId`. Sin
+  /// override de margen: se omite `marginPercentOverride`.
   Map<String, dynamic> toPatchBody() {
     final skuTrim = sku.trim();
+    final nameTrim = name.trim();
+    final priceTrim = price.trim();
+    final costTrim = cost.trim();
     final m = <String, dynamic>{
       'sku': skuTrim,
-      'name': name,
-      'price': price,
-      'cost': cost,
-      'currency': currency,
-      'barcode': (barcode == null || barcode!.trim().isEmpty)
-          ? null
-          : barcode!.trim(),
+      'name': nameTrim,
+      'price': priceTrim.isEmpty ? '0' : priceTrim,
+      'cost': costTrim.isEmpty ? '0' : costTrim,
+      'currency': currency.trim(),
     };
-    if (type != null && type!.isNotEmpty) m['type'] = type;
+    final bc = barcode?.trim();
+    m['barcode'] = (bc == null || bc.isEmpty) ? '' : bc;
+    if (type != null && type!.trim().isNotEmpty) m['type'] = type!.trim();
     if (unit != null && unit!.trim().isNotEmpty) m['unit'] = unit!.trim();
     if (description != null) {
-      m['description'] = description!.trim().isEmpty
-          ? null
-          : description!.trim();
+      m['description'] = description!.trim();
     }
     final sid = supplierId?.trim();
-    m['supplierId'] = (sid == null || sid.isEmpty) ? null : sid;
+    if (sid != null && sid.isNotEmpty) {
+      m['supplierId'] = sid;
+    }
     final pm = (pricingMode?.trim().isEmpty ?? true)
         ? 'USE_STORE_DEFAULT'
         : pricingMode!.trim();
     m['pricingMode'] = pm;
     if (pm == 'USE_PRODUCT_OVERRIDE') {
       final o = marginPercentOverride?.trim();
-      m['marginPercentOverride'] = (o != null && o.isNotEmpty) ? o : null;
-    } else {
-      m['marginPercentOverride'] = null;
+      if (o != null && o.isNotEmpty) {
+        m['marginPercentOverride'] = o;
+      }
     }
     return m;
   }

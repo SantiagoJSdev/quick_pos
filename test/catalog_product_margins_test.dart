@@ -40,10 +40,10 @@ void main() {
     expect(m['marginPercentOverride'], '25');
   });
 
-  test('toPatchBody USE_STORE_DEFAULT y anula override', () {
+  test('toPatchBody USE_STORE_DEFAULT sin clave marginPercentOverride', () {
     final m = _base().toPatchBody();
     expect(m['pricingMode'], 'USE_STORE_DEFAULT');
-    expect(m['marginPercentOverride'], null);
+    expect(m.containsKey('marginPercentOverride'), false);
   });
 
   test('toPatchBody USE_PRODUCT_OVERRIDE', () {
@@ -53,6 +53,13 @@ void main() {
     ).toPatchBody();
     expect(m['pricingMode'], 'USE_PRODUCT_OVERRIDE');
     expect(m['marginPercentOverride'], '18.5');
+  });
+
+  test('toPatchBody no envía null en JSON (barcode vacío → string vacío)', () {
+    final m = _base().toPatchBody();
+    expect(m['barcode'], '');
+    expect(m.containsKey('supplierId'), false);
+    expect(m.values.where((v) => v == null), isEmpty);
   });
 
   test('fromJson lee campos M7', () {
