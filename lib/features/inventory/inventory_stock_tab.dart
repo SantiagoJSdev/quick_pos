@@ -292,7 +292,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   }
 
   Future<void> _openNewProductWithBarcode(String code) async {
-    final changed = await Navigator.of(context).push<bool>(
+    final result = await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,
@@ -307,7 +307,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (result != null && mounted) await _load();
   }
 
   Future<void> _onScanPressed() async {

@@ -152,7 +152,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     CatalogProduct? existing,
     String? prefilledBarcode,
   }) async {
-    await Navigator.of(context).push<bool>(
+    await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,

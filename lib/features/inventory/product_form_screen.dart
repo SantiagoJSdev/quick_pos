@@ -334,25 +334,24 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     );
     await widget.localPrefs.savePendingCatalogMutations(pending);
     final cached = await widget.localPrefs.loadCatalogProductsCache();
-    cached.add(
-      CatalogProduct(
-        id: localId,
-        sku: product.sku.isEmpty ? 'PENDIENTE' : product.sku,
-        name: product.name,
-        barcode: product.barcode,
-        description: product.description,
-        type: product.type,
-        price: product.price,
-        cost: product.cost,
-        currency: product.currency,
-        active: true,
-        unit: product.unit,
-        supplierId: product.supplierId,
-        pricingMode: product.pricingMode,
-        marginPercentOverride: product.marginPercentOverride,
-        imageUrl: product.imageUrl,
-      ),
+    final localRow = CatalogProduct(
+      id: localId,
+      sku: product.sku.isEmpty ? 'PENDIENTE' : product.sku,
+      name: product.name,
+      barcode: product.barcode,
+      description: product.description,
+      type: product.type,
+      price: product.price,
+      cost: product.cost,
+      currency: product.currency,
+      active: true,
+      unit: product.unit,
+      supplierId: product.supplierId,
+      pricingMode: product.pricingMode,
+      marginPercentOverride: product.marginPercentOverride,
+      imageUrl: product.imageUrl,
     );
+    cached.add(localRow);
     await widget.localPrefs.saveCatalogProductsCache(cached);
     await _queuePhotoUploadIfAny(localId);
     widget.catalogInvalidationBus?.invalidateFromLocalMutation(
@@ -368,7 +367,31 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         ),
       ),
     );
-    Navigator.of(context).pop(true);
+    Navigator.of(context).pop(localRow);
+  }
+
+  /// Copia local usada al encolar edición offline (misma forma que en caché).
+  CatalogProduct _catalogSnapshotForQueuedEdit(CatalogProduct product) {
+    return CatalogProduct(
+      id: widget.existing!.id,
+      sku: product.sku,
+      name: product.name,
+      barcode: product.barcode,
+      description: product.description,
+      type: product.type,
+      price: product.price,
+      cost: product.cost,
+      currency: product.currency,
+      active: true,
+      unit: product.unit,
+      supplierId: product.supplierId,
+      pricingMode: product.pricingMode,
+      marginPercentOverride: product.marginPercentOverride,
+      effectiveMarginPercent: product.effectiveMarginPercent,
+      marginComputedPercent: product.marginComputedPercent,
+      suggestedPrice: product.suggestedPrice,
+      imageUrl: product.imageUrl,
+    );
   }
 
   /// Tras guardar la ficha online: sube e asocia la foto de inmediato si hay [uploadsApi].
@@ -611,7 +634,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
           );
         }
-        Navigator.of(context).pop(true);
+        Navigator.of(context).pop(forCache);
       } on ApiError catch (e) {
         if (!mounted) return;
         if (e.isLikelyTransportFailure) {
@@ -628,28 +651,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           );
           await widget.localPrefs.savePendingCatalogMutations(pending);
           final cached = await widget.localPrefs.loadCatalogProductsCache();
+          final snapshot = _catalogSnapshotForQueuedEdit(product);
           final i = cached.indexWhere((x) => x.id == widget.existing!.id);
           if (i >= 0) {
-            cached[i] = CatalogProduct(
-              id: widget.existing!.id,
-              sku: product.sku,
-              name: product.name,
-              barcode: product.barcode,
-              description: product.description,
-              type: product.type,
-              price: product.price,
-              cost: product.cost,
-              currency: product.currency,
-              active: true,
-              unit: product.unit,
-              supplierId: product.supplierId,
-              pricingMode: product.pricingMode,
-              marginPercentOverride: product.marginPercentOverride,
-              effectiveMarginPercent: product.effectiveMarginPercent,
-              marginComputedPercent: product.marginComputedPercent,
-              suggestedPrice: product.suggestedPrice,
-              imageUrl: product.imageUrl,
-            );
+            cached[i] = snapshot;
           }
           await widget.localPrefs.saveCatalogProductsCache(cached);
           await _queuePhotoUploadIfAny(widget.existing!.id);
@@ -659,7 +664,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               content: Text('Sin conexión: edición guardada en cola.'),
             ),
           );
-          Navigator.of(context).pop(true);
+          Navigator.of(context).pop(snapshot);
           return;
         }
         setState(() => _error = e.userMessageForSupport);
@@ -679,28 +684,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           );
           await widget.localPrefs.savePendingCatalogMutations(pending);
           final cached = await widget.localPrefs.loadCatalogProductsCache();
+          final snapshot = _catalogSnapshotForQueuedEdit(product);
           final i = cached.indexWhere((x) => x.id == widget.existing!.id);
           if (i >= 0) {
-            cached[i] = CatalogProduct(
-              id: widget.existing!.id,
-              sku: product.sku,
-              name: product.name,
-              barcode: product.barcode,
-              description: product.description,
-              type: product.type,
-              price: product.price,
-              cost: product.cost,
-              currency: product.currency,
-              active: true,
-              unit: product.unit,
-              supplierId: product.supplierId,
-              pricingMode: product.pricingMode,
-              marginPercentOverride: product.marginPercentOverride,
-              effectiveMarginPercent: product.effectiveMarginPercent,
-              marginComputedPercent: product.marginComputedPercent,
-              suggestedPrice: product.suggestedPrice,
-              imageUrl: product.imageUrl,
-            );
+            cached[i] = snapshot;
           }
           await widget.localPrefs.saveCatalogProductsCache(cached);
           await _queuePhotoUploadIfAny(widget.existing!.id);
@@ -710,7 +697,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               content: Text('Sin conexión: edición guardada en cola.'),
             ),
           );
-          Navigator.of(context).pop(true);
+          Navigator.of(context).pop(snapshot);
           return;
         }
         setState(
@@ -796,7 +783,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
           ),
         );
-        Navigator.of(context).pop(true);
+        Navigator.of(context).pop(created);
       } on ApiError catch (e) {
         if (!mounted) return;
         if (e.isLikelyTransportFailure) {

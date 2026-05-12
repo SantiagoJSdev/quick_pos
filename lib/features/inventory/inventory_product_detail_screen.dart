@@ -182,7 +182,7 @@ class _InventoryProductDetailScreenState
   }
 
   Future<void> _openEditProduct(CatalogProduct product) async {
-    final changed = await Navigator.of(context).push<bool>(
+    final result = await Navigator.of(context).push<CatalogProduct?>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
           storeId: widget.storeId,
@@ -197,7 +197,38 @@ class _InventoryProductDetailScreenState
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (!mounted) return;
+    if (result != null) {
+      setState(() => _catalogProduct = result);
+      await _refreshInventoryLineAndMovementsOnly();
+    }
+  }
+
+  /// Tras editar ficha: no volver a [getProduct] de inmediato (a veces viene
+  /// stale); el formulario ya devolvió el [CatalogProduct] actualizado.
+  Future<void> _refreshInventoryLineAndMovementsOnly() async {
+    final pid = widget._productId;
+    if (pid.isEmpty || !widget.shellOnline) return;
+    try {
+      final detailFuture = widget.inventoryApi.getInventoryLine(
+        widget.storeId,
+        pid,
+      );
+      final movFuture = widget.inventoryApi.listMovements(
+        widget.storeId,
+        productId: pid,
+        limit: 100,
+      );
+      final detail = await detailFuture;
+      final mov = await movFuture;
+      if (!mounted) return;
+      setState(() {
+        _line = detail ?? _line;
+        _movements = mov;
+      });
+    } catch (_) {
+      // Secundario: el producto ya quedó actualizado desde el pop del formulario.
+    }
   }
 
   String _formatWhen(DateTime? t) {
