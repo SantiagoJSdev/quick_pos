@@ -2008,8 +2008,8 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             children: [
               if (line.isByWeight && line.displayGrams != null)
                 _posCartDetailRow('Peso', '${line.displayGrams} g'),
-              _posCartDetailRow('Unitario $functionalCode', unitFunctional),
-              _posCartDetailRow('Unitario $docC', line.documentUnitPrice),
+              _posCartDetailRow('Costo $functionalCode', unitFunctional),
+              _posCartDetailRow('Costo $docC', line.documentUnitPrice),
               _posCartDetailRow(
                 'Total $functionalCode',
                 '$lineTotalFunctional $functionalCode',
