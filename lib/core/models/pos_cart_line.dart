@@ -34,6 +34,40 @@ class PosCartLine {
   final String? lineAmountFunctional;
   final String? lineAmountDocument;
 
-  String get lineTotalDocument =>
-      MoneyStringMath.multiply(documentUnitPrice, quantity);
+  static bool _positiveDecimal(String? s) {
+    if (s == null) return false;
+    final t = s.trim().replaceAll(',', '.');
+    if (t.isEmpty) return false;
+    final v = double.tryParse(t) ?? 0;
+    return v > 0;
+  }
+
+  /// Total línea en moneda documento. Por peso usa el monto fijado en el sheet
+  /// ([lineAmountDocument]); si no, `precio unitario doc. × cantidad`.
+  String get lineTotalDocument {
+    if (isByWeight && _positiveDecimal(lineAmountDocument)) {
+      return MoneyStringMath.multiply(
+        '1',
+        lineAmountDocument!.trim(),
+        fractionDigits: 2,
+      );
+    }
+    return MoneyStringMath.multiply(documentUnitPrice, quantity);
+  }
+
+  /// `POST /sales` `lines[].price`: por kg ajustado para que `quantity × price`
+  /// coincida con [lineTotalDocument] cuando hay monto por peso acordado.
+  String get documentUnitPriceForCheckout {
+    if (isByWeight && _positiveDecimal(lineAmountDocument)) {
+      final total = lineAmountDocument!.trim();
+      final q = quantity.trim();
+      if (q.isNotEmpty) {
+        final qv = double.tryParse(q.replaceAll(',', '.')) ?? 0;
+        if (qv > 0) {
+          return MoneyStringMath.divide(total, q, fractionDigits: 10);
+        }
+      }
+    }
+    return documentUnitPrice;
+  }
 }

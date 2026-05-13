@@ -1135,7 +1135,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         catalogCurrency: p.currency,
         documentUnitPrice: docPrice,
         documentCurrencyCode: doc,
-        quantity: PosCartQuantity.normalize(res.quantityKg),
+        quantity: PosCartQuantity.normalizeWeightKg(res.quantityKg),
         isByWeight: true,
         displayGrams: res.displayGrams,
         pricePerKgFunctional: funcPrice,

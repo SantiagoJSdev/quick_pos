@@ -289,6 +289,11 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
   String? _error;
   bool _syncing = false;
 
+  /// Evita que un `onChanged` de otro campo dispare [_recompute] mientras
+  /// sincronizamos los tres TextField (si no, p. ej. gramos a 1 decimal
+  /// “363.6” recalcula Bs y da 1015.90 en vez de 2×508=1016).
+  bool _updatingControllers = false;
+
   @override
   void initState() {
     super.initState();
@@ -312,52 +317,93 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
 
   String _fmt(double v, int fd) => v.toStringAsFixed(fd);
 
+  static String _normDecimal(String raw) => raw.trim().replaceAll(',', '.');
+
   bool get _priceValid =>
       _p(widget.pricePerKgFunctional) > 0 && _p(widget.pricePerKgDocument) > 0;
+
+  void _setControllersSynced({
+    required String gramsText,
+    required String docText,
+    required String funcText,
+  }) {
+    _updatingControllers = true;
+    try {
+      _gramsCtrl.text = gramsText;
+      _docCtrl.text = docText;
+      _funcCtrl.text = funcText;
+    } finally {
+      _updatingControllers = false;
+    }
+  }
 
   void _recompute({
     required PosWeightInputMode from,
     required String userInput,
   }) {
-    if (_syncing) return;
+    if (_syncing || _updatingControllers) return;
     _syncing = true;
-    final priceFunc = _p(widget.pricePerKgFunctional);
-    final fx = _p(widget.fxRateDocumentPerFunctional);
-    final input = _p(userInput);
-    var grams = 0.0;
-    var kg = 0.0;
-    var amountFunc = 0.0;
-    var amountDoc = 0.0;
-    if (priceFunc > 0 && fx > 0 && input > 0) {
-      if (from == PosWeightInputMode.grams) {
-        grams = input;
-        kg = grams / 1000;
-        amountFunc = kg * priceFunc;
-        amountDoc = amountFunc * fx;
-      } else if (from == PosWeightInputMode.documentAmount) {
-        amountDoc = input;
-        amountFunc = amountDoc / fx;
-        kg = amountFunc / priceFunc;
-        grams = kg * 1000;
-      } else {
-        amountFunc = input;
-        amountDoc = amountFunc * fx;
-        kg = amountFunc / priceFunc;
-        grams = kg * 1000;
-      }
+    final priceF = widget.pricePerKgFunctional.trim();
+    final fx = widget.fxRateDocumentPerFunctional.trim();
+    final preserved = userInput.trim().replaceAll(',', '.');
+    final raw = preserved;
+    final input = _p(raw);
+    var gramsText = '';
+    var docText = '';
+    var funcText = '';
+
+    void applyPartial() {
+      _setControllersSynced(
+        gramsText: from == PosWeightInputMode.grams ? preserved : '',
+        docText: from == PosWeightInputMode.documentAmount ? preserved : '',
+        funcText: from == PosWeightInputMode.functionalAmount ? preserved : '',
+      );
     }
-    _gramsCtrl.text = grams > 0 ? _fmt(grams, 1) : '';
-    _docCtrl.text = amountDoc > 0 ? _fmt(amountDoc, 2) : '';
-    _funcCtrl.text = amountFunc > 0 ? _fmt(amountFunc, 2) : '';
+
+    if (raw.isEmpty || _p(priceF) <= 0 || _p(fx) <= 0) {
+      applyPartial();
+      _syncing = false;
+      setState(() {});
+      return;
+    }
+    if (input <= 0) {
+      applyPartial();
+      _syncing = false;
+      setState(() {});
+      return;
+    }
+
+    if (from == PosWeightInputMode.grams) {
+      gramsText = preserved;
+      final kgStr = MoneyStringMath.divide(raw, '1000', fractionDigits: 10);
+      funcText = MoneyStringMath.multiply(kgStr, priceF, fractionDigits: 6);
+      docText = MoneyStringMath.multiply(funcText, fx, fractionDigits: 2);
+    } else if (from == PosWeightInputMode.documentAmount) {
+      docText = preserved;
+      funcText = MoneyStringMath.divide(raw, fx, fractionDigits: 6);
+      final kgStr = MoneyStringMath.divide(funcText, priceF, fractionDigits: 10);
+      final grams = _p(MoneyStringMath.multiply(kgStr, '1000', fractionDigits: 4));
+      gramsText = grams > 0 ? _fmt(grams, 2) : '';
+    } else {
+      funcText = preserved;
+      docText = MoneyStringMath.multiply(raw, fx, fractionDigits: 2);
+      final kgStr = MoneyStringMath.divide(raw, priceF, fractionDigits: 10);
+      final grams = _p(MoneyStringMath.multiply(kgStr, '1000', fractionDigits: 4));
+      gramsText = grams > 0 ? _fmt(grams, 2) : '';
+    }
+    _setControllersSynced(
+      gramsText: gramsText,
+      docText: docText,
+      funcText: funcText,
+    );
     _syncing = false;
     setState(() {});
   }
 
   String get _quantityKg {
-    final grams = _p(_gramsCtrl.text);
-    return grams <= 0
-        ? '0'
-        : MoneyStringMath.divide(_fmt(grams, 4), '1000', fractionDigits: 4);
+    final raw = _normDecimal(_gramsCtrl.text);
+    if (raw.isEmpty || _p(raw) <= 0) return '0';
+    return MoneyStringMath.divide(raw, '1000', fractionDigits: 6);
   }
 
   void _confirm() {
@@ -366,22 +412,74 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
       setState(() => _error = 'Precio por kg no válido para este producto.');
       return;
     }
-    final grams = _p(_gramsCtrl.text);
-    final doc = _p(_docCtrl.text);
-    final func = _p(_funcCtrl.text);
-    if (grams <= 0 || doc <= 0 || func <= 0) {
-      setState(
-        () => _error = 'Ingresá un valor mayor que 0 en el modo activo.',
-      );
-      return;
+    final priceF = widget.pricePerKgFunctional.trim();
+    final fx = widget.fxRateDocumentPerFunctional.trim();
+    late final String lineFunc;
+    late final String lineDoc;
+    late final String qtyKg;
+    late final String displayG;
+    switch (_mode) {
+      case PosWeightInputMode.functionalAmount:
+        lineFunc = MoneyStringMath.multiply(
+          '1',
+          _normDecimal(_funcCtrl.text),
+          fractionDigits: 6,
+        );
+        if (_p(lineFunc) <= 0) {
+          setState(
+            () => _error = 'Ingresá un monto funcional mayor que 0.',
+          );
+          return;
+        }
+        lineDoc = MoneyStringMath.multiply(lineFunc, fx, fractionDigits: 2);
+        qtyKg = MoneyStringMath.divide(lineFunc, priceF, fractionDigits: 6);
+        displayG = _fmt(
+          _p(MoneyStringMath.multiply(qtyKg, '1000', fractionDigits: 4)),
+          1,
+        );
+        break;
+      case PosWeightInputMode.documentAmount:
+        lineDoc = MoneyStringMath.multiply(
+          '1',
+          _normDecimal(_docCtrl.text),
+          fractionDigits: 2,
+        );
+        if (_p(lineDoc) <= 0) {
+          setState(
+            () => _error = 'Ingresá un monto en moneda documento mayor que 0.',
+          );
+          return;
+        }
+        lineFunc = MoneyStringMath.divide(lineDoc, fx, fractionDigits: 6);
+        qtyKg = MoneyStringMath.divide(lineFunc, priceF, fractionDigits: 6);
+        displayG = _fmt(
+          _p(MoneyStringMath.multiply(qtyKg, '1000', fractionDigits: 4)),
+          1,
+        );
+        break;
+      case PosWeightInputMode.grams:
+        final gRaw = _normDecimal(_gramsCtrl.text);
+        if (gRaw.isEmpty || _p(gRaw) <= 0) {
+          setState(() => _error = 'Ingresá un peso en gramos mayor que 0.');
+          return;
+        }
+        displayG = _fmt(_p(gRaw), 1);
+        qtyKg = MoneyStringMath.divide(gRaw, '1000', fractionDigits: 6);
+        lineFunc = MoneyStringMath.multiply(qtyKg, priceF, fractionDigits: 6);
+        lineDoc = MoneyStringMath.multiply(lineFunc, fx, fractionDigits: 2);
+        break;
     }
     Navigator.pop(
       context,
       PosWeightedAddResult(
-        quantityKg: _quantityKg,
-        displayGrams: _fmt(grams, 1),
-        lineAmountFunctional: _fmt(func, 2),
-        lineAmountDocument: _fmt(doc, 2),
+        quantityKg: qtyKg,
+        displayGrams: displayG,
+        lineAmountFunctional: MoneyStringMath.multiply(
+          '1',
+          lineFunc,
+          fractionDigits: 2,
+        ),
+        lineAmountDocument: lineDoc,
       ),
     );
   }
@@ -471,8 +569,10 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                onChanged: (v) =>
-                    _recompute(from: PosWeightInputMode.grams, userInput: v),
+                onChanged: (v) {
+                  if (_updatingControllers) return;
+                  _recompute(from: PosWeightInputMode.grams, userInput: v);
+                },
                 decoration: const InputDecoration(
                   labelText: 'Peso (g)',
                   border: OutlineInputBorder(),
@@ -484,10 +584,13 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                onChanged: (v) => _recompute(
-                  from: PosWeightInputMode.documentAmount,
-                  userInput: v,
-                ),
+                onChanged: (v) {
+                  if (_updatingControllers) return;
+                  _recompute(
+                    from: PosWeightInputMode.documentAmount,
+                    userInput: v,
+                  );
+                },
                 decoration: InputDecoration(
                   labelText: 'Monto ${widget.documentCode}',
                   border: const OutlineInputBorder(),
@@ -499,10 +602,13 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                onChanged: (v) => _recompute(
-                  from: PosWeightInputMode.functionalAmount,
-                  userInput: v,
-                ),
+                onChanged: (v) {
+                  if (_updatingControllers) return;
+                  _recompute(
+                    from: PosWeightInputMode.functionalAmount,
+                    userInput: v,
+                  );
+                },
                 decoration: InputDecoration(
                   labelText: 'Monto ${widget.functionalCode}',
                   border: const OutlineInputBorder(),

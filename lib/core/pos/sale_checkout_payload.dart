@@ -78,7 +78,7 @@ class SaleCheckoutPayload {
             (l) => <String, dynamic>{
               'productId': l.productId.toString(),
               'quantity': l.quantity.toString(),
-              'price': l.documentUnitPrice.toString(),
+              'price': l.documentUnitPriceForCheckout,
               'discount': '0',
             },
           )

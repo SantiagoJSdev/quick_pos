@@ -223,7 +223,7 @@ class HeldTicket {
             productId: l.productId,
             nameSnapshot: l.name,
             quantity: l.quantity,
-            price: l.documentUnitPrice,
+            price: l.documentUnitPriceForCheckout,
             currency: l.documentCurrencyCode,
             catalogUnitPrice: l.catalogUnitPrice,
             catalogCurrency: l.catalogCurrency,
@@ -236,7 +236,7 @@ class HeldTicket {
         )
         .toList();
     final subtotal = MoneyStringMath.sum(
-      lines.map((l) => MoneyStringMath.multiply(l.price, l.quantity)),
+      cartLines.map((l) => l.lineTotalDocument),
     );
     final totals = <String, dynamic>{
       'subtotal': subtotal,
