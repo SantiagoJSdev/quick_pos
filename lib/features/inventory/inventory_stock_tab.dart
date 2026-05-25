@@ -9,6 +9,8 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/catalog/pending_catalog_mutation_entry.dart';
+import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/inventory_line.dart';
@@ -165,7 +167,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
       final list = await widget.inventoryApi.listInventory(widget.storeId);
       if (!mounted) return;
       await widget.localPrefs.saveInventoryCache(widget.storeId, list);
-      List<CatalogProduct> catalog = const [];
+      List<CatalogProduct> catalogRaw = const [];
       try {
         final raw = await widget.productsApi.listProducts(
           widget.storeId,
@@ -173,32 +175,11 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         );
         if (!mounted) return;
         await widget.localPrefs.saveCatalogProductsCache(raw);
-        catalog = raw.where((p) => p.active).toList();
+        catalogRaw = raw;
       } catch (_) {
-        final cachedCatalog = await widget.localPrefs
-            .loadCatalogProductsCache();
-        catalog = cachedCatalog.where((p) => p.active).toList();
+        catalogRaw = await widget.localPrefs.loadCatalogProductsCache();
       }
-      final inInventory = list.map((l) => l.productId).toSet();
-      final synthetic = <InventoryLine>[];
-      for (final p in catalog) {
-        if (!inInventory.contains(p.id)) {
-          synthetic.add(
-            InventoryLine.syntheticZeroStock(
-              productId: p.id,
-              sku: p.sku,
-              name: p.name,
-              barcode: p.barcode,
-            ),
-          );
-        }
-      }
-      final merged = [...list, ...synthetic]
-        ..sort(
-          (a, b) => a.displayName.toLowerCase().compareTo(
-            b.displayName.toLowerCase(),
-          ),
-        );
+      final merged = _mergeInventoryWithCatalog(list, catalogRaw);
       if (!mounted) return;
       setState(() {
         _all = merged;
@@ -256,15 +237,39 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     }
   }
 
+  /// `productId` de la línea o, si falta, el id embebido en [InventoryLine.product].
+  String _lineProductId(InventoryLine l) {
+    final fromField = l.productId.trim();
+    if (fromField.isNotEmpty) return fromField;
+    return (l.product?.id ?? '').trim();
+  }
+
+  /// Solo líneas cuyo producto sigue en catálogo **activo** más filas sintéticas
+  /// (catálogo sin movimientos en inventario). El API de inventario puede seguir
+  /// devolviendo stock de productos dados de baja en catálogo; no los listamos acá.
   List<InventoryLine> _mergeInventoryWithCatalog(
     List<InventoryLine> list,
     List<CatalogProduct> catalogRaw,
   ) {
     final catalog = catalogRaw.where((p) => p.active).toList();
-    final inInventory = list.map((l) => l.productId).toSet();
+    final activeIds = catalog
+        .map((p) => p.id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final filteredList = list.where((l) {
+      final pid = _lineProductId(l);
+      if (pid.isEmpty) return false;
+      return activeIds.contains(pid);
+    }).toList();
+    final inInventory = filteredList
+        .map(_lineProductId)
+        .where((id) => id.isNotEmpty)
+        .toSet();
     final synthetic = <InventoryLine>[];
     for (final p in catalog) {
-      if (!inInventory.contains(p.id)) {
+      final pid = p.id.trim();
+      if (pid.isEmpty) continue;
+      if (!inInventory.contains(pid)) {
         synthetic.add(
           InventoryLine.syntheticZeroStock(
             productId: p.id,
@@ -275,7 +280,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
         );
       }
     }
-    return [...list, ...synthetic]..sort(
+    return [...filteredList, ...synthetic]..sort(
       (a, b) =>
           a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
     );
@@ -336,6 +341,138 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _openEditForLine(InventoryLine line) async {
+    final pid = line.productId.trim().isNotEmpty
+        ? line.productId.trim()
+        : line.product?.id.trim() ?? '';
+    if (pid.isEmpty) return;
+    CatalogProduct? p;
+    if (widget.shellOnline) {
+      p = await widget.productsApi.getProduct(widget.storeId, pid);
+    }
+    if (p == null) {
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
+      for (final x in cached) {
+        if (x.id == pid) {
+          p = x;
+          break;
+        }
+      }
+    }
+    if (!mounted) return;
+    if (p == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se encontró la ficha del producto. '
+            'Conectate o abrilo desde la pestaña Catálogo.',
+          ),
+        ),
+      );
+      return;
+    }
+    final result = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute(
+        builder: (ctx) => ProductFormScreen(
+          storeId: widget.storeId,
+          productsApi: widget.productsApi,
+          suppliersApi: widget.suppliersApi,
+          localPrefs: widget.localPrefs,
+          storesApi: widget.storesApi,
+          catalogInvalidationBus: widget.catalogInvalidationBus,
+          uploadsApi: widget.uploadsApi,
+          shellOnline: widget.shellOnline,
+          existing: p,
+        ),
+      ),
+    );
+    if (result != null && mounted) await _load();
+  }
+
+  Future<void> _confirmDeactivateLine(InventoryLine line) async {
+    final name = line.displayName;
+    final pid = line.productId.trim().isNotEmpty
+        ? line.productId.trim()
+        : line.product?.id.trim() ?? '';
+    if (pid.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar producto'),
+        content: Text(
+          '¿Desactivar "$name"?\n\n'
+          'No se borra del historial de ventas; deja de aparecer en catálogo activo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.productsApi.deactivateProduct(widget.storeId, pid);
+      if (!mounted) return;
+      final cached = await widget.localPrefs.loadCatalogProductsCache();
+      cached.removeWhere((x) => x.id == pid);
+      if (!mounted) return;
+      await widget.localPrefs.saveCatalogProductsCache(cached);
+      if (!mounted) return;
+      widget.catalogInvalidationBus.invalidateFromLocalMutation(
+        productIds: {pid},
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Producto eliminado del catálogo activo')),
+      );
+      if (mounted) await _load();
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      if (e.isLikelyTransportFailure) {
+        final pending = await widget.localPrefs.loadPendingCatalogMutations();
+        pending.add(
+          PendingCatalogMutationEntry(
+            opId: ClientMutationId.newId(),
+            storeId: widget.storeId,
+            type: PendingCatalogMutationEntry.typeDeactivate,
+            createdAtIso: DateTime.now().toUtc().toIso8601String(),
+            productId: pid,
+          ),
+        );
+        await widget.localPrefs.savePendingCatalogMutations(pending);
+        final cached = await widget.localPrefs.loadCatalogProductsCache();
+        cached.removeWhere((x) => x.id == pid);
+        if (!mounted) return;
+        await widget.localPrefs.saveCatalogProductsCache(cached);
+        if (!mounted) return;
+        widget.catalogInvalidationBus.invalidateFromLocalMutation(
+          productIds: {pid},
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sin conexión: eliminación en cola para sincronizar.',
+            ),
+          ),
+        );
+        if (mounted) await _load();
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.userMessageForSupport)));
+      }
     }
   }
 
@@ -567,19 +704,36 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
             );
             if (mounted) await _load();
           },
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                line.quantity,
-                style: Theme.of(context).textTheme.titleMedium,
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    line.quantity,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(
+                    synth ? 'catálogo' : 'disp.',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-              Text(
-                synth ? 'catálogo' : 'disp.',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Editar producto',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => unawaited(_openEditForLine(line)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Eliminar del catálogo',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => unawaited(_confirmDeactivateLine(line)),
               ),
             ],
           ),

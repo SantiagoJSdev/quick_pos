@@ -1111,7 +1111,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final fxDocPerFunc = func.toUpperCase() == doc.toUpperCase()
         ? '1'
         : MoneyStringMath.divide(docPrice, funcPrice, fractionDigits: 6);
-    final res = await showPosWeightedAddSheet(
+    final outcome = await showPosWeightedAddSheet(
       context,
       productName: p.name,
       functionalCode: func,
@@ -1122,8 +1122,20 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       initialGrams:
           existing?.displayGrams ??
           _gramsFromQuantity(existing?.quantity ?? '0'),
+      allowRemoveFromCart: existing != null,
     );
-    if (!mounted || res == null) return;
+    if (!mounted || outcome == null) return;
+    if (outcome is PosWeightedSheetRemoved) {
+      _invalidateCheckoutIdempotency();
+      setState(() {
+        _cart.removeWhere((l) => l.productId == p.id);
+      });
+      _search.clear();
+      _searchFocus.unfocus();
+      _showCartFeedback('${p.name} quitado del ticket');
+      return;
+    }
+    final res = (outcome as PosWeightedSheetAdded).result;
     _invalidateCheckoutIdempotency();
     final i = _cart.indexWhere((l) => l.productId == p.id);
     setState(() {

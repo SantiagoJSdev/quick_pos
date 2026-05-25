@@ -214,8 +214,11 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Desactivar producto'),
-        content: Text('¿Desactivar "${p.name}"? No se borra del historial.'),
+        title: const Text('Eliminar producto'),
+        content: Text(
+          '¿Desactivar "${p.name}"?\n\n'
+          'No se borra del historial de ventas; deja de aparecer en catálogo activo.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -223,7 +226,11 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Desactivar'),
+            style: FilledButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Eliminar'),
           ),
         ],
       ),
@@ -237,10 +244,13 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
       if (!mounted) return;
       await widget.localPrefs.saveCatalogProductsCache(cached);
       if (!mounted) return;
+      widget.catalogInvalidationBus.invalidateFromLocalMutation(
+        productIds: {p.id},
+      );
       setState(() => _all = cached);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Producto desactivado')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Producto eliminado del catálogo activo')),
+      );
       unawaited(_load());
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -261,11 +271,14 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
         if (!mounted) return;
         await widget.localPrefs.saveCatalogProductsCache(cached);
         if (!mounted) return;
+        widget.catalogInvalidationBus.invalidateFromLocalMutation(
+          productIds: {p.id},
+        );
         setState(() => _all = cached);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Sin conexión: desactivación en cola para sincronizar.',
+              'Sin conexión: eliminación en cola para sincronizar.',
             ),
           ),
         );
@@ -449,17 +462,21 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
             children: subChildren,
           ),
           isThreeLine: subChildren.length >= 2,
-          onTap: () => _openForm(existing: p),
-          trailing: PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'edit') _openForm(existing: p);
-              if (v == 'deactivate') _confirmDeactivate(p);
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(value: 'edit', child: Text('Editar')),
-              const PopupMenuItem(
-                value: 'deactivate',
-                child: Text('Desactivar'),
+          onTap: () => unawaited(_openForm(existing: p)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Editar',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => unawaited(_openForm(existing: p)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Eliminar del catálogo',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => unawaited(_confirmDeactivate(p)),
               ),
             ],
           ),

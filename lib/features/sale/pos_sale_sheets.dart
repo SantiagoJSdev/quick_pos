@@ -232,7 +232,21 @@ class PosWeightedAddResult {
   final String lineAmountDocument;
 }
 
-Future<PosWeightedAddResult?> showPosWeightedAddSheet(
+/// Resultado del sheet de peso: agregar/actualizar cantidad o quitar del ticket.
+sealed class PosWeightedSheetOutcome {
+  const PosWeightedSheetOutcome();
+}
+
+final class PosWeightedSheetAdded extends PosWeightedSheetOutcome {
+  const PosWeightedSheetAdded(this.result);
+  final PosWeightedAddResult result;
+}
+
+final class PosWeightedSheetRemoved extends PosWeightedSheetOutcome {
+  const PosWeightedSheetRemoved();
+}
+
+Future<PosWeightedSheetOutcome?> showPosWeightedAddSheet(
   BuildContext context, {
   required String productName,
   required String functionalCode,
@@ -241,8 +255,10 @@ Future<PosWeightedAddResult?> showPosWeightedAddSheet(
   required String pricePerKgDocument,
   required String fxRateDocumentPerFunctional,
   String? initialGrams,
+  /// Si true (línea ya en el carrito), muestra «Quitar del ticket».
+  bool allowRemoveFromCart = false,
 }) {
-  return showModalBottomSheet<PosWeightedAddResult>(
+  return showModalBottomSheet<PosWeightedSheetOutcome>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
@@ -254,6 +270,7 @@ Future<PosWeightedAddResult?> showPosWeightedAddSheet(
       pricePerKgDocument: pricePerKgDocument,
       fxRateDocumentPerFunctional: fxRateDocumentPerFunctional,
       initialGrams: initialGrams,
+      allowRemoveFromCart: allowRemoveFromCart,
     ),
   );
 }
@@ -267,6 +284,7 @@ class _WeightedAddSheet extends StatefulWidget {
     required this.pricePerKgDocument,
     required this.fxRateDocumentPerFunctional,
     this.initialGrams,
+    this.allowRemoveFromCart = false,
   });
 
   final String productName;
@@ -276,6 +294,7 @@ class _WeightedAddSheet extends StatefulWidget {
   final String pricePerKgDocument;
   final String fxRateDocumentPerFunctional;
   final String? initialGrams;
+  final bool allowRemoveFromCart;
 
   @override
   State<_WeightedAddSheet> createState() => _WeightedAddSheetState();
@@ -471,15 +490,17 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
     }
     Navigator.pop(
       context,
-      PosWeightedAddResult(
-        quantityKg: qtyKg,
-        displayGrams: displayG,
-        lineAmountFunctional: MoneyStringMath.multiply(
-          '1',
-          lineFunc,
-          fractionDigits: 2,
+      PosWeightedSheetAdded(
+        PosWeightedAddResult(
+          quantityKg: qtyKg,
+          displayGrams: displayG,
+          lineAmountFunctional: MoneyStringMath.multiply(
+            '1',
+            lineFunc,
+            fractionDigits: 2,
+          ),
+          lineAmountDocument: lineDoc,
         ),
-        lineAmountDocument: lineDoc,
       ),
     );
   }
@@ -656,6 +677,24 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
               ),
             ],
             const SizedBox(height: 12),
+            if (widget.allowRemoveFromCart) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(
+                    context,
+                    const PosWeightedSheetRemoved(),
+                  ),
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  label: const Text('Quitar del ticket'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: PosSaleUi.error,
+                    side: const BorderSide(color: PosSaleUi.error),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             Row(
               children: [
                 Expanded(
@@ -668,7 +707,9 @@ class _WeightedAddSheetState extends State<_WeightedAddSheet> {
                 Expanded(
                   child: FilledButton(
                     onPressed: _confirm,
-                    child: const Text('Agregar'),
+                    child: Text(
+                      widget.allowRemoveFromCart ? 'Actualizar' : 'Agregar',
+                    ),
                   ),
                 ),
               ],
