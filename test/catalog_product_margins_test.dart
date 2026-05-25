@@ -62,6 +62,13 @@ void main() {
     expect(m.values.where((v) => v == null), isEmpty);
   });
 
+  test('toPatchBody applySuggestedListPrice omite price', () {
+    final m = _base().toPatchBody(applySuggestedListPrice: true);
+    expect(m['applySuggestedListPrice'], true);
+    expect(m.containsKey('price'), false);
+    expect(m['cost'], '8.00');
+  });
+
   test('fromJson lee campos M7', () {
     final p = CatalogProduct.fromJson({
       'id': 'x',

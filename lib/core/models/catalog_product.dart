@@ -184,7 +184,9 @@ class CatalogProduct {
   /// `"campo": null`. `barcode` vacío se envía como `""` (misma intención que
   /// limpiar sin usar `null`). Sin proveedor: se omite `supplierId`. Sin
   /// override de margen: se omite `marginPercentOverride`.
-  Map<String, dynamic> toPatchBody() {
+  /// Si [applySuggestedListPrice] es true (M7), el servidor alinea `price` al
+  /// sugerido según costo y margen; no enviar `price` en el mismo PATCH.
+  Map<String, dynamic> toPatchBody({bool applySuggestedListPrice = false}) {
     final skuTrim = sku.trim();
     final nameTrim = name.trim();
     final priceTrim = price.trim();
@@ -192,10 +194,14 @@ class CatalogProduct {
     final m = <String, dynamic>{
       'sku': skuTrim,
       'name': nameTrim,
-      'price': priceTrim.isEmpty ? '0' : priceTrim,
       'cost': costTrim.isEmpty ? '0' : costTrim,
       'currency': currency.trim(),
     };
+    if (!applySuggestedListPrice) {
+      m['price'] = priceTrim.isEmpty ? '0' : priceTrim;
+    } else {
+      m['applySuggestedListPrice'] = true;
+    }
     final bc = barcode?.trim();
     m['barcode'] = (bc == null || bc.isEmpty) ? '' : bc;
     if (type != null && type!.trim().isNotEmpty) m['type'] = type!.trim();

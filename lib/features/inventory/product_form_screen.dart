@@ -97,6 +97,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _supplierId;
   String? _storeDefaultMarginPercent;
 
+  /// Ficha al abrir el formulario (para inferir % si el margen de tienda aún no cargó).
+  String? _openingListPrice;
+  String? _openingCost;
+
   bool get _isByWeightUnit => _unit.text.trim().toUpperCase() == 'KG';
 
   @override
@@ -111,6 +115,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (p.barcode != null) _barcode.text = p.barcode!;
       _price.text = p.price;
       _cost.text = p.cost;
+      _openingListPrice = p.price;
+      _openingCost = p.cost;
       _currency = _currencies.contains(p.currency) ? p.currency : 'USD';
       _type = p.type ?? 'GOODS';
       if (p.unit != null) _unit.text = p.unit!;
@@ -128,10 +134,124 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _allowNoBarcode = false;
       }
     }
+    _cost.addListener(_syncListPriceFromCostAndMargin);
+    _marginPercentOverride.addListener(_syncListPriceFromCostAndMargin);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncListPriceFromCostAndMargin();
       unawaited(_prefetchStoreDefaultMargin());
       unawaited(_loadSuppliers());
     });
+  }
+
+  bool get _listPriceFollowsMargin =>
+      _pricingMode == 'USE_STORE_DEFAULT' ||
+      _pricingMode == 'USE_PRODUCT_OVERRIDE';
+
+  /// % margen implícito en precio/costo (p. ej. lista 2 y costo 1 → 100).
+  static String? _marginPercentFromPriceAndCost(String? price, String? cost) {
+    final pr = double.tryParse(
+      price?.trim().replaceAll(',', '.') ?? '',
+    );
+    final co = double.tryParse(
+      cost?.trim().replaceAll(',', '.') ?? '',
+    );
+    if (pr == null || co == null || co <= 0) return null;
+    final pct = ((pr / co) - 1) * 100;
+    if (pct < 0) return '0';
+    final s = pct.toStringAsFixed(4);
+    return s.contains('.')
+        ? s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '')
+        : s;
+  }
+
+  String? _marginPercentForListPrice() {
+    if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
+      final mo = _marginPercentOverride.text.trim();
+      if (mo.isNotEmpty) return mo;
+      return widget.existing?.marginPercentOverride?.trim();
+    }
+    if (_pricingMode == 'USE_STORE_DEFAULT') {
+      final store = _storeDefaultMarginPercent?.trim();
+      if (store != null && store.isNotEmpty) return store;
+      final em = widget.existing?.effectiveMarginPercent?.trim();
+      if (em != null && em.isNotEmpty) return em;
+      final mc = widget.existing?.marginComputedPercent?.trim();
+      if (mc != null && mc.isNotEmpty) return mc;
+      final sug = widget.existing?.suggestedPrice?.trim();
+      final baseCost = widget.existing?.cost.trim();
+      if (sug != null &&
+          sug.isNotEmpty &&
+          baseCost != null &&
+          baseCost.isNotEmpty) {
+        final fromSug = _marginPercentFromPriceAndCost(sug, baseCost);
+        if (fromSug != null) return fromSug;
+      }
+      return _marginPercentFromPriceAndCost(_openingListPrice, _openingCost);
+    }
+    return null;
+  }
+
+  /// Precio de lista = costo × (1 + margen/100) cuando aplica política M7.
+  String? _suggestedListPriceFromCost(String cost) {
+    final margin = _marginPercentForListPrice();
+    if (margin == null || margin.isEmpty) return null;
+    return PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+      cost,
+      margin,
+    );
+  }
+
+  void _syncListPriceFromCostAndMargin() {
+    if (!_listPriceFollowsMargin || _loading) return;
+    final cost = _cost.text.trim();
+    if (!_decimal.hasMatch(cost)) return;
+    final sug = _suggestedListPriceFromCost(cost);
+    if (sug == null) return;
+    if (_price.text.trim() == sug) return;
+    _price.text = sug;
+    if (mounted) setState(() {});
+  }
+
+  /// Al guardar con margen: siempre ignora el valor viejo del input y usa costo × margen.
+  String? _resolveListPriceForMarginPolicy(String cost) {
+    if (!_listPriceFollowsMargin) return null;
+    if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
+      final mo = _marginPercentOverride.text.trim();
+      if (!_marginPercentInRange(mo)) return null;
+      return PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+        cost,
+        mo,
+      );
+    }
+    final margin = _marginPercentForListPrice();
+    if (margin == null || margin.isEmpty) return null;
+    return PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+      cost,
+      margin,
+    );
+  }
+
+  CatalogProduct _catalogWithPrice(CatalogProduct base, String price) {
+    return CatalogProduct(
+      id: base.id,
+      sku: base.sku,
+      name: base.name,
+      barcode: base.barcode,
+      description: base.description,
+      type: base.type,
+      price: price,
+      cost: base.cost,
+      currency: base.currency,
+      active: base.active,
+      unit: base.unit,
+      supplierId: base.supplierId,
+      pricingMode: base.pricingMode,
+      marginPercentOverride: base.marginPercentOverride,
+      effectiveMarginPercent: base.effectiveMarginPercent,
+      marginComputedPercent: base.marginComputedPercent,
+      suggestedPrice: base.suggestedPrice,
+      imageUrl: base.imageUrl,
+    );
   }
 
   Future<void> _prefetchStoreDefaultMargin() async {
@@ -140,7 +260,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     );
     final m0 = cached?.defaultMarginPercent?.trim();
     if (m0 != null && m0.isNotEmpty && mounted) {
-      setState(() => _storeDefaultMarginPercent = m0);
+      setState(() {
+        _storeDefaultMarginPercent = m0;
+        _syncListPriceFromCostAndMargin();
+      });
     }
     final api = widget.storesApi;
     if (api == null || !widget.shellOnline) return;
@@ -150,6 +273,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       final m = bs.defaultMarginPercent?.trim();
       setState(() {
         _storeDefaultMarginPercent = (m == null || m.isEmpty) ? null : m;
+        if (m != null && m.isNotEmpty) {
+          _syncListPriceFromCostAndMargin();
+        }
       });
     } catch (_) {}
   }
@@ -437,6 +563,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _name.dispose();
     _barcode.dispose();
     _price.dispose();
+    _cost.removeListener(_syncListPriceFromCostAndMargin);
+    _marginPercentOverride.removeListener(_syncListPriceFromCostAndMargin);
     _cost.dispose();
     _unit.dispose();
     _description.dispose();
@@ -489,13 +617,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       );
       return;
     }
-    if (priceRaw.isNotEmpty && !_decimal.hasMatch(priceRaw)) {
-      setState(
-        () => _error =
-            'Precio de lista no válido (o dejalo vacío para calcularlo desde costo y margen).',
-      );
-      return;
-    }
     if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
       final mo = _marginPercentOverride.text.trim();
       if (!_marginPercentInRange(mo)) {
@@ -507,41 +628,33 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
 
     late final String listPriceForModel;
-    if (priceRaw.isNotEmpty) {
+    if (_pricingMode == 'MANUAL_PRICE') {
+      if (priceRaw.isEmpty) {
+        setState(
+          () => _error = 'En precio manual debés indicar el precio de lista.',
+        );
+        return;
+      }
+      if (!_decimal.hasMatch(priceRaw)) {
+        setState(
+          () => _error = 'Precio de lista no válido (ej. 4.99).',
+        );
+        return;
+      }
       listPriceForModel = priceRaw;
-    } else if (_pricingMode == 'MANUAL_PRICE') {
-      setState(
-        () => _error = 'En precio manual debés indicar el precio de lista.',
-      );
-      return;
-    } else if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
-      final mo = _marginPercentOverride.text.trim();
-      final sug =
-          PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-            cost,
-            mo,
-          );
+    } else {
+      final sug = _resolveListPriceForMarginPolicy(cost);
       if (sug == null) {
         setState(
-          () => _error =
-              'No se pudo calcular el precio desde costo y margen propio.',
+          () => _error = _pricingMode == 'USE_PRODUCT_OVERRIDE'
+              ? 'No se pudo calcular el precio desde costo y margen propio.'
+              : 'No hay margen de tienda disponible. Conectate, configurá el margen '
+                  'en ajustes de negocio, o usá margen propio / precio manual.',
         );
         return;
       }
       listPriceForModel = sug;
-    } else {
-      final sm = _storeDefaultMarginPercent?.trim();
-      if (sm == null || sm.isEmpty) {
-        // Sin margen en caché: lista = costo hasta que el servidor recalcule al sincronizar.
-        listPriceForModel = cost;
-      } else {
-        final sug =
-            PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-              cost,
-              sm,
-            );
-        listPriceForModel = sug ?? cost;
-      }
+      _price.text = sug;
     }
 
     // Alta: SKU vacío → no se envía; backend asigna SKU-000xxx (`BACKEND_PRODUCT_SKU_BARCODE.md`).
@@ -595,6 +708,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           widget.existing!.id,
         );
         forCache = forCache.withResolvedSupplierId(product.supplierId);
+        if (_listPriceFollowsMargin) {
+          forCache = _catalogWithPrice(forCache, listPriceForModel);
+        }
         if (!mounted) return;
         final cached = await widget.localPrefs.loadCatalogProductsCache();
         final i = cached.indexWhere((x) => x.id == widget.existing!.id);
@@ -610,30 +726,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             hadLocalPhotoPick &&
             (forCache.imageUrl?.trim().isNotEmpty ?? false);
         final photoQueued = hadLocalPhotoPick && !photoSaved;
-        if (priceRaw.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Producto actualizado · precio de lista calculado: '
-                '$listPriceForModel $_currency'
-                '${photoSaved ? ' · foto guardada' : ''}'
-                '${photoQueued ? ' · foto en cola' : ''}',
-              ),
+        final priceNote = _listPriceFollowsMargin
+            ? ' · precio de lista alineado al costo y margen'
+            : '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Producto actualizado$priceNote'
+              '${_listPriceFollowsMargin ? ' ($listPriceForModel $_currency)' : ''}'
+              '${photoSaved ? ' · foto guardada' : ''}'
+              '${photoQueued ? ' · foto en cola' : ''}',
             ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                photoSaved
-                    ? 'Producto actualizado · foto guardada'
-                    : photoQueued
-                    ? 'Producto actualizado · foto en cola'
-                    : 'Producto actualizado',
-              ),
-            ),
-          );
-        }
+          ),
+        );
         Navigator.of(context).pop(forCache);
       } on ApiError catch (e) {
         if (!mounted) return;
@@ -999,13 +1104,25 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               Expanded(
                 child: TextField(
                   controller: _price,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Precio lista',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
+                    helperText: _listPriceFollowsMargin
+                        ? 'Calculado desde costo y margen al cambiar el costo o al guardar.'
+                        : null,
+                    filled: _listPriceFollowsMargin,
+                    fillColor: _listPriceFollowsMargin
+                        ? Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                        : null,
                   ),
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  readOnly: _listPriceFollowsMargin,
+                  showCursor: !_listPriceFollowsMargin,
+                  enableInteractiveSelection: !_listPriceFollowsMargin,
                   enabled: !_loading,
                 ),
               ),
@@ -1021,6 +1138,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     decimal: true,
                   ),
                   enabled: !_loading,
+                  onChanged: (_) => _syncListPriceFromCostAndMargin(),
                 ),
               ),
             ],
@@ -1052,8 +1170,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             decoration: const InputDecoration(
               labelText: 'Política de margen',
               helperText:
-                  'Precio sugerido sobre costo (M7). El precio de lista lo definís arriba; '
-                  'el servidor calcula sugeridos según la regla.',
+                  'Con margen de tienda o propio, el precio de lista sigue al costo. '
+                  'En precio manual lo definís vos.',
               border: OutlineInputBorder(),
             ),
             child: DropdownButtonHideUnderline(
@@ -1077,7 +1195,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 onChanged: _loading
                     ? null
                     : (v) {
-                        if (v != null) setState(() => _pricingMode = v);
+                        if (v != null) {
+                          setState(() => _pricingMode = v);
+                          _syncListPriceFromCostAndMargin();
+                        }
                       },
               ),
             ),
