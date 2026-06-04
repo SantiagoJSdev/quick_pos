@@ -10,6 +10,9 @@ import '../../core/models/business_settings.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
+import '../dashboard/presentation/screens/dashboard_home_screen.dart';
+import '../dashboard/presentation/screens/device_dashboard_setup_screen.dart';
+import '../dashboard/data/dashboard_repository.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'exchange_rate_today_screen.dart';
 import 'register_exchange_rate_screen.dart';
@@ -21,6 +24,7 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.storeId,
     required this.storesApi,
     required this.exchangeRatesApi,
+    required this.dashboardRepository,
     required this.onChangeStore,
     required this.localPrefs,
     required this.forcedOffline,
@@ -32,6 +36,7 @@ class StoreDashboardScreen extends StatefulWidget {
   final String storeId;
   final StoresApi storesApi;
   final ExchangeRatesApi exchangeRatesApi;
+  final DashboardRepository dashboardRepository;
   final Future<void> Function() onChangeStore;
   final LocalPrefs localPrefs;
   final bool forcedOffline;
@@ -426,6 +431,50 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   const SizedBox(height: 16),
                 ],
                 _functionalCurrencyCard(context, s),
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: widget.onlineStatus
+                      ? () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (ctx) => DashboardHomeScreen(
+                                storeId: widget.storeId,
+                                repository: widget.dashboardRepository,
+                                shellOnline: widget.onlineStatus,
+                              ),
+                            ),
+                          );
+                        }
+                      : null,
+                  icon: const Icon(Icons.analytics_outlined),
+                  label: const Text('Dashboard operativo'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    backgroundColor: PosSaleUi.primaryDim,
+                    foregroundColor: PosSaleUi.primary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final ok = await showStoreConfigPinDialog(context);
+                    if (!ok || !context.mounted) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (ctx) => DeviceDashboardSetupScreen(
+                          storeId: widget.storeId,
+                          repository: widget.dashboardRepository,
+                          localPrefs: widget.localPrefs,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.tv_outlined),
+                  label: const Text('Configurar dashboard TV'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
                   onPressed: _openPinProtectedConfig,

@@ -13,6 +13,7 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/api/uploads_api.dart';
+import '../../features/dashboard/data/dashboard_repository.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/catalog_offline_sync.dart';
 import '../../core/network/api_connectivity_debug.dart';
@@ -45,6 +46,7 @@ class MainShell extends StatefulWidget {
     required this.syncApi,
     required this.uploadsApi,
     required this.catalogInvalidationBus,
+    required this.dashboardRepository,
     required this.onChangeStore,
     required this.localPrefs,
   });
@@ -61,6 +63,7 @@ class MainShell extends StatefulWidget {
   final SyncApi syncApi;
   final UploadsApi uploadsApi;
   final CatalogInvalidationBus catalogInvalidationBus;
+  final DashboardRepository dashboardRepository;
   final Future<void> Function() onChangeStore;
   final LocalPrefs localPrefs;
 
@@ -286,6 +289,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 storeId: widget.storeId,
                 storesApi: widget.storesApi,
                 exchangeRatesApi: widget.exchangeRatesApi,
+                dashboardRepository: widget.dashboardRepository,
                 onChangeStore: widget.onChangeStore,
                 localPrefs: widget.localPrefs,
                 forcedOffline: _manualForceOffline,

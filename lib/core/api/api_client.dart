@@ -185,13 +185,38 @@ class ApiClient {
     String storeId,
     Object? body, {
     String? requestId,
+    Map<String, String>? extraHeaders,
   }) async {
+    final headers = Map<String, String>.from(
+      _headers(storeId, requestId: requestId),
+    );
+    if (extraHeaders != null) headers.addAll(extraHeaders);
     final res = await _withTimeout(
       _client.patch(
         _uri(path),
-        headers: _headers(storeId, requestId: requestId),
+        headers: headers,
         body: body == null ? null : jsonEncode(body),
       ),
+    );
+    return _decodeSuccess(res);
+  }
+
+  /// GET sin `X-Store-Id` (p. ej. kiosk `GET /dashboard/device/:id`).
+  Future<Map<String, dynamic>> getJsonWithoutStore(
+    String path, {
+    Map<String, String>? query,
+    required Map<String, String> headers,
+    String? requestId,
+  }) async {
+    final h = {
+      ...ngrokSkipBrowserWarningHeadersForApiBase(_effectiveBaseUrl()),
+      'User-Agent': 'QuickPos/1 (Flutter)',
+      'Accept': 'application/json',
+      'X-Request-Id': _effectiveRequestId(requestId),
+      ...headers,
+    };
+    final res = await _withTimeout(
+      _client.get(_uri(path, query), headers: h),
     );
     return _decodeSuccess(res);
   }

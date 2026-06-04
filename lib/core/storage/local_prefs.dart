@@ -42,6 +42,9 @@ const _kSalesGeneralCachePrefix = 'sales_general_cache_v1_';
 const _kLatestRateCachePrefix = 'latest_rate_cache_v1_';
 const _kApiBaseUrlOverrideV1 = 'api_base_url_override_v1';
 const _kPendingProductPhotoUploadsV1 = 'pending_product_photo_uploads_v1';
+const _kDashboardAccessTokenPrefix = 'dashboard_access_token_v1_';
+const _kDashboardKioskCachePrefix = 'dashboard_kiosk_cache_v1_';
+const _kCachedDeviceModeV1 = 'cached_device_mode_v1';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -1094,5 +1097,43 @@ class LocalPrefs {
       if (next.length >= _kMaxRecentSalesSameDay) break;
     }
     await saveRecentSaleTickets(next);
+  }
+
+  Future<void> saveDashboardAccessToken(String deviceId, String token) async {
+    await _prefs.setString(
+      '$_kDashboardAccessTokenPrefix${deviceId.trim()}',
+      token.trim(),
+    );
+  }
+
+  Future<String?> getDashboardAccessToken(String deviceId) async {
+    final v = _prefs.getString('$_kDashboardAccessTokenPrefix${deviceId.trim()}');
+    final t = v?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
+
+  Future<void> clearDashboardAccessToken(String deviceId) async {
+    await _prefs.remove('$_kDashboardAccessTokenPrefix${deviceId.trim()}');
+  }
+
+  Future<void> saveDashboardKioskCache(String deviceId, String json) async {
+    await _prefs.setString(
+      '$_kDashboardKioskCachePrefix${deviceId.trim()}',
+      json,
+    );
+  }
+
+  Future<String?> loadDashboardKioskCache(String deviceId) async {
+    return _prefs.getString('$_kDashboardKioskCachePrefix${deviceId.trim()}');
+  }
+
+  Future<void> saveCachedDeviceMode(String mode) async {
+    await _prefs.setString(_kCachedDeviceModeV1, mode.trim());
+  }
+
+  Future<String?> getCachedDeviceMode() async {
+    final v = _prefs.getString(_kCachedDeviceModeV1);
+    final t = v?.trim();
+    return (t == null || t.isEmpty) ? null : t;
   }
 }
