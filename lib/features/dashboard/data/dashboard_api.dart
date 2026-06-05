@@ -1,4 +1,5 @@
 import '../../../core/api/api_client.dart';
+import '../../../core/config/app_config.dart';
 import '../domain/dashboard_filters.dart';
 import '../domain/dashboard_summary.dart';
 import '../domain/dashboard_timeseries.dart';
@@ -91,11 +92,20 @@ class DashboardApi {
     if (dashboardView != null) body['dashboardView'] = dashboardView;
     if (regenerateToken != null) body['regenerateToken'] = regenerateToken;
 
+    final pin = adminPin.trim();
+    final headers = <String, String>{
+      'X-Dashboard-Admin-Pin': pin,
+      'X-Config-Admin-Pin': pin,
+    };
+    final opsKey = AppConfig.effectiveOpsApiKey;
+    if (opsKey != null) {
+      headers['X-Ops-Api-Key'] = opsKey;
+    }
     final raw = await _client.patchJson(
       '/pos-devices/$deviceId/dashboard-config',
       storeId,
       body.isEmpty ? null : body,
-      extraHeaders: {'X-Dashboard-Admin-Pin': adminPin.trim()},
+      extraHeaders: headers,
     );
     return DeviceDashboardConfig.fromJson(raw);
   }

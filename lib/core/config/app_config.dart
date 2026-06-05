@@ -30,6 +30,13 @@ class AppConfig {
     defaultValue: '',
   );
 
+  /// Clave ops para `PATCH .../dashboard-config` si el backend no usa PIN
+  /// (`FRONTEND_DASHBOARD_API.md` — header `X-Ops-Api-Key`).
+  static const String _opsApiKeyOverride = String.fromEnvironment(
+    'OPS_API_KEY',
+    defaultValue: '',
+  );
+
   static String? _runtimeApiBaseUrlOverride;
 
   static String normalizeApiBaseUrl(String raw) {
@@ -64,5 +71,10 @@ class AppConfig {
     if (e.isEmpty) return false;
     final p = effectiveConfigAdminPin;
     return e == p || e.toLowerCase() == p.toLowerCase();
+  }
+
+  static String? get effectiveOpsApiKey {
+    final k = _opsApiKeyOverride.trim();
+    return k.isEmpty ? null : k;
   }
 }

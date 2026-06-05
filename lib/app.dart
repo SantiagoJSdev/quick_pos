@@ -13,6 +13,7 @@ import 'core/api/uploads_api.dart';
 import 'core/api/api_client.dart';
 import 'features/dashboard/data/dashboard_api.dart';
 import 'features/dashboard/data/dashboard_repository.dart';
+import 'features/dashboard/domain/dashboard_device_access.dart';
 import 'features/dashboard/domain/device_dashboard_config.dart';
 import 'features/dashboard/presentation/screens/device_dashboard_screen.dart';
 import 'core/catalog/catalog_invalidation_bus.dart';
@@ -100,9 +101,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
             storeId,
             deviceId,
           );
-          if (config.deviceMode == DeviceMode.dashboard &&
-              config.dashboardEnabled &&
-              config.hasDashboardToken) {
+          if (DashboardDeviceAccess.showsKioskAtStartup(config)) {
             final t =
                 token ?? await widget.localPrefs.getDashboardAccessToken(deviceId);
             if (t != null && t.isNotEmpty) {

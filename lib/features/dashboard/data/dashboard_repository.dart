@@ -4,6 +4,7 @@ import '../../../core/storage/local_prefs.dart';
 import '../domain/dashboard_filters.dart';
 import '../domain/dashboard_summary.dart';
 import '../domain/dashboard_timeseries.dart';
+import '../domain/dashboard_device_access.dart';
 import '../domain/device_dashboard_config.dart';
 import '../domain/device_dashboard_payload.dart';
 import '../domain/payment_breakdown_item.dart';
@@ -81,7 +82,78 @@ class DashboardRepository {
     String deviceId,
   ) async {
     final config = await _api.getDashboardConfig(storeId, deviceId);
+    await _cacheDeviceConfig(deviceId, config);
+    return config;
+  }
+
+  /// Si el servidor no responde, usa último `dashboardEnabled` cacheado.
+  Future<bool> operationalDashboardVisibleCached(
+    String storeId,
+    String deviceId, {
+    required bool online,
+  }) async {
+    if (online) {
+      try {
+        final c = await fetchDeviceConfig(storeId, deviceId);
+        return DashboardDeviceAccess.showsOperationalDashboard(c);
+      } catch (_) {
+        return _readCachedOperationalVisible(deviceId);
+      }
+    }
+    return _readCachedOperationalVisible(deviceId);
+  }
+
+  Future<bool> _readCachedOperationalVisible(String deviceId) async {
+    final enabled = await _localPrefs?.getCachedDashboardEnabled(deviceId);
+    if (enabled != true) return false;
+    final mode = await _localPrefs?.getCachedDeviceMode();
+    if (mode == DeviceMode.dashboard.apiValue) return false;
+    return true;
+  }
+
+  Future<void> _cacheDeviceConfig(
+    String deviceId,
+    DeviceDashboardConfig config,
+  ) async {
     await _localPrefs?.saveCachedDeviceMode(config.deviceMode.apiValue);
+    await _localPrefs?.saveCachedDashboardEnabled(
+      deviceId,
+      config.dashboardEnabled,
+    );
+  }
+
+  /// Habilita reportes en este terminal (POS + dashboard), sin modo TV.
+  Future<DeviceDashboardConfig> enableOperationalDashboard({
+    required String storeId,
+    required String deviceId,
+    required String adminPin,
+  }) async {
+    // Solo activar flag; no forzar HYBRID (algunos backends aún no lo aceptan).
+    final config = await _api.patchDashboardConfig(
+      storeId: storeId,
+      deviceId: deviceId,
+      adminPin: adminPin,
+      dashboardEnabled: true,
+    );
+    await _cacheDeviceConfig(deviceId, config);
+    return config;
+  }
+
+  /// Oculta dashboard en este terminal (vuelve a POS puro).
+  Future<DeviceDashboardConfig> disableOperationalDashboard({
+    required String storeId,
+    required String deviceId,
+    required String adminPin,
+  }) async {
+    final config = await _api.patchDashboardConfig(
+      storeId: storeId,
+      deviceId: deviceId,
+      adminPin: adminPin,
+      dashboardEnabled: false,
+      deviceMode: DeviceMode.pos,
+    );
+    await _localPrefs?.clearDashboardAccessToken(deviceId);
+    await _cacheDeviceConfig(deviceId, config);
     return config;
   }
 
@@ -103,7 +175,7 @@ class DashboardRepository {
     if (token != null && token.isNotEmpty) {
       await _localPrefs?.saveDashboardAccessToken(deviceId, token);
     }
-    await _localPrefs?.saveCachedDeviceMode(DeviceMode.dashboard.apiValue);
+    await _cacheDeviceConfig(deviceId, config);
     return config;
   }
 

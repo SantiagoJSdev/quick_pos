@@ -6,10 +6,12 @@ import 'package:flutter/services.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
+import '../../core/config/app_config.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
+import '../dashboard/domain/device_dashboard_config.dart';
 import '../dashboard/presentation/screens/dashboard_home_screen.dart';
 import '../dashboard/presentation/screens/device_dashboard_setup_screen.dart';
 import '../dashboard/data/dashboard_repository.dart';
@@ -54,14 +56,18 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
   late Future<BusinessSettings> _future;
   bool _settingsFromCache = false;
   bool _terminalLoading = true;
+  bool _deviceAccessLoading = true;
+  bool _operationalDashboardVisible = false;
   String? _deviceId;
   String? _appVersion;
+  DeviceDashboardConfig? _deviceDashboardConfig;
 
   @override
   void initState() {
     super.initState();
     _future = _loadSettingsWithCache();
     unawaited(_loadTerminal());
+    unawaited(_loadDeviceDashboardAccess());
   }
 
   @override
@@ -72,7 +78,36 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       setState(() {
         _future = _loadSettingsWithCache();
       });
+      unawaited(_loadDeviceDashboardAccess());
     }
+  }
+
+  Future<void> _loadDeviceDashboardAccess() async {
+    final deviceId = _deviceId ?? await widget.localPrefs.getOrCreateDeviceId();
+    if (!mounted) return;
+    setState(() => _deviceAccessLoading = true);
+    final visible = await widget.dashboardRepository
+        .operationalDashboardVisibleCached(
+          widget.storeId,
+          deviceId,
+          online: widget.onlineStatus && !widget.forcedOffline,
+        );
+    if (!mounted) return;
+    DeviceDashboardConfig? config;
+    if (widget.onlineStatus && !widget.forcedOffline) {
+      try {
+        config = await widget.dashboardRepository.fetchDeviceConfig(
+          widget.storeId,
+          deviceId,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _operationalDashboardVisible = visible;
+      _deviceDashboardConfig = config;
+      _deviceAccessLoading = false;
+    });
   }
 
   Future<BusinessSettings> _loadSettingsWithCache() async {
@@ -149,7 +184,72 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     setState(() {
       _future = _loadSettingsWithCache();
     });
-    await _future;
+    await Future.wait([_future, _loadDeviceDashboardAccess()]);
+  }
+
+  Future<void> _toggleOperationalDashboard({required bool enable}) async {
+    final deviceId = _deviceId;
+    if (deviceId == null || deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('deviceId no disponible.')),
+      );
+      return;
+    }
+    final pin = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _DashboardAdminPinDialog(
+        title: enable
+            ? 'Habilitar dashboard operativo'
+            : 'Deshabilitar dashboard operativo',
+        message: enable
+            ? 'Solo este dispositivo verá el botón de reportes. '
+              'El cambio queda guardado en el servidor.'
+            : 'Este equipo dejará de mostrar el dashboard operativo.',
+      ),
+    );
+    if (pin == null || pin.isEmpty || !mounted) return;
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    try {
+      if (enable) {
+        await widget.dashboardRepository.enableOperationalDashboard(
+          storeId: widget.storeId,
+          deviceId: deviceId,
+          adminPin: pin,
+        );
+      } else {
+        await widget.dashboardRepository.disableOperationalDashboard(
+          storeId: widget.storeId,
+          deviceId: deviceId,
+          adminPin: pin,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enable
+                ? 'Dashboard habilitado en este dispositivo.'
+                : 'Dashboard deshabilitado en este dispositivo.',
+          ),
+        ),
+      );
+      await _loadDeviceDashboardAccess();
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_dashboardPatchErrorHint(e)),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    }
   }
 
   Future<void> _openPinProtectedConfig() async {
@@ -199,6 +299,126 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
 
   void _closeApp() {
     SystemNavigator.pop();
+  }
+
+  Widget _buildDashboardAccessSection(BuildContext context) {
+    if (_deviceAccessLoading) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 8),
+        child: LinearProgressIndicator(),
+      );
+    }
+
+    final enabled = _operationalDashboardVisible;
+    final mode = _deviceDashboardConfig?.deviceMode;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (enabled) ...[
+          FilledButton.tonalIcon(
+            onPressed: widget.onlineStatus
+                ? () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (ctx) => DashboardHomeScreen(
+                          storeId: widget.storeId,
+                          repository: widget.dashboardRepository,
+                          shellOnline: widget.onlineStatus,
+                        ),
+                      ),
+                    );
+                  }
+                : null,
+            icon: const Icon(Icons.analytics_outlined),
+            label: const Text('Dashboard operativo'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              backgroundColor: PosSaleUi.primaryDim,
+              foregroundColor: PosSaleUi.primary,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ] else ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: PosSaleUi.surface3,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: PosSaleUi.border),
+            ),
+            child: Text(
+              widget.onlineStatus
+                  ? 'El dashboard operativo no está habilitado en este '
+                    'dispositivo. Un administrador puede activarlo abajo o '
+                    'desde el backend (`dashboardEnabled: true`).'
+                  : 'Sin conexión: no se puede verificar si este equipo tiene '
+                    'dashboard habilitado.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: PosSaleUi.textMuted,
+                height: 1.35,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (widget.onlineStatus)
+          OutlinedButton.icon(
+            onPressed: enabled
+                ? () => _toggleOperationalDashboard(enable: false)
+                : () => _toggleOperationalDashboard(enable: true),
+            icon: Icon(enabled ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+            label: Text(
+              enabled
+                  ? 'Deshabilitar dashboard en este dispositivo'
+                  : 'Habilitar dashboard en este dispositivo',
+            ),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(44),
+            ),
+          ),
+        if (mode != null && enabled) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Modo servidor: ${mode.apiValue}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: PosSaleUi.textFaint,
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: widget.onlineStatus
+              ? () async {
+                  final ok = await showStoreConfigPinDialog(context);
+                  if (!ok || !context.mounted) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (ctx) => DeviceDashboardSetupScreen(
+                        storeId: widget.storeId,
+                        repository: widget.dashboardRepository,
+                        localPrefs: widget.localPrefs,
+                      ),
+                    ),
+                  );
+                }
+              : null,
+          icon: const Icon(Icons.tv_outlined),
+          label: const Text('Configurar dashboard TV (kiosk)'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(44),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'TV = pantalla completa solo lectura. Operativo = reportes dentro del POS.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: PosSaleUi.textMuted,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _functionalCurrencyCard(BuildContext context, BusinessSettings s) {
@@ -432,49 +652,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 ],
                 _functionalCurrencyCard(context, s),
                 const SizedBox(height: 16),
-                FilledButton.tonalIcon(
-                  onPressed: widget.onlineStatus
-                      ? () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (ctx) => DashboardHomeScreen(
-                                storeId: widget.storeId,
-                                repository: widget.dashboardRepository,
-                                shellOnline: widget.onlineStatus,
-                              ),
-                            ),
-                          );
-                        }
-                      : null,
-                  icon: const Icon(Icons.analytics_outlined),
-                  label: const Text('Dashboard operativo'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    backgroundColor: PosSaleUi.primaryDim,
-                    foregroundColor: PosSaleUi.primary,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final ok = await showStoreConfigPinDialog(context);
-                    if (!ok || !context.mounted) return;
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (ctx) => DeviceDashboardSetupScreen(
-                          storeId: widget.storeId,
-                          repository: widget.dashboardRepository,
-                          localPrefs: widget.localPrefs,
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.tv_outlined),
-                  label: const Text('Configurar dashboard TV'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(44),
-                  ),
-                ),
+                _buildDashboardAccessSection(context),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
                   onPressed: _openPinProtectedConfig,
@@ -590,6 +768,108 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+/// Diálogo PIN: el [TextEditingController] vive en el [State] y se libera al cerrar el diálogo.
+String _dashboardPatchErrorHint(ApiError e) {
+  final msg = e.userMessageForSupport;
+  if (e.statusCode == 401 ||
+      msg.toLowerCase().contains('invalid') ||
+      msg.toLowerCase().contains('pin') ||
+      msg.toLowerCase().contains('unauthorized')) {
+    return 'El servidor rechazó el PIN (${e.statusCode}).\n'
+        'No es un endpoint extra en la app: hay que configurar el backend.\n'
+        '• En el `.env` del API: `DASHBOARD_ADMIN_PIN=1200Mia` (mismo que la app)\n'
+        '• Reiniciar el servidor Nest después de cambiar el `.env`\n'
+        '• Alternativa: `OPS_API_KEY` en el servidor y compilar la app con '
+        '`--dart-define=OPS_API_KEY=...`\n'
+        'Detalle: $msg';
+  }
+  if (e.statusCode == 404) {
+    return 'Dispositivo no registrado en el servidor (${e.statusCode}). '
+        'Hacé al menos una venta o sync con este equipo antes de habilitar '
+        'dashboard.\n$msg';
+  }
+  return msg;
+}
+
+class _DashboardAdminPinDialog extends StatefulWidget {
+  const _DashboardAdminPinDialog({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  State<_DashboardAdminPinDialog> createState() => _DashboardAdminPinDialogState();
+}
+
+class _DashboardAdminPinDialogState extends State<_DashboardAdminPinDialog> {
+  late final TextEditingController _ctrl;
+  String _err = '';
+  bool _obscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!AppConfig.adminPinMatches(_ctrl.text)) {
+      setState(() => _err = 'Clave incorrecta.');
+      return;
+    }
+    Navigator.pop(context, _ctrl.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.message, style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            obscureText: _obscure,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'PIN administración',
+              border: const OutlineInputBorder(),
+              errorText: _err.isEmpty ? null : _err,
+              suffixIcon: IconButton(
+                icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscure = !_obscure),
+              ),
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Confirmar'),
+        ),
+      ],
     );
   }
 }

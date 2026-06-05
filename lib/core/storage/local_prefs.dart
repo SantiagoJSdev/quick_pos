@@ -45,6 +45,7 @@ const _kPendingProductPhotoUploadsV1 = 'pending_product_photo_uploads_v1';
 const _kDashboardAccessTokenPrefix = 'dashboard_access_token_v1_';
 const _kDashboardKioskCachePrefix = 'dashboard_kiosk_cache_v1_';
 const _kCachedDeviceModeV1 = 'cached_device_mode_v1';
+const _kCachedDashboardEnabledPrefix = 'cached_dashboard_enabled_v1_';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -1135,5 +1136,18 @@ class LocalPrefs {
     final v = _prefs.getString(_kCachedDeviceModeV1);
     final t = v?.trim();
     return (t == null || t.isEmpty) ? null : t;
+  }
+
+  Future<void> saveCachedDashboardEnabled(String deviceId, bool enabled) async {
+    await _prefs.setBool(
+      '$_kCachedDashboardEnabledPrefix${deviceId.trim()}',
+      enabled,
+    );
+  }
+
+  Future<bool?> getCachedDashboardEnabled(String deviceId) async {
+    final key = '$_kCachedDashboardEnabledPrefix${deviceId.trim()}';
+    if (!_prefs.containsKey(key)) return null;
+    return _prefs.getBool(key);
   }
 }
