@@ -2,7 +2,7 @@ import 'package:uuid/uuid.dart';
 
 /// Identificadores de idempotencia en cliente (`opId`, `id` de venta, etc.).
 ///
-/// Ver `docs/CLIENT_IDEMPOTENCY_AND_OFFLINE.md`: mismo valor en reintentos y,
+/// Ver `docs/FRONTEND_INTEGRATION_CONTEXT.md` §5.2 — mismo valor en reintentos y,
 /// más adelante, al reenviar desde cola offline / `sync/push`.
 class ClientMutationId {
   ClientMutationId._();

@@ -19,7 +19,7 @@ class SalesApi {
     return _client.getJson('/sales/$saleId', storeId);
   }
 
-  /// `GET /api/v1/sales` — historial paginado (`format=object` default). Ver `docs/BACKEND_SALES_HISTORY_API.md`.
+  /// `GET /api/v1/sales` — historial paginado. Ver `docs/FRONTEND_INTEGRATION_CONTEXT.md` §6.
   /// No mezclar `cursor` con `format=array`.
   Future<SalesListPage> listSales(
     String storeId, {

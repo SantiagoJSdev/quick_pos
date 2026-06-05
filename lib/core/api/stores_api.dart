@@ -29,8 +29,7 @@ class StoresApi {
 
   /// Alta de tienda desde el dispositivo con **UUID generado en el cliente**.
   ///
-  /// Contrato documentado: `FRONTEND_INTEGRATION_CONTEXT.md` §13.0 y
-  /// `docs/BACKEND_STORE_ONBOARDING.md`. Requiere `STORE_ONBOARDING_ENABLED=1`
+  /// Resumen: `docs/FRONTEND_INTEGRATION_CONTEXT.md`. Requiere `STORE_ONBOARDING_ENABLED=1`
   /// en el servidor; si no, los `PUT` responden **403**.
   ///
   /// 1. `PUT /api/v1/stores/{storeId}` — `{ "name", "type": "main"|"branch" }`.

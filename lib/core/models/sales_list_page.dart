@@ -1,5 +1,5 @@
 /// Respuesta de `GET /api/v1/sales` con `format=object` (default).
-/// Ver `docs/BACKEND_SALES_HISTORY_API.md`.
+/// Ver `docs/FRONTEND_INTEGRATION_CONTEXT.md` §6 (historial ventas).
 class SalesListItem {
   const SalesListItem({
     required this.id,

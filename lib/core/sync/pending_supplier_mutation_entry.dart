@@ -1,6 +1,6 @@
 /// Proveedor en cola para `sync/push` (`SUPPLIER_CREATE` | `SUPPLIER_UPDATE` | `SUPPLIER_DEACTIVATE`).
 ///
-/// Ver `docs/SYNC_PUSH_SUPPLIERS.md`: `payload` enviado es `{ "supplier": supplier }`.
+/// Ver `docs/FRONTEND_INTEGRATION_CONTEXT.md` §16: `payload` enviado es `{ "supplier": supplier }`.
 class PendingSupplierMutationEntry {
   const PendingSupplierMutationEntry({
     required this.opId,

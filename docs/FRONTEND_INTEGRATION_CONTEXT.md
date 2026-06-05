@@ -135,6 +135,15 @@ Este documento sirve para:
 - `POST /sync/push`
 - `GET /sync/pull`
 
+### Dashboard (online; por dispositivo)
+
+- `GET /reports/sales/summary`
+- `GET /reports/sales/timeseries`
+- `GET /reports/sales/payments`
+- `GET /pos-devices/:deviceId/dashboard-config`
+- `PATCH /pos-devices/:deviceId/dashboard-config`
+- `GET /dashboard/device/:deviceId` (kiosk; header `X-Device-Token`)
+
 Notas de contrato vigentes para ventas:
 
 - `POST /sales` acepta `payments[]` opcional.
@@ -216,6 +225,8 @@ Notas de contrato vigentes para ventas:
 - `lib/features/inventory/*`
 - `lib/features/sale/*`
 - `lib/features/suppliers/*`
+- `lib/features/dashboard/*` — reportes operativos + kiosk TV
+- `lib/features/settings/*` — inicio tienda, config, tasas
 - `lib/features/shell/*`
 
 ## 8) Checklist para nuevas funcionalidades
@@ -232,11 +243,11 @@ Cuando se agregue o cambie una funcionalidad:
 
 ## 9) Convencion de mantenimiento documental
 
-- Mantener **solo este archivo** como fuente de verdad en `docs/`.
-- Evitar crear docs paralelos; todo nuevo contexto va aqui.
-- Si se necesita detalle tecnico temporal, incorporarlo y resumirlo aqui antes de cerrar la tarea.
-- Excepcion operativa: las pruebas manuales se registran en `docs/MANUAL_TESTS.md`.
-- Regla: cada nueva prueba manual o ajuste de QA manual debe cargarse en `docs/MANUAL_TESTS.md`.
+- Mantener **`docs/FRONTEND_INTEGRATION_CONTEXT.md`** como fuente de verdad funcional/técnica.
+- Índice: **`docs/README.md`**.
+- Excepcion operativa: pruebas manuales en **`docs/MANUAL_TESTS.md`**.
+- No crear archivos extra en `docs/` (sprints, contratos duplicados, checklists paralelos).
+- Contratos backend completos: Swagger del repo API; aquí solo lo que consume el front.
 
 ## 10) Estado Offline (decision vigente)
 
@@ -261,23 +272,7 @@ Se integra como referencia ejecutiva el plan `FRONT_OFFLINE_EXECUTION_PLAN_V2.md
 
 ### 11.2 Estado de ejecucion consolidado
 
-Fuente de seguimiento operativo: `docs/FRONT_OFFLINE_IMPLEMENTATION_CHECKLIST.md`.
-Fuente unica de pruebas manuales: `docs/MANUAL_TESTS.md`.
-
-- Estado global actual: **en progreso avanzado**.
-- Ya implementado: base offline en POS/Inventario/Catalogo, scheduler 90s + reconexion, fallback de read models, tickets en espera, devoluciones/compras offline en cola.
-- Ya implementado tambien: configuracion dinamica de URL/IP desde Ajustes, prueba de conexion, selector de perfil (Produccion/LAN/Local), y badge de entorno activo (LOCAL/LAN/PROD).
-- Ya implementado tambien: clasificacion base de errores de sync (retryable/manual) y vista de operaciones pendientes en Ventas.
-- Fotos implementadas end-to-end:
-  - `POST /uploads/products-image` (multipart, campo `file`),
-  - `PATCH /products/:id/image` para asociar `imageUrl`,
-  - cola local con reintentos automáticos y clasificación manual/retryable.
-- Cobro mixto implementado end-to-end en frontend:
-  - UI de `Pago en funcional` + `Pago en documento`,
-  - validacion de faltante en documento antes de cobrar,
-  - envio de `payments[]` en REST y en `sync/push` offline,
-  - manejo de errores de contrato `PAYMENTS_*` en mensajes de caja.
-- Pendiente principal: ejecutar QA manual formal y cerrar evidencia.
+Ver **seccion 15** (backlog y estado). Pruebas manuales: `docs/MANUAL_TESTS.md`.
 
 ## 12) QA rapido de validacion offline (movil)
 
@@ -325,3 +320,108 @@ Ejecutar este bloque en Android fisico para validar comportamiento base:
       (`latest_rate_cache_v1_*`) y fallback sin red,
     - badge de “mostrando datos cacheados” en Inicio, Inventario y Historial General
       cuando los datos vienen de fallback offline.
+- 2026-06-04:
+  - Modulo `lib/features/dashboard/*`: dashboard operativo, control por dispositivo (`dashboardEnabled`), kiosk TV.
+  - Documentacion consolidada en este archivo + `MANUAL_TESTS.md`.
+
+## 14) Dashboard operativo y kiosk
+
+**Codigo:** `lib/features/dashboard/` (data / domain / presentation).
+
+### 14.1 Dos modos
+
+| Modo | Cuando | Pantalla |
+|------|--------|----------|
+| **Operativo** | `dashboardEnabled: true` y `deviceMode` ≠ `DASHBOARD` | Boton en Inicio → `DashboardHomeScreen` (online-first) |
+| **TV / kiosk** | `deviceMode: DASHBOARD` + token | Arranque → `DeviceDashboardScreen` (refresh ~45s) |
+
+**Control por dispositivo:** `GET/PATCH /pos-devices/:deviceId/dashboard-config` con `X-Store-Id`. El boton operativo **no** aparece en todos los equipos: solo si el servidor devuelve `dashboardEnabled: true` (o se activa con PIN / Postman).
+
+### 14.2 Endpoints (reportes)
+
+Headers habituales: `X-Store-Id`. Montos en JSON como **String**. KPIs **no** recalcular en cliente.
+
+| Uso | Metodo | Ruta |
+|-----|--------|------|
+| KPIs | GET | `/reports/sales/summary` |
+| Serie diaria | GET | `/reports/sales/timeseries` |
+| Pagos | GET | `/reports/sales/payments` |
+| Por caja (v2) | GET | `/reports/sales/by-device` |
+| Kiosk agregado | GET | `/dashboard/device/:deviceId` + header `X-Device-Token` (sin `X-Store-Id`) |
+| Config dispositivo | GET | `/pos-devices/:deviceId/dashboard-config` |
+| Activar / desactivar | PATCH | `/pos-devices/:deviceId/dashboard-config` |
+
+**Query fechas:** `preset=today|yesterday|week|month` **o** `dateFrom` + `dateTo` (`YYYY-MM-DD`, max 31 dias).
+
+**PATCH admin:** headers `X-Dashboard-Admin-Pin` (y opcional `X-Config-Admin-Pin`, `X-Ops-Api-Key`) = mismos secretos que en el `.env` del Nest (`DASHBOARD_ADMIN_PIN`, `CONFIG_ADMIN_PIN`, `OPS_API_KEY`).
+
+**App:** PIN local en `AppConfig` (default `1200Mia`, override `--dart-define=CONFIG_ADMIN_PIN=...`).
+
+Body ejemplo habilitar solo operativo:
+
+```json
+{ "dashboardEnabled": true }
+```
+
+Modo TV adicional: `"deviceMode": "DASHBOARD", "regenerateToken": true` → respuesta incluye `dashboardAccessToken` **una vez** (guardar en prefs del kiosk).
+
+### 14.3 Flujo recomendado (operador)
+
+1. Registrar el terminal (venta o `sync/push`).
+2. `PATCH dashboard-config` con `dashboardEnabled: true` (Postman o Inicio → “Habilitar dashboard en este dispositivo”).
+3. Hot restart → Inicio → **Dashboard operativo**.
+
+### 14.4 Errores frecuentes
+
+| HTTP | Causa |
+|------|--------|
+| 401 en PATCH | PIN servidor ≠ PIN app |
+| 404 en config | `deviceId` aun no registrado en servidor |
+| 403 en kiosk | `dashboardEnabled: false` o modo POS |
+
+## 15) Estado de implementacion y pendientes
+
+### 15.1 Offline-first — **cerrado** (salvo auditoria)
+
+Implementado: cola `sync/push`, scheduler 90s, reconexion, caches (catalogo, inventario, settings, FX, historial), ventas/devoluciones/compras/catalogo offline, tickets en espera, cobro mixto `payments[]`, fotos + upload, URL backend configurable (LAN/Local/Prod).
+
+**Pendiente**
+
+- [ ] Auditoria: confirmar que con `shellOnline == false` ninguna mutacion hace HTTP directo sin cola (devoluciones, compras, inventario, catalogo).
+- [ ] Ejecutar y marcar casos en `docs/MANUAL_TESTS.md` (seccion offline/conectividad).
+
+### 15.2 Dashboard — **v1 implementado**
+
+Implementado: `DashboardHomeScreen` (3 APIs paralelo), presets fecha, KPIs, grafico, pagos; gating por `dashboardEnabled`; habilitar/deshabilitar con PIN; kiosk + setup TV; cache kiosk 5 min; bootstrap modo `DASHBOARD`.
+
+**Pendiente (v1.1 / v2)**
+
+- [ ] QA manual dashboard → `MANUAL_TESTS.md` seccion 5.
+- [ ] `GET /reports/sales/by-device` (comparar cajas).
+- [ ] Pull-to-refresh en dashboard operativo.
+- [ ] Widget compacto “Hoy: X netas” en Inicio.
+- [ ] Comparativo vs semana anterior en KPIs.
+- [ ] Modo oscuro dedicado TV.
+- [ ] Sincronizar `deviceMode` tras cada `sync/push` (fase 2 backend).
+
+### 15.3 Otros modulos — sin gaps criticos documentados
+
+POS, inventario, proveedores, tasas, onboarding tienda: operativos segun secciones 4–6. Nuevas features: seguir checklist seccion 8.
+
+## 16) Sync push — proveedores (`SUPPLIER_*`)
+
+Referencia minima para cola offline de proveedores (`lib/core/sync/pending_supplier_mutation_entry.dart`).
+
+**`POST /sync/push`** — body: `deviceId`, `ops[]` (1–200). Cada op: `opId` (UUID v4), `opType`, `timestamp`, `payload`.
+
+**opTypes proveedor:** `SUPPLIER_CREATE`, `SUPPLIER_UPDATE`, `SUPPLIER_DEACTIVATE`.
+
+**Payload:** `{ "supplier": { ... } }`.
+
+| opType | Campos clave en `supplier` |
+|--------|---------------------------|
+| CREATE | `clientSupplierId` (UUID v4 provisional), `name` (1–200), opcionales phone/email/address/taxId/notes |
+| UPDATE | id servidor o `clientSupplierId` + campos a cambiar |
+| DEACTIVATE | id a desactivar |
+
+Tras ack, remapear ids provisionales (`supplier_sync_remap.dart`). Orden del array `ops` = orden de aplicacion en servidor.

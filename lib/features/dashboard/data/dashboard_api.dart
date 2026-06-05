@@ -7,7 +7,7 @@ import '../domain/device_dashboard_config.dart';
 import '../domain/device_dashboard_payload.dart';
 import '../domain/payment_breakdown_item.dart';
 
-/// Reportes operativos y kiosk — `docs/FRONTEND_DASHBOARD_API.md`.
+/// Reportes operativos y kiosk — `docs/FRONTEND_INTEGRATION_CONTEXT.md` §14.
 class DashboardApi {
   DashboardApi(this._client);
 

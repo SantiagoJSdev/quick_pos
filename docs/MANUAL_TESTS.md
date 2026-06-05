@@ -381,7 +381,54 @@ Documento unico para registrar todas las pruebas manuales del frontend (actuales
 
 ---
 
-## 6) Historial y detalle
+## 6) Dashboard operativo y kiosk
+
+Ver casos **MT-DASH-***.
+
+### MT-DASH-001 - Habilitar dashboard por dispositivo
+- Estado: `[ ]`
+- Precondicion: backend con `DASHBOARD_ADMIN_PIN` alineado a la app; terminal registrado (sync o venta).
+- Pasos:
+  1. GET `dashboard-config` → `dashboardEnabled: false`.
+  2. PATCH con PIN → `dashboardEnabled: true`.
+  3. Hot restart app → Inicio.
+- Resultado esperado:
+  - Aparece boton **Dashboard operativo**.
+  - Otros dispositivos sin PATCH no muestran el boton.
+
+### MT-DASH-002 - Reportes con ventas
+- Estado: `[ ]`
+- Pasos:
+  1. Abrir Dashboard operativo con preset **Hoy**.
+  2. Verificar KPIs vs ventas confirmadas del dia.
+- Resultado esperado:
+  - `netSales` coherente con brutas − devoluciones (valores del servidor, no recalculados en app).
+
+### MT-DASH-003 - Sin ventas en periodo
+- Estado: `[ ]`
+- Pasos:
+  1. Elegir dia sin movimientos.
+- Resultado esperado:
+  - KPIs en cero; grafico muestra empty state sin crash.
+
+### MT-DASH-004 - PIN incorrecto en PATCH
+- Estado: `[ ]`
+- Pasos:
+  1. Habilitar desde app con PIN distinto al del servidor.
+- Resultado esperado:
+  - SnackBar 401 con mensaje claro; no pantalla roja.
+
+### MT-DASH-005 - Kiosk TV (opcional)
+- Estado: `[ ]`
+- Pasos:
+  1. PATCH `deviceMode: DASHBOARD` + token.
+  2. Reiniciar app en ese dispositivo.
+- Resultado esperado:
+  - Pantalla TV; refresh periodico; sin acceso a cobro POS.
+
+---
+
+## 7) Historial y detalle
 
 ### MT-HIST-001 - Historial dispositivo local
 - Estado: `[ ]`
@@ -400,7 +447,7 @@ Documento unico para registrar todas las pruebas manuales del frontend (actuales
 
 ---
 
-## 7) Registro de ejecucion
+## 8) Registro de ejecucion
 
 Agregar una linea por corrida:
 

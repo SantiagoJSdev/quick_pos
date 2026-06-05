@@ -139,7 +139,7 @@ class _CreateStoreScreenState extends State<CreateStoreScreen> {
               const SizedBox(height: 12),
               const Text(
                 'Requiere STORE_ONBOARDING_ENABLED=1 en el servidor y los PUT '
-                'documentados (docs/BACKEND_STORE_ONBOARDING.md).',
+                'documentados en el backend (Swagger / onboarding tienda).',
                 style: TextStyle(fontSize: 12),
               ),
             ],
@@ -206,7 +206,7 @@ class _CreateStoreScreenState extends State<CreateStoreScreen> {
       }
       setState(() {
         _error =
-            '$msg\n\nContrato: docs/BACKEND_STORE_ONBOARDING.md · §13.0 FRONTEND_INTEGRATION_CONTEXT.md';
+            '$msg\n\nVer docs/FRONTEND_INTEGRATION_CONTEXT.md (onboarding tienda).';
       });
     } catch (e) {
       if (!mounted) return;
