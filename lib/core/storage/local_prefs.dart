@@ -62,14 +62,14 @@ class LocalPrefs {
 
   /// Borra **toda** la persistencia local de Quick POS al desvincular el dispositivo.
   ///
-  /// Conserva solo: [getOrCreateDeviceId] (`deviceId`) y override de URL API
-  /// ([_kApiBaseUrlOverrideV1]), para no perder identidad del terminal ni la config de backend.
-  Future<void> clearAllLocalQuickPosDataPreservingDeviceAndApiConfig() async {
+  /// Conserva solo [getOrCreateDeviceId] (`deviceId`). La URL del API guardada
+  /// en Configuración se borra para que vuelva a aplicar `--dart-define` / default.
+  Future<void> clearAllLocalQuickPosDataPreservingDeviceId() async {
     // Sincroniza con disco (Android puede cachear lecturas hasta reload).
     try {
       await _prefs.reload();
     } catch (_) {}
-    const keep = {_kDeviceId, _kApiBaseUrlOverrideV1};
+    const keep = {_kDeviceId};
     for (final k in List<String>.from(_prefs.getKeys())) {
       if (keep.contains(k)) continue;
       await _prefs.remove(k);

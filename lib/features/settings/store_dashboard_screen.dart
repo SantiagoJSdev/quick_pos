@@ -276,7 +276,8 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Desvincular tienda'),
         content: const Text(
-          'Se borrará la tienda guardada en este dispositivo. '
+          'Se borrará la tienda guardada en este dispositivo y la URL del '
+          'backend que hayas configurado manualmente. '
           'Podrás enlazar o crear otra cuando quieras. '
           'Los datos del servidor no se eliminan.',
         ),
