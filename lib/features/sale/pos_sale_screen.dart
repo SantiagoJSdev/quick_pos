@@ -1977,11 +1977,10 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     required String documentCode,
   }) {
     if (!mounted) return;
-    var dialogOpen = true;
     final docC = documentCode.trim();
     showDialog<void>(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: false,
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: PosSaleUi.surface,
@@ -2042,14 +2041,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           ),
         );
       },
-    ).then((_) {
-      dialogOpen = false;
-    });
-    Timer(const Duration(seconds: 2), () {
-      if (!mounted || !dialogOpen) return;
-      final nav = Navigator.of(context, rootNavigator: true);
-      if (nav.canPop()) nav.pop();
-    });
+    );
   }
 
   String _posCurrencyLabel(String code) {
