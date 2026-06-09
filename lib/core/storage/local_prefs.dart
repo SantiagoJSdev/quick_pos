@@ -474,6 +474,70 @@ class LocalPrefs {
     return a + b + c + d + e + f;
   }
 
+  /// Quita una operación de **todas** las colas locales por [opId].
+  ///
+  /// La cola del dispositivo es la que reenvía en `sync/push`; borrar filas en el
+  /// servidor no evita que vuelva a aparecer hasta descartarla aquí.
+  Future<bool> removePendingSyncOpByOpId(String opId) async {
+    final id = opId.trim();
+    if (id.isEmpty) return false;
+    var removed = false;
+
+    final sales = await loadPendingSales();
+    final salesNext = sales.where((e) => e.opId != id).toList(growable: false);
+    if (salesNext.length != sales.length) {
+      removed = true;
+      await savePendingSales(salesNext);
+    }
+
+    final adjusts = await loadPendingInventoryAdjusts();
+    final adjustsNext = adjusts
+        .where((e) => e.opId != id)
+        .toList(growable: false);
+    if (adjustsNext.length != adjusts.length) {
+      removed = true;
+      await savePendingInventoryAdjusts(adjustsNext);
+    }
+
+    final purchases = await loadPendingPurchaseReceives();
+    final purchasesNext = purchases
+        .where((e) => e.opId != id)
+        .toList(growable: false);
+    if (purchasesNext.length != purchases.length) {
+      removed = true;
+      await savePendingPurchaseReceives(purchasesNext);
+    }
+
+    final returns = await loadPendingSaleReturns();
+    final returnsNext = returns
+        .where((e) => e.opId != id)
+        .toList(growable: false);
+    if (returnsNext.length != returns.length) {
+      removed = true;
+      await savePendingSaleReturns(returnsNext);
+    }
+
+    final suppliers = await loadPendingSupplierMutations();
+    final suppliersNext = suppliers
+        .where((e) => e.opId != id)
+        .toList(growable: false);
+    if (suppliersNext.length != suppliers.length) {
+      removed = true;
+      await savePendingSupplierMutations(suppliersNext);
+    }
+
+    final catalog = await loadPendingCatalogMutations();
+    final catalogNext = catalog
+        .where((e) => e.opId != id)
+        .toList(growable: false);
+    if (catalogNext.length != catalog.length) {
+      removed = true;
+      await savePendingCatalogMutations(catalogNext);
+    }
+
+    return removed;
+  }
+
   Future<List<CatalogProduct>> loadCatalogProductsCache() async {
     final raw = _prefs.getString(_kCatalogProductsCacheV1);
     if (raw == null || raw.isEmpty) return [];

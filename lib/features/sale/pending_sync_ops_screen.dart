@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -41,6 +43,7 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
       final purchases = await widget.localPrefs.loadPendingPurchaseReceives();
       final returns = await widget.localPrefs.loadPendingSaleReturns();
       final suppliers = await widget.localPrefs.loadPendingSupplierMutations();
+      final catalog = await widget.localPrefs.loadPendingCatalogMutations();
 
       final rows = <_PendingOpRow>[
         ...sales
@@ -88,6 +91,15 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
                 timestampIso: e.opTimestampIso,
               ),
             ),
+        ...catalog
+            .where((e) => e.storeId == widget.storeId)
+            .map(
+              (e) => _PendingOpRow(
+                opId: e.opId,
+                opType: e.type,
+                timestampIso: e.createdAtIso,
+              ),
+            ),
       ];
       rows.sort((a, b) => a.timestampIso.compareTo(b.timestampIso));
       if (!mounted) return;
@@ -104,6 +116,53 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
     }
   }
 
+  Future<void> _confirmDiscard(_PendingOpRow row) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PosSaleUi.surface,
+        title: const Text(
+          'Descartar operación',
+          style: TextStyle(color: PosSaleUi.text),
+        ),
+        content: Text(
+          'Se quitará de la cola local del dispositivo y dejará de reenviarse '
+          'en sync/push.\n\n'
+          'opId: ${row.opId}\n'
+          'Tipo: ${row.opType}\n\n'
+          'El historial en el servidor (SyncOperation / ops metrics) puede '
+          'seguir existiendo para auditoría. Si el dato no se aplicó en el '
+          'backend, corregilo manualmente o volvé a crear la operación.',
+          style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Descartar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final removed = await widget.localPrefs.removePendingSyncOpByOpId(row.opId);
+    if (!mounted) return;
+    if (!removed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró la operación en la cola.')),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Operación descartada de la cola local.')),
+    );
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filterType == 'ALL'
@@ -111,6 +170,16 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
         : _filterType == 'SUPPLIER'
         ? _rows
               .where((r) => r.opType.startsWith('SUPPLIER_'))
+              .toList(growable: false)
+        : _filterType == 'CATALOG'
+        ? _rows
+              .where(
+                (r) =>
+                    r.opType == 'CREATE_PRODUCT' ||
+                    r.opType == 'CREATE_PRODUCT_WITH_STOCK' ||
+                    r.opType == 'UPDATE_PRODUCT' ||
+                    r.opType == 'DEACTIVATE_PRODUCT',
+              )
               .toList(growable: false)
         : _rows.where((r) => r.opType == _filterType).toList(growable: false);
     return Scaffold(
@@ -207,6 +276,12 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
                               onSelected: (_) =>
                                   setState(() => _filterType = 'SUPPLIER'),
                             ),
+                            ChoiceChip(
+                              label: const Text('CATALOG_*'),
+                              selected: _filterType == 'CATALOG',
+                              onSelected: (_) =>
+                                  setState(() => _filterType = 'CATALOG'),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 10),
@@ -264,6 +339,16 @@ class _PendingSyncOpsScreenState extends State<PendingSyncOpsScreen> {
                                             Icons.copy,
                                             size: 18,
                                             color: PosSaleUi.textMuted,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Descartar de la cola',
+                                          onPressed: () =>
+                                              unawaited(_confirmDiscard(r)),
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            size: 18,
+                                            color: Colors.orangeAccent,
                                           ),
                                         ),
                                       ],

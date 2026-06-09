@@ -114,15 +114,21 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
   }
 
   Map<String, dynamic> _editBody() {
-    return <String, dynamic>{
+    final body = <String, dynamic>{
       'name': _name.text.trim(),
-      'phone': _optOrNull(_phone),
-      'email': _optOrNull(_email),
-      'address': _optOrNull(_address),
-      'taxId': _composeTaxId(),
-      'notes': _optOrNull(_notes),
       'active': _active,
     };
+    final p = _optOrNull(_phone);
+    final em = _optOrNull(_email);
+    final ad = _optOrNull(_address);
+    final tx = _composeTaxId();
+    final no = _optOrNull(_notes);
+    if (p != null) body['phone'] = p;
+    if (em != null) body['email'] = em;
+    if (ad != null) body['address'] = ad;
+    if (tx != null) body['taxId'] = tx;
+    if (no != null) body['notes'] = no;
+    return body;
   }
 
   bool get _useOfflineQueueFirst => !widget.shellOnline;
