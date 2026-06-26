@@ -21,12 +21,11 @@ class ProductsApi {
   Future<List<CatalogProduct>> listProducts(
     String storeId, {
     bool includeInactive = false,
-    String source = 'auto',
   }) async {
     final raw = await _client.getJsonList(
       '/products',
       storeId,
-      query: {'includeInactive': includeInactive.toString(), 'source': source},
+      query: {'includeInactive': includeInactive.toString()},
     );
     return raw.map(CatalogProduct.fromJson).toList();
   }

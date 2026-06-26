@@ -15,7 +15,7 @@ class AppConfig {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:3002/api/v1',
+    defaultValue: 'https://quick-guak.onrender.com/api/v1',
 
     // defaultValue: 'http://192.168.0.199:3002/api/v1',
   );
@@ -32,10 +32,7 @@ class AppConfig {
 
   /// Clave ops para `PATCH .../dashboard-config` si el backend no usa PIN
   /// (`FRONTEND_DASHBOARD_API.md` — header `X-Ops-Api-Key`).
-  static const String _opsApiKeyOverride = String.fromEnvironment(
-    'OPS_API_KEY',
-    defaultValue: '',
-  );
+  static const String _opsApiKeyOverride = String.fromEnvironment('OPS_API_KEY', defaultValue: '');
 
   static String? _runtimeApiBaseUrlOverride;
 

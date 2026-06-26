@@ -60,7 +60,7 @@
               { "key": "X-Store-Id", "value": "{{storeId}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/products?source=auto&includeInactive=false",
+              "raw": "{{baseUrl}}/api/v1/products?includeInactive=false",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "products"],
               "query": [
