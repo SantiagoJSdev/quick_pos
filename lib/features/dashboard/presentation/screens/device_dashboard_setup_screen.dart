@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/api/api_error.dart';
-import '../../../../core/config/app_config.dart';
 import '../../../../core/pos/pos_terminal_info.dart';
 import '../../../../core/storage/local_prefs.dart';
 import '../../../sale/pos_sale_ui_tokens.dart';
@@ -54,8 +53,9 @@ class _DeviceDashboardSetupScreenState extends State<DeviceDashboardSetupScreen>
   }
 
   Future<void> _activate() async {
-    if (!AppConfig.adminPinMatches(_pinCtrl.text)) {
-      setState(() => _error = 'PIN de administración incorrecto.');
+    final pin = _pinCtrl.text.trim();
+    if (pin.isEmpty) {
+      setState(() => _error = 'Ingresá el PIN del servidor.');
       return;
     }
     final deviceId = _deviceId;
@@ -71,7 +71,7 @@ class _DeviceDashboardSetupScreenState extends State<DeviceDashboardSetupScreen>
       final config = await widget.repository.activateKioskMode(
         storeId: widget.storeId,
         deviceId: deviceId,
-        adminPin: _pinCtrl.text.trim(),
+        adminPin: pin,
       );
       if (!mounted) return;
       setState(() {
@@ -141,7 +141,7 @@ class _DeviceDashboardSetupScreenState extends State<DeviceDashboardSetupScreen>
             controller: _pinCtrl,
             obscureText: true,
             decoration: const InputDecoration(
-              labelText: 'PIN administración',
+              labelText: 'PIN del servidor (DASHBOARD_ADMIN_PIN)',
               border: OutlineInputBorder(),
             ),
           ),

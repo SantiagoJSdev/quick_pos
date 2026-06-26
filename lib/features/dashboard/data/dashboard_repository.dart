@@ -105,10 +105,7 @@ class DashboardRepository {
 
   Future<bool> _readCachedOperationalVisible(String deviceId) async {
     final enabled = await _localPrefs?.getCachedDashboardEnabled(deviceId);
-    if (enabled != true) return false;
-    final mode = await _localPrefs?.getCachedDeviceMode();
-    if (mode == DeviceMode.dashboard.apiValue) return false;
-    return true;
+    return enabled == true;
   }
 
   Future<void> _cacheDeviceConfig(
@@ -122,19 +119,24 @@ class DashboardRepository {
     );
   }
 
-  /// Habilita reportes en este terminal (POS + dashboard), sin modo TV.
+  /// Habilita dashboard en este terminal (`PATCH .../dashboard-config`).
   Future<DeviceDashboardConfig> enableOperationalDashboard({
     required String storeId,
     required String deviceId,
     required String adminPin,
   }) async {
-    // Solo activar flag; no forzar HYBRID (algunos backends aún no lo aceptan).
     final config = await _api.patchDashboardConfig(
       storeId: storeId,
       deviceId: deviceId,
       adminPin: adminPin,
       dashboardEnabled: true,
+      deviceMode: DeviceMode.dashboard,
+      regenerateToken: true,
     );
+    final token = config.dashboardAccessToken;
+    if (token != null && token.isNotEmpty) {
+      await _localPrefs?.saveDashboardAccessToken(deviceId, token);
+    }
     await _cacheDeviceConfig(deviceId, config);
     return config;
   }
@@ -161,22 +163,12 @@ class DashboardRepository {
     required String storeId,
     required String deviceId,
     required String adminPin,
-  }) async {
-    final config = await _api.patchDashboardConfig(
+  }) {
+    return enableOperationalDashboard(
       storeId: storeId,
       deviceId: deviceId,
       adminPin: adminPin,
-      dashboardEnabled: true,
-      deviceMode: DeviceMode.dashboard,
-      dashboardView: 'SALES_SUMMARY',
-      regenerateToken: true,
     );
-    final token = config.dashboardAccessToken;
-    if (token != null && token.isNotEmpty) {
-      await _localPrefs?.saveDashboardAccessToken(deviceId, token);
-    }
-    await _cacheDeviceConfig(deviceId, config);
-    return config;
   }
 
   Future<void> _cacheKioskPayload(

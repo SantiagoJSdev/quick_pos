@@ -6,14 +6,12 @@ import 'package:flutter/services.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
-import '../../core/config/app_config.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import '../dashboard/domain/device_dashboard_config.dart';
 import '../dashboard/presentation/screens/dashboard_home_screen.dart';
-import '../dashboard/presentation/screens/device_dashboard_setup_screen.dart';
 import '../dashboard/data/dashboard_repository.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'exchange_rate_today_screen.dart';
@@ -199,13 +197,11 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => _DashboardAdminPinDialog(
-        title: enable
-            ? 'Habilitar dashboard operativo'
-            : 'Deshabilitar dashboard operativo',
+        title: enable ? 'Habilitar dashboard' : 'Deshabilitar dashboard',
         message: enable
-            ? 'Solo este dispositivo verá el botón de reportes. '
-              'El cambio queda guardado en el servidor.'
-            : 'Este equipo dejará de mostrar el dashboard operativo.',
+            ? 'Ingresá el PIN del servidor (DASHBOARD_ADMIN_PIN). '
+              'La app envía el PATCH con el storeId y deviceId de este equipo.'
+            : 'Este equipo dejará de mostrar el dashboard.',
       ),
     );
     if (pin == null || pin.isEmpty || !mounted) return;
@@ -230,7 +226,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
         SnackBar(
           content: Text(
             enable
-                ? 'Dashboard habilitado en este dispositivo.'
+                ? 'Dashboard habilitado en el servidor. Token guardado en este dispositivo.'
                 : 'Dashboard deshabilitado en este dispositivo.',
           ),
         ),
@@ -302,6 +298,18 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     SystemNavigator.pop();
   }
 
+  String _dashboardAccessHint() {
+    if (!widget.onlineStatus) {
+      return 'Sin conexión: no se puede verificar si este equipo tiene '
+          'dashboard habilitado.';
+    }
+
+    return 'El dashboard no está habilitado en este dispositivo. '
+        'Tocá «Habilitar dashboard» e ingresá el PIN del servidor '
+        '(DASHBOARD_ADMIN_PIN). No hace falta configurarlo en Postman: '
+        'la app usa el storeId y el deviceId de abajo.';
+  }
+
   Widget _buildDashboardAccessSection(BuildContext context) {
     if (_deviceAccessLoading) {
       return const Padding(
@@ -349,12 +357,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
               border: Border.all(color: PosSaleUi.border),
             ),
             child: Text(
-              widget.onlineStatus
-                  ? 'El dashboard operativo no está habilitado en este '
-                    'dispositivo. Un administrador puede activarlo abajo o '
-                    'desde el backend (`dashboardEnabled: true`).'
-                  : 'Sin conexión: no se puede verificar si este equipo tiene '
-                    'dashboard habilitado.',
+              _dashboardAccessHint(),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: PosSaleUi.textMuted,
                 height: 1.35,
@@ -370,9 +373,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 : () => _toggleOperationalDashboard(enable: true),
             icon: Icon(enabled ? Icons.visibility_off_outlined : Icons.visibility_outlined),
             label: Text(
-              enabled
-                  ? 'Deshabilitar dashboard en este dispositivo'
-                  : 'Habilitar dashboard en este dispositivo',
+              enabled ? 'Deshabilitar dashboard' : 'Habilitar dashboard',
             ),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size.fromHeight(44),
@@ -387,37 +388,6 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
             ),
           ),
         ],
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: widget.onlineStatus
-              ? () async {
-                  final ok = await showStoreConfigPinDialog(context);
-                  if (!ok || !context.mounted) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (ctx) => DeviceDashboardSetupScreen(
-                        storeId: widget.storeId,
-                        repository: widget.dashboardRepository,
-                        localPrefs: widget.localPrefs,
-                      ),
-                    ),
-                  );
-                }
-              : null,
-          icon: const Icon(Icons.tv_outlined),
-          label: const Text('Configurar dashboard TV (kiosk)'),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(44),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'TV = pantalla completa solo lectura. Operativo = reportes dentro del POS.',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: PosSaleUi.textMuted,
-            height: 1.35,
-          ),
-        ),
       ],
     );
   }
@@ -780,13 +750,8 @@ String _dashboardPatchErrorHint(ApiError e) {
       msg.toLowerCase().contains('invalid') ||
       msg.toLowerCase().contains('pin') ||
       msg.toLowerCase().contains('unauthorized')) {
-    return 'El servidor rechazó el PIN (${e.statusCode}).\n'
-        'No es un endpoint extra en la app: hay que configurar el backend.\n'
-        '• En el `.env` del API: `DASHBOARD_ADMIN_PIN=1200Mia` (mismo que la app)\n'
-        '• Reiniciar el servidor Nest después de cambiar el `.env`\n'
-        '• Alternativa: `OPS_API_KEY` en el servidor y compilar la app con '
-        '`--dart-define=OPS_API_KEY=...`\n'
-        'Detalle: $msg';
+    return 'PIN rechazado por el servidor (${e.statusCode}). '
+        'Verificá DASHBOARD_ADMIN_PIN en el `.env` del API.\n$msg';
   }
   if (e.statusCode == 404) {
     return 'Dispositivo no registrado en el servidor (${e.statusCode}). '
@@ -827,11 +792,12 @@ class _DashboardAdminPinDialogState extends State<_DashboardAdminPinDialog> {
   }
 
   void _submit() {
-    if (!AppConfig.adminPinMatches(_ctrl.text)) {
-      setState(() => _err = 'Clave incorrecta.');
+    final pin = _ctrl.text.trim();
+    if (pin.isEmpty) {
+      setState(() => _err = 'Ingresá el PIN del servidor.');
       return;
     }
-    Navigator.pop(context, _ctrl.text.trim());
+    Navigator.pop(context, pin);
   }
 
   @override
@@ -849,7 +815,7 @@ class _DashboardAdminPinDialogState extends State<_DashboardAdminPinDialog> {
             obscureText: _obscure,
             autofocus: true,
             decoration: InputDecoration(
-              labelText: 'PIN administración',
+              labelText: 'PIN del servidor (DASHBOARD_ADMIN_PIN)',
               border: const OutlineInputBorder(),
               errorText: _err.isEmpty ? null : _err,
               suffixIcon: IconButton(

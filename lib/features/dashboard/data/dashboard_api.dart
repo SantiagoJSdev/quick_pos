@@ -93,10 +93,7 @@ class DashboardApi {
     if (regenerateToken != null) body['regenerateToken'] = regenerateToken;
 
     final pin = adminPin.trim();
-    final headers = <String, String>{
-      'X-Dashboard-Admin-Pin': pin,
-      'X-Config-Admin-Pin': pin,
-    };
+    final headers = <String, String>{'X-Dashboard-Admin-Pin': pin};
     final opsKey = AppConfig.effectiveOpsApiKey;
     if (opsKey != null) {
       headers['X-Ops-Api-Key'] = opsKey;
