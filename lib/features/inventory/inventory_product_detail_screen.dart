@@ -541,7 +541,7 @@ class _InventoryProductDetailScreenState
                       (m) => Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
-                          title: Text(m.type),
+                          title: Text(m.typeLabelEs),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
