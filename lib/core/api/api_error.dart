@@ -23,6 +23,84 @@ class ApiError implements Exception {
     return '$base\n(requestId: $requestId)';
   }
 
+  /// Mensaje en español para conflictos de catálogo (SKU / código de barras duplicado).
+  /// Si no parece un duplicado, devuelve [userMessageForSupport].
+  String get catalogConflictMessageEs {
+    final blob = '${error.toLowerCase()}\n${messages.join('\n').toLowerCase()}';
+    final looksDuplicate =
+        blob.contains('unique') ||
+        blob.contains('duplicate') ||
+        blob.contains('already exists') ||
+        blob.contains('already exist') ||
+        blob.contains('already registered') ||
+        blob.contains('constraint failed') ||
+        blob.contains('p2002') ||
+        ((statusCode == 409) &&
+            (blob.contains('barcode') ||
+                blob.contains('sku') ||
+                blob.contains('product')));
+    if (!looksDuplicate) return userMessageForSupport;
+
+    final isBarcode =
+        blob.contains('barcode') ||
+        blob.contains('código de barras') ||
+        blob.contains('codigo de barras');
+    final isSku = blob.contains('sku') && !isBarcode;
+    if (isBarcode) {
+      return 'Ya existe un producto con este código de barras. '
+          'Usá otro código o editá el producto que ya está en el catálogo.';
+    }
+    if (isSku) {
+      return 'Ya existe un producto con este SKU. '
+          'Usá otro SKU o editá el producto existente.';
+    }
+    return 'Producto duplicado: ya existe uno con el mismo código de barras o SKU. '
+        'Revisá el catálogo o editá el producto existente.';
+  }
+
+  /// True si el error parece stock insuficiente (venta / sync).
+  bool get looksLikeInsufficientStock {
+    final blob = '${error.toLowerCase()}\n${messages.join('\n').toLowerCase()}';
+    const keys = <String>[
+      'insufficient_stock',
+      'insufficient stock',
+      'stock_insufficient',
+      'out of stock',
+      'sin stock',
+      'no hay stock',
+      'not enough stock',
+      'stock insuficiente',
+      'inventory_insufficient',
+      'qty_exceed',
+      'quantity exceeds',
+    ];
+    for (final k in keys) {
+      if (blob.contains(k)) return true;
+    }
+    return false;
+  }
+
+  /// Mensaje de cobro POS en español (stock, pagos, etc.).
+  String get posCheckoutMessageEs {
+    if (looksLikeInsufficientStock) {
+      return 'Error: no hay stock suficiente para uno o más productos del ticket.';
+    }
+    final raw = userMessageForSupport;
+    if (raw.contains('PAYMENTS_TOTAL_MISMATCH')) {
+      return 'El total pagado no cuadra con el total del ticket.';
+    }
+    if (raw.contains('PAYMENTS_MISSING_FX_SNAPSHOT')) {
+      return 'Falta la tasa (fxSnapshot) para convertir uno de los pagos.';
+    }
+    if (raw.contains('PAYMENTS_FX_PAIR_MISMATCH')) {
+      return 'La tasa enviada no coincide con el par de monedas del ticket.';
+    }
+    if (raw.contains('PAYMENTS_INVALID_AMOUNT')) {
+      return 'Hay un monto de pago inválido. Revisá los campos de cobro.';
+    }
+    return raw;
+  }
+
   bool get isClientError => statusCode >= 400 && statusCode < 500;
   bool get isServerError => statusCode >= 500 && statusCode < 600;
 

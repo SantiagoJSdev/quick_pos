@@ -294,8 +294,42 @@ class LocalPrefs {
 
   Future<void> appendPendingSale(PendingSaleEntry entry) async {
     final list = await loadPendingSales();
+    final saleId = entry.sale['id']?.toString().trim() ?? '';
+    if (saleId.isNotEmpty) {
+      final i = list.indexWhere(
+        (e) =>
+            e.storeId == entry.storeId &&
+            (e.sale['id']?.toString().trim() ?? '') == saleId,
+      );
+      if (i >= 0) {
+        // Mismo cobro: conservar opId original (evita doble factura al reintentar).
+        list[i] = PendingSaleEntry(
+          opId: list[i].opId,
+          storeId: entry.storeId,
+          sale: entry.sale,
+          opTimestampIso: list[i].opTimestampIso,
+        );
+        await savePendingSales(list);
+        return;
+      }
+    }
     list.add(entry);
     await savePendingSales(list);
+  }
+
+  /// `opId` ya en cola para este `sale.id`, o null.
+  Future<String?> findPendingSaleOpId({
+    required String storeId,
+    required String saleId,
+  }) async {
+    final sid = saleId.trim();
+    if (sid.isEmpty) return null;
+    final list = await loadPendingSales();
+    for (final e in list) {
+      if (e.storeId != storeId) continue;
+      if ((e.sale['id']?.toString().trim() ?? '') == sid) return e.opId;
+    }
+    return null;
   }
 
   Future<int> countPendingSalesForStore(String storeId) async {

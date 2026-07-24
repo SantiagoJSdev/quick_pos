@@ -1459,18 +1459,27 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   /// Encola venta y ticket local sin tocar el carrito (tras cobro optimista).
+  /// Reutiliza el mismo `opId` si ya hay cola para este `sale.id` (evita doble factura).
   Future<void> _persistQueuedSaleNoCartClear({
     required Map<String, dynamic> restBody,
     required String doc,
     required String? clientSaleId,
     required String? totalDocument,
   }) async {
-    final syncOpId = ClientMutationId.newId();
     final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
       restBody,
       widget.storeId,
       fxSource: 'POS_OFFLINE',
     );
+    final saleId =
+        (clientSaleId ?? saleMap['id']?.toString() ?? '').trim();
+    final existingOpId = saleId.isEmpty
+        ? null
+        : await widget.localPrefs.findPendingSaleOpId(
+            storeId: widget.storeId,
+            saleId: saleId,
+          );
+    final syncOpId = existingOpId ?? ClientMutationId.newId();
     await widget.localPrefs.appendPendingSale(
       PendingSaleEntry(
         opId: syncOpId,
@@ -1479,14 +1488,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         opTimestampIso: DateTime.now().toUtc().toIso8601String(),
       ),
     );
-    if (clientSaleId != null &&
-        clientSaleId.isNotEmpty &&
-        totalDocument != null) {
+    if (saleId.isNotEmpty && totalDocument != null) {
       final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
       await widget.localPrefs.prependRecentSaleTicket(
         RecentSaleTicket(
           storeId: widget.storeId,
-          saleId: clientSaleId,
+          saleId: saleId,
           totalDocument: totalDocument,
           documentCurrencyCode: doc,
           recordedAtIso: DateTime.now().toIso8601String(),
@@ -1574,19 +1581,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         mixedPaymentText: mixedPaymentTextSnapshot,
         mixedPaymentApplied: mixedPaymentAppliedSnapshot,
       );
-      final raw = e.userMessageForSupport;
-      final msg = raw.contains('PAYMENTS_TOTAL_MISMATCH')
-          ? 'El total pagado no cuadra con el total del ticket.'
-          : raw.contains('PAYMENTS_MISSING_FX_SNAPSHOT')
-          ? 'Falta la tasa (fxSnapshot) para convertir uno de los pagos.'
-          : raw.contains('PAYMENTS_FX_PAIR_MISMATCH')
-          ? 'La tasa enviada no coincide con el par de monedas del ticket.'
-          : raw.contains('PAYMENTS_INVALID_AMOUNT')
-          ? 'Hay un monto de pago inválido. Revisá los campos de cobro.'
-          : raw;
+      final msg = e.posCheckoutMessageEs;
       _logPosCheckoutApiFailure(e, msg);
       _showCheckoutPanelMessage(
-        'El servidor rechazó la venta. Ticket restaurado. $msg',
+        e.looksLikeInsufficientStock
+            ? msg
+            : 'El servidor rechazó la venta. Ticket restaurado. $msg',
         error: true,
         duration: const Duration(seconds: 6),
       );
@@ -1628,12 +1628,20 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     String doc, {
     bool queuedBecauseShellOffline = false,
   }) async {
-    final syncOpId = ClientMutationId.newId();
     final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
       restBody,
       widget.storeId,
       fxSource: 'POS_OFFLINE',
     );
+    final clientSid = _pendingSaleId;
+    final saleId = (clientSid ?? saleMap['id']?.toString() ?? '').trim();
+    final existingOpId = saleId.isEmpty
+        ? null
+        : await widget.localPrefs.findPendingSaleOpId(
+            storeId: widget.storeId,
+            saleId: saleId,
+          );
+    final syncOpId = existingOpId ?? ClientMutationId.newId();
     await widget.localPrefs.appendPendingSale(
       PendingSaleEntry(
         opId: syncOpId,
@@ -1643,13 +1651,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       ),
     );
     final totalDoc = _cartTotalDocument;
-    final clientSid = _pendingSaleId;
-    if (clientSid != null && clientSid.isNotEmpty && totalDoc != null) {
+    if (saleId.isNotEmpty && totalDoc != null) {
       final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
       await widget.localPrefs.prependRecentSaleTicket(
         RecentSaleTicket(
           storeId: widget.storeId,
-          saleId: clientSid,
+          saleId: saleId,
           totalDocument: totalDoc,
           documentCurrencyCode: doc,
           recordedAtIso: DateTime.now().toIso8601String(),

@@ -10,10 +10,8 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/suppliers_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
-import '../../core/network/network_errors.dart';
 import '../../core/photos/pending_product_photo_upload_entry.dart';
 import '../../core/models/supplier.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
@@ -140,6 +138,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _syncListPriceFromCostAndMargin();
       unawaited(_prefetchStoreDefaultMargin());
       unawaited(_loadSuppliers());
+      if (!widget.isEdit) {
+        final b = widget.initialBarcode?.trim();
+        if (b != null && b.isNotEmpty) {
+          unawaited(_checkBarcodeFieldForDuplicate());
+        }
+      }
     });
   }
 
@@ -391,6 +395,100 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return out;
   }
 
+  Future<CatalogProduct?> _findProductByBarcode(String raw) async {
+    final c = raw.trim().toLowerCase();
+    if (c.isEmpty) return null;
+    final excludeId = widget.existing?.id.trim();
+
+    CatalogProduct? matchIn(Iterable<CatalogProduct> list) {
+      for (final p in list) {
+        if (excludeId != null &&
+            excludeId.isNotEmpty &&
+            p.id.trim() == excludeId) {
+          continue;
+        }
+        final b = p.barcode?.trim().toLowerCase();
+        if (b != null && b.isNotEmpty && b == c) return p;
+      }
+      return null;
+    }
+
+    // Alta/edición online-only: consultar catálogo del servidor si hay red.
+    if (widget.shellOnline) {
+      try {
+        final list = await widget.productsApi.listProducts(widget.storeId);
+        if (!mounted) return null;
+        await widget.localPrefs.saveCatalogProductsCache(list);
+        return matchIn(list);
+      } catch (_) {
+        // Fallback a caché si el listado falla (sin crear offline).
+      }
+    }
+
+    final cached = await widget.localPrefs.loadCatalogProductsCache();
+    return matchIn(cached);
+  }
+
+  Future<void> _warnBarcodeAlreadyExists(CatalogProduct existing) async {
+    if (!mounted) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Código de barras ya registrado'),
+        content: Text(
+          'Ya existe el producto «${existing.name}»'
+          '${existing.sku.trim().isNotEmpty ? ' (SKU ${existing.sku})' : ''} '
+          'con este código de barras.\n\n'
+          'No hace falta crear otro: podés editar el existente o usar otro código.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'clear'),
+            child: const Text('Usar otro código'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'edit'),
+            child: const Text('Editar existente'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'clear') {
+      setState(() {
+        _barcode.clear();
+        _allowNoBarcode = false;
+        _error = null;
+      });
+      return;
+    }
+    if (choice == 'edit') {
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<Object?>(
+          builder: (ctx) => ProductFormScreen(
+            storeId: widget.storeId,
+            productsApi: widget.productsApi,
+            suppliersApi: widget.suppliersApi,
+            localPrefs: widget.localPrefs,
+            storesApi: widget.storesApi,
+            catalogInvalidationBus: widget.catalogInvalidationBus,
+            uploadsApi: widget.uploadsApi,
+            shellOnline: widget.shellOnline,
+            existing: existing,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _checkBarcodeFieldForDuplicate() async {
+    final code = _barcode.text.trim();
+    if (code.isEmpty || _loading) return;
+    final existing = await _findProductByBarcode(code);
+    if (!mounted || existing == null) return;
+    await _warnBarcodeAlreadyExists(existing);
+  }
+
   Future<void> _scanBarcodeField() async {
     if (!BarcodeScannerScreen.isSupported) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -403,10 +501,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
+    final trimmed = code.trim();
     setState(() {
-      _barcode.text = code;
+      _barcode.text = trimmed;
       _allowNoBarcode = false;
+      _error = null;
     });
+    final existing = await _findProductByBarcode(trimmed);
+    if (!mounted || existing == null) return;
+    await _warnBarcodeAlreadyExists(existing);
   }
 
   Future<void> _pickPhoto(ImageSource source) async {
@@ -442,81 +545,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         localFilePath: path,
         createdAtIso: DateTime.now().toUtc().toIso8601String(),
       ),
-    );
-  }
-
-  Future<void> _finishSoloProductOfflineQueue(CatalogProduct product) async {
-    final localId = 'local_${ClientMutationId.newId()}';
-    final pending = await widget.localPrefs.loadPendingCatalogMutations();
-    pending.add(
-      PendingCatalogMutationEntry(
-        opId: ClientMutationId.newId(),
-        storeId: widget.storeId,
-        type: PendingCatalogMutationEntry.typeCreate,
-        createdAtIso: DateTime.now().toUtc().toIso8601String(),
-        localTempId: localId,
-        body: product.toCreateBody(),
-      ),
-    );
-    await widget.localPrefs.savePendingCatalogMutations(pending);
-    final cached = await widget.localPrefs.loadCatalogProductsCache();
-    final localRow = CatalogProduct(
-      id: localId,
-      sku: product.sku.isEmpty ? 'PENDIENTE' : product.sku,
-      name: product.name,
-      barcode: product.barcode,
-      description: product.description,
-      type: product.type,
-      price: product.price,
-      cost: product.cost,
-      currency: product.currency,
-      active: true,
-      unit: product.unit,
-      supplierId: product.supplierId,
-      pricingMode: product.pricingMode,
-      marginPercentOverride: product.marginPercentOverride,
-      imageUrl: product.imageUrl,
-    );
-    cached.add(localRow);
-    await widget.localPrefs.saveCatalogProductsCache(cached);
-    await _queuePhotoUploadIfAny(localId);
-    widget.catalogInvalidationBus?.invalidateFromLocalMutation(
-      productIds: {localId},
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _photoLocalPath == null
-              ? 'Sin conexión: producto guardado en cola.'
-              : 'Sin conexión: producto y foto guardados en cola.',
-        ),
-      ),
-    );
-    Navigator.of(context).pop(localRow);
-  }
-
-  /// Copia local usada al encolar edición offline (misma forma que en caché).
-  CatalogProduct _catalogSnapshotForQueuedEdit(CatalogProduct product) {
-    return CatalogProduct(
-      id: widget.existing!.id,
-      sku: product.sku,
-      name: product.name,
-      barcode: product.barcode,
-      description: product.description,
-      type: product.type,
-      price: product.price,
-      cost: product.cost,
-      currency: product.currency,
-      active: true,
-      unit: product.unit,
-      supplierId: product.supplierId,
-      pricingMode: product.pricingMode,
-      marginPercentOverride: product.marginPercentOverride,
-      effectiveMarginPercent: product.effectiveMarginPercent,
-      marginComputedPercent: product.marginComputedPercent,
-      suggestedPrice: product.suggestedPrice,
-      imageUrl: product.imageUrl,
     );
   }
 
@@ -593,6 +621,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   Future<void> _save() async {
     setState(() => _error = null);
+    if (!widget.shellOnline) {
+      setState(() {
+        _error =
+            'Para crear o editar productos necesitás conexión con el servidor. '
+            'Activá el modo online e intentá de nuevo.';
+      });
+      return;
+    }
     final skuInput = _sku.text.trim();
     final name = _name.text.trim();
     final barcode = _barcode.text.trim();
@@ -610,6 +646,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             'este producto solo se venderá por búsqueda manual.';
       });
       return;
+    }
+    if (barcode.isNotEmpty) {
+      final existingByBarcode = await _findProductByBarcode(barcode);
+      if (!mounted) return;
+      if (existingByBarcode != null) {
+        setState(() {
+          _error =
+              'Ya existe «${existingByBarcode.name}»'
+              '${existingByBarcode.sku.trim().isNotEmpty ? ' (SKU ${existingByBarcode.sku})' : ''} '
+              'con este código de barras. Editá ese producto o usá otro código.';
+        });
+        return;
+      }
     }
     if (!_decimal.hasMatch(cost)) {
       setState(
@@ -743,71 +792,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       } on ApiError catch (e) {
         if (!mounted) return;
         if (e.isLikelyTransportFailure) {
-          final pending = await widget.localPrefs.loadPendingCatalogMutations();
-          pending.add(
-            PendingCatalogMutationEntry(
-              opId: ClientMutationId.newId(),
-              storeId: widget.storeId,
-              type: PendingCatalogMutationEntry.typeUpdate,
-              createdAtIso: DateTime.now().toUtc().toIso8601String(),
-              productId: widget.existing!.id,
-              body: product.toPatchBody(),
-            ),
-          );
-          await widget.localPrefs.savePendingCatalogMutations(pending);
-          final cached = await widget.localPrefs.loadCatalogProductsCache();
-          final snapshot = _catalogSnapshotForQueuedEdit(product);
-          final i = cached.indexWhere((x) => x.id == widget.existing!.id);
-          if (i >= 0) {
-            cached[i] = snapshot;
-          }
-          await widget.localPrefs.saveCatalogProductsCache(cached);
-          await _queuePhotoUploadIfAny(widget.existing!.id);
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sin conexión: edición guardada en cola.'),
-            ),
-          );
-          Navigator.of(context).pop(snapshot);
+          setState(() {
+            _error =
+                'Sin conexión con el servidor. Los productos solo se pueden '
+                'guardar online. Verificá la red e intentá de nuevo.';
+          });
           return;
         }
-        setState(() => _error = e.userMessageForSupport);
+        setState(() => _error = e.catalogConflictMessageEs);
       } catch (e) {
         if (!mounted) return;
-        if (shouldTreatAsOfflineQueueable(e)) {
-          final pending = await widget.localPrefs.loadPendingCatalogMutations();
-          pending.add(
-            PendingCatalogMutationEntry(
-              opId: ClientMutationId.newId(),
-              storeId: widget.storeId,
-              type: PendingCatalogMutationEntry.typeUpdate,
-              createdAtIso: DateTime.now().toUtc().toIso8601String(),
-              productId: widget.existing!.id,
-              body: product.toPatchBody(),
-            ),
-          );
-          await widget.localPrefs.savePendingCatalogMutations(pending);
-          final cached = await widget.localPrefs.loadCatalogProductsCache();
-          final snapshot = _catalogSnapshotForQueuedEdit(product);
-          final i = cached.indexWhere((x) => x.id == widget.existing!.id);
-          if (i >= 0) {
-            cached[i] = snapshot;
-          }
-          await widget.localPrefs.saveCatalogProductsCache(cached);
-          await _queuePhotoUploadIfAny(widget.existing!.id);
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sin conexión: edición guardada en cola.'),
-            ),
-          );
-          Navigator.of(context).pop(snapshot);
-          return;
-        }
         setState(
           () => _error = e is ApiError
-              ? e.userMessageForSupport
+              ? e.catalogConflictMessageEs
               : 'No se pudo guardar. Verificá la conexión.',
         );
       } finally {
@@ -849,15 +846,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (choice == null) return;
 
     if (choice == _NewProductStockChoice.soloProducto) {
-      if (!widget.shellOnline) {
-        setState(() => _loading = true);
-        try {
-          await _finishSoloProductOfflineQueue(product);
-        } finally {
-          if (mounted) setState(() => _loading = false);
-        }
-        return;
-      }
       setState(() => _loading = true);
       try {
         var created = await widget.productsApi.createProduct(
@@ -892,19 +880,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       } on ApiError catch (e) {
         if (!mounted) return;
         if (e.isLikelyTransportFailure) {
-          await _finishSoloProductOfflineQueue(product);
+          setState(() {
+            _error =
+                'Sin conexión con el servidor. Los productos solo se pueden '
+                'crear online. Verificá la red e intentá de nuevo.';
+          });
           return;
         }
-        setState(() => _error = e.userMessageForSupport);
+        setState(() => _error = e.catalogConflictMessageEs);
       } catch (e) {
         if (!mounted) return;
-        if (shouldTreatAsOfflineQueueable(e)) {
-          await _finishSoloProductOfflineQueue(product);
-          return;
-        }
         setState(
           () => _error = e is ApiError
-              ? e.userMessageForSupport
+              ? e.catalogConflictMessageEs
               : 'No se pudo guardar. Verificá la conexión.',
         );
       } finally {
@@ -1087,6 +1075,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             keyboardType: TextInputType.text,
             enabled: !_loading,
+            textInputAction: TextInputAction.done,
+            onEditingComplete: () {
+              FocusManager.instance.primaryFocus?.unfocus();
+              unawaited(_checkBarcodeFieldForDuplicate());
+            },
           ),
           SwitchListTile(
             title: const Text('Permitir sin código de barras'),
