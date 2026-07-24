@@ -301,7 +301,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     Duration? duration,
   }) {
     _cartFeedbackTimer?.cancel();
-    _pendingCountPoll?.cancel();
     final d = duration ?? Duration(seconds: error ? 4 : 3);
     if (_checkoutPanelVisible) {
       setState(() {
@@ -333,6 +332,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   @override
   void dispose() {
     _cartFeedbackTimer?.cancel();
+    _pendingCountPoll?.cancel();
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _search.dispose();
     _searchFocus.dispose();
@@ -1976,15 +1976,18 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     );
   }
 
-  void _showCartLinePriceDetail({
+  Future<void> _showCartLinePriceDetail({
     required PosCartLine line,
     required String unitFunctional,
     required String lineTotalFunctional,
     required String functionalCode,
     required String documentCode,
-  }) {
+  }) async {
     if (!mounted) return;
+    _ensureSearchUnfocusedForCheckout();
     final docC = documentCode.trim();
+    final stockLabel = await _stockLabelFromLocalCache(line.productId);
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -2026,6 +2029,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             children: [
               if (line.isByWeight && line.displayGrams != null)
                 _posCartDetailRow('Peso', '${line.displayGrams} g'),
+              _posCartDetailRow('Stock disponible', stockLabel),
               _posCartDetailRow('Costo $functionalCode', unitFunctional),
               _posCartDetailRow('Costo $docC', line.documentUnitPrice),
               _posCartDetailRow(
@@ -2049,6 +2053,35 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         );
       },
     );
+  }
+
+  /// Stock desde caché local de inventario (sin llamar al API).
+  Future<String> _stockLabelFromLocalCache(String productId) async {
+    final pid = productId.trim();
+    if (pid.isEmpty) return 'Sin dato local';
+    try {
+      final inv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      for (final row in inv) {
+        final id = row.productId.trim().isNotEmpty
+            ? row.productId.trim()
+            : (row.product?.id.trim() ?? '');
+        if (id != pid) continue;
+        final q = row.quantity.trim();
+        final r = row.reserved.trim();
+        final qty = double.tryParse(q.replaceAll(',', '.'));
+        final reserved = double.tryParse(r.replaceAll(',', '.')) ?? 0;
+        if (qty == null) return q.isEmpty ? 'Sin dato local' : q;
+        final available = qty - reserved;
+        final availStr = available == available.roundToDouble()
+            ? '${available.round()}'
+            : available.toStringAsFixed(2);
+        if (reserved > 0) {
+          return '$availStr (disp.) · $q en inventario';
+        }
+        return availStr;
+      }
+    } catch (_) {}
+    return 'Sin dato local';
   }
 
   String _posCurrencyLabel(String code) {
@@ -2091,10 +2124,20 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   bool _isCompactPosLayout(BuildContext context) =>
       MediaQuery.sizeOf(context).shortestSide < 600;
 
-  /// En móvil, al enfocar el buscador ocultamos el panel de cobro para que no compita
-  /// por altura con el ticket y no quede pegado al input.
-  bool _hideCheckoutWhileSearchFocused(BuildContext context) =>
-      _isCompactPosLayout(context) && _searchFocus.hasFocus;
+  /// En móvil, ocultar cobro solo mientras se busca de verdad (texto o teclado).
+  /// Si el foco queda “pegado” sin teclado ni texto, el botón Cobrar no debe desaparecer.
+  bool _hideCheckoutWhileSearchFocused(BuildContext context) {
+    if (!_isCompactPosLayout(context)) return false;
+    if (!_searchFocus.hasFocus) return false;
+    if (_search.text.trim().isNotEmpty) return true;
+    return MediaQuery.viewInsetsOf(context).bottom > 0;
+  }
+
+  void _ensureSearchUnfocusedForCheckout() {
+    if (!_searchFocus.hasFocus) return;
+    _searchFocus.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
 
   /// Panel modal a pantalla completa en el Stack raíz (no dentro del `Expanded`).
   bool _keyboardSuggestionOverlayActive(BuildContext context) {
@@ -2628,7 +2671,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                               : RefreshIndicator(
                                                   color: PosSaleUi.primary,
                                                   onRefresh: _load,
-                                                  child: ListView.separated(
+                                                  child: NotificationListener<
+                                                    ScrollNotification
+                                                  >(
+                                                    onNotification: (n) {
+                                                      if (n
+                                                          is ScrollStartNotification) {
+                                                        _ensureSearchUnfocusedForCheckout();
+                                                      }
+                                                      return false;
+                                                    },
+                                                    child: ListView.separated(
                                                     itemCount: _cart.length,
                                                     separatorBuilder:
                                                         (context, i) =>
@@ -2660,20 +2713,28 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                         lineTotalFunctional: lf,
                                                         functionalCode: func,
                                                         documentCode: dCode,
-                                                        onMinus: () =>
-                                                            _bumpLine(i, -1),
-                                                        onPlus: () =>
-                                                            _bumpLine(i, 1),
-                                                        onQtyTap: () =>
-                                                            _onLineQtyTap(i),
+                                                        onMinus: () {
+                                                          _ensureSearchUnfocusedForCheckout();
+                                                          _bumpLine(i, -1);
+                                                        },
+                                                        onPlus: () {
+                                                          _ensureSearchUnfocusedForCheckout();
+                                                          _bumpLine(i, 1);
+                                                        },
+                                                        onQtyTap: () {
+                                                          _ensureSearchUnfocusedForCheckout();
+                                                          _onLineQtyTap(i);
+                                                        },
                                                         onDismissed: () =>
                                                             _removeLineByProductId(
                                                               l.productId,
                                                             ),
-                                                        onShowPriceDetail: () =>
+                                                        onShowPriceDetail: () {
+                                                          unawaited(
                                                             _showCartLinePriceDetail(
                                                               line: l,
-                                                              unitFunctional: uf,
+                                                              unitFunctional:
+                                                                  uf,
                                                               lineTotalFunctional:
                                                                   lf,
                                                               functionalCode:
@@ -2681,8 +2742,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                               documentCode:
                                                                   dCode,
                                                             ),
+                                                          );
+                                                        },
                                                       );
                                                     },
+                                                  ),
                                                   ),
                                                 ),
                                         ),
