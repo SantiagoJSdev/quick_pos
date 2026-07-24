@@ -14,6 +14,7 @@ import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/network/product_image_url.dart';
 import '../../core/idempotency/client_mutation_id.dart';
+import '../../core/models/active_pos_cart_draft.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/held_ticket.dart';
@@ -75,7 +76,8 @@ class PosSaleScreen extends StatefulWidget {
   State<PosSaleScreen> createState() => _PosSaleScreenState();
 }
 
-class _PosSaleScreenState extends State<PosSaleScreen> {
+class _PosSaleScreenState extends State<PosSaleScreen>
+    with WidgetsBindingObserver {
   static const double _kSearchRowExtent = 72;
   static const int _kSearchVisibleRows = 5;
 
@@ -109,6 +111,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   int _pendingSyncCount = 0;
   bool _flushBusy = false;
   Timer? _pendingCountPoll;
+  Timer? _cartDraftPersistTimer;
 
   String? _cartFeedback;
   bool _cartFeedbackIsError = false;
@@ -130,6 +133,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _search.addListener(() => setState(() {}));
     _searchFocus.addListener(() => setState(() {}));
     PosTerminalInfo.load(widget.localPrefs).then((t) {
@@ -143,6 +147,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       const Duration(seconds: 5),
       (_) => _refreshPendingCount(),
     );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _cartDraftPersistTimer?.cancel();
+      unawaited(_persistActiveCartDraftNow());
+    }
   }
 
   @override
@@ -331,6 +346,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cartDraftPersistTimer?.cancel();
+    unawaited(_persistActiveCartDraftNow());
     _cartFeedbackTimer?.cancel();
     _pendingCountPoll?.cancel();
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
@@ -338,6 +356,87 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     _searchFocus.dispose();
     _paymentFunctionalCtrl.dispose();
     super.dispose();
+  }
+
+  void _schedulePersistActiveCartDraft() {
+    _cartDraftPersistTimer?.cancel();
+    _cartDraftPersistTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_persistActiveCartDraftNow());
+    });
+  }
+
+  Future<void> _persistActiveCartDraftNow() async {
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      final terminal = _terminal;
+      final doc = _selectedDocumentCurrency;
+      if (terminal == null) return;
+      if (_cart.isEmpty || doc == null || doc.trim().isEmpty) {
+        await widget.localPrefs.clearActivePosCartDraft(
+          storeId: widget.storeId,
+          deviceId: terminal.deviceId,
+        );
+        return;
+      }
+      await widget.localPrefs.saveActivePosCartDraft(
+        ActivePosCartDraft(
+          storeId: widget.storeId,
+          deviceId: terminal.deviceId,
+          documentCurrencyCode: doc,
+          lines: _cart.map(_cloneCartLine).toList(),
+          updatedAtIso: DateTime.now().toUtc().toIso8601String(),
+          activeHeldTicketId: _activeHeldTicketId,
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[POS cart draft] persist failed: $e\n$st');
+    }
+  }
+
+  Future<void> _clearActiveCartDraftNow() async {
+    _cartDraftPersistTimer?.cancel();
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      final terminal = _terminal;
+      if (terminal == null) return;
+      await widget.localPrefs.clearActivePosCartDraft(
+        storeId: widget.storeId,
+        deviceId: terminal.deviceId,
+      );
+    } catch (e, st) {
+      debugPrint('[POS cart draft] clear failed: $e\n$st');
+    }
+  }
+
+  Future<void> _restoreActiveCartDraftIfNeeded() async {
+    if (!mounted || _cart.isNotEmpty || _settings == null) return;
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      if (!mounted || _terminal == null) return;
+      final draft = await widget.localPrefs.loadActivePosCartDraft(
+        storeId: widget.storeId,
+        deviceId: _terminal!.deviceId,
+      );
+      if (!mounted || draft == null || draft.lines.isEmpty) return;
+      final docCode = _matchDocumentCurrencyOption(draft.documentCurrencyCode);
+      if (docCode == null) {
+        debugPrint(
+          '[POS cart draft] moneda ${draft.documentCurrencyCode} no disponible',
+        );
+        return;
+      }
+      setState(() {
+        _selectedDocumentCurrency = docCode;
+        _cart
+          ..clear()
+          ..addAll(draft.lines.map(_cloneCartLine));
+        _activeHeldTicketId = draft.activeHeldTicketId;
+        _invalidateCheckoutIdempotency();
+      });
+      await _reloadFxForDocumentCurrency(rebuildDocumentLinePrices: false);
+    } catch (e, st) {
+      debugPrint('[POS cart draft] restore failed: $e\n$st');
+    }
   }
 
   List<String> get _documentCurrencyOptions {
@@ -579,6 +678,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     _cart
       ..clear()
       ..addAll(next);
+    _schedulePersistActiveCartDraft();
   }
 
   void _invalidateCheckoutIdempotency() {
@@ -653,6 +753,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
     });
     _clearMixedPaymentInputs();
+    await _clearActiveCartDraftNow();
     await _refreshHeldCount();
     if (mounted) _showCartFeedback('Ticket guardado en espera');
   }
@@ -692,6 +793,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
     });
     _clearMixedPaymentInputs();
+    _schedulePersistActiveCartDraft();
     await _reloadFxForDocumentCurrency(rebuildDocumentLinePrices: false);
     if (mounted) _showCartFeedback('Ticket recuperado desde guardados');
   }
@@ -715,6 +817,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           _activeHeldTicketId = null;
           _invalidateCheckoutIdempotency();
         });
+        await _clearActiveCartDraftNow();
       }
     }
     await _applyHeldTicketToCart(t);
@@ -802,7 +905,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         _all = active;
         _settings = cached;
         _contextError = null;
-        _selectedDocumentCurrency = doc;
+        if (_cart.isEmpty) {
+          _selectedDocumentCurrency = doc;
+        }
         _error = active.isEmpty
             ? 'Sin productos en caché. Conectate para sincronizar el catálogo.'
             : null;
@@ -905,7 +1010,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       setState(() {
         _settings = settings;
         _contextError = null;
-        _selectedDocumentCurrency = doc;
+        if (_cart.isEmpty) {
+          _selectedDocumentCurrency = doc;
+        }
       });
       await _reloadFxForDocumentCurrency();
     } on ApiError catch (e) {
@@ -920,7 +1027,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         setState(() {
           _settings = cached;
           _contextError = null;
-          _selectedDocumentCurrency = doc;
+          if (_cart.isEmpty) {
+            _selectedDocumentCurrency = doc;
+          }
         });
         await _reloadFxForDocumentCurrency();
       } else {
@@ -943,7 +1052,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         setState(() {
           _settings = cached;
           _contextError = null;
-          _selectedDocumentCurrency = doc;
+          if (_cart.isEmpty) {
+            _selectedDocumentCurrency = doc;
+          }
         });
         await _reloadFxForDocumentCurrency();
       } else {
@@ -971,6 +1082,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       await _bootstrapShellOfflineLoad();
       if (!mounted) return;
       setState(() => _loading = false);
+      await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
       debugPrint('[POS load] end offline branch');
@@ -987,6 +1099,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       await _bootstrapShellOfflineLoad();
       if (!mounted) return;
       setState(() => _loading = false);
+      await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
       debugPrint('[POS load] end online timeout→cache branch');
@@ -996,6 +1109,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
     if (shouldFinalizeLoading) {
       setState(() => _loading = false);
+      await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
     }
@@ -1130,6 +1244,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       setState(() {
         _cart.removeWhere((l) => l.productId == p.id);
       });
+      _schedulePersistActiveCartDraft();
       _search.clear();
       _searchFocus.unfocus();
       _showCartFeedback('${p.name} quitado del ticket');
@@ -1160,6 +1275,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         _cart.add(line);
       }
     });
+    _schedulePersistActiveCartDraft();
     _search.clear();
     _searchFocus.unfocus();
     _showCartFeedback('${p.name} · ${res.displayGrams} g en el ticket');
@@ -1227,6 +1343,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         );
       }
     });
+    _schedulePersistActiveCartDraft();
     _search.clear();
     _searchFocus.unfocus();
     _showCartFeedback('${p.name} × $add en el ticket');
@@ -1400,6 +1517,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
+    unawaited(_clearActiveCartDraftNow());
 
     if (!mounted) return;
     _showCheckoutPanelMessage(
@@ -1438,6 +1556,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _paymentFunctionalCtrl.text = mixedPaymentText;
       _appliedFunctionalPayment = mixedPaymentApplied;
     });
+    _schedulePersistActiveCartDraft();
   }
 
   PosCartLine _cloneCartLine(PosCartLine l) {
@@ -1675,6 +1794,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
+    await _clearActiveCartDraftNow();
     if (heldId != null) {
       await widget.localPrefs.deleteHeldTicket(heldId);
       await _refreshHeldCount();
@@ -2303,11 +2423,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final next = cur + delta;
     if (next <= 0) {
       setState(() => _cart.removeAt(index));
+      _schedulePersistActiveCartDraft();
       return;
     }
     setState(() {
       _cart[index].quantity = PosCartQuantity.stringify(next);
     });
+    _schedulePersistActiveCartDraft();
   }
 
   Future<void> _onLineQtyTap(int index) async {
@@ -2330,6 +2452,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
       _cart[index].quantity = n;
     });
+    _schedulePersistActiveCartDraft();
   }
 
   void _removeLineByProductId(String productId) {
@@ -2337,6 +2460,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
       _cart.removeWhere((l) => l.productId == productId);
     });
+    _schedulePersistActiveCartDraft();
   }
 
   void _clearCart() {
@@ -2347,6 +2471,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
+    unawaited(_clearActiveCartDraftNow());
   }
 
   void _simulateRandomScan() {
