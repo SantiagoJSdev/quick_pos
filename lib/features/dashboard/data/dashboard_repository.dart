@@ -1,7 +1,10 @@
 import 'dart:convert';
 
+import '../../../core/api/sales_api.dart';
+import '../../../core/models/sales_list_page.dart';
 import '../../../core/storage/local_prefs.dart';
 import '../domain/dashboard_filters.dart';
+import '../domain/dashboard_local_dates.dart';
 import '../domain/dashboard_summary.dart';
 import '../domain/dashboard_timeseries.dart';
 import '../domain/dashboard_device_access.dart';
@@ -17,6 +20,7 @@ class DashboardHomeData {
     required this.timeSeries,
     required this.payments,
     required this.loadedAt,
+    this.totalsCorrectedForCaracas = false,
   });
 
   final DashboardSummary summary;
@@ -24,18 +28,30 @@ class DashboardHomeData {
   final SalesPaymentsReport payments;
   final DateTime loadedAt;
 
-  String get periodLabel => '${summary.from} — ${summary.to}';
+  /// KPIs recalculados con calendario America/Caracas porque la tienda está en UTC.
+  final bool totalsCorrectedForCaracas;
+
+  String get periodLabel {
+    final tz = summary.timezone.trim();
+    final range = '${summary.from} — ${summary.to}';
+    if (tz.isEmpty) return range;
+    return '$range · $tz';
+  }
+
   String get currencyCode => summary.currencyCode;
 }
 
 class DashboardRepository {
   DashboardRepository({
     required DashboardApi api,
+    SalesApi? salesApi,
     LocalPrefs? localPrefs,
   }) : _api = api,
+       _salesApi = salesApi,
        _localPrefs = localPrefs;
 
   final DashboardApi _api;
+  final SalesApi? _salesApi;
   final LocalPrefs? _localPrefs;
 
   Future<DashboardHomeData> loadHome(
@@ -47,13 +63,132 @@ class DashboardRepository {
       _api.getSalesTimeSeries(storeId, filters),
       _api.getSalesPayments(storeId, filters),
     ]);
+    var summary = results[0] as DashboardSummary;
+    var corrected = false;
+    if (_shouldCorrectUtcStoreToCaracas(summary)) {
+      final fixed = await _recomputeSummaryInCaracas(storeId, filters, summary);
+      if (fixed != null) {
+        summary = fixed;
+        corrected = true;
+      }
+    }
     return DashboardHomeData(
-      summary: results[0] as DashboardSummary,
+      summary: summary,
       timeSeries: results[1] as DashboardTimeSeries,
       payments: results[2] as SalesPaymentsReport,
       loadedAt: DateTime.now(),
+      totalsCorrectedForCaracas: corrected,
     );
   }
+
+  bool _shouldCorrectUtcStoreToCaracas(DashboardSummary summary) {
+    final tz = summary.timezone.trim().toUpperCase();
+    return tz == 'UTC' || tz == 'ETC/UTC' || tz == 'GMT';
+  }
+
+  /// Si la tienda reporta en UTC, los `dateFrom`/`dateTo` no coinciden con el
+  /// día comercial en Venezuela. Recalculamos KPIs desde `GET /sales` filtrando
+  /// por calendario America/Caracas.
+  Future<DashboardSummary?> _recomputeSummaryInCaracas(
+    String storeId,
+    DashboardFilters filters,
+    DashboardSummary server,
+  ) async {
+    final salesApi = _salesApi;
+    if (salesApi == null) return null;
+    final range = DashboardLocalDates.businessRange(filters);
+    if (range == null) return null;
+
+    final window = DashboardLocalDates.utcFetchWindow(range.from, range.to);
+    final items = await _loadAllSalesInWindow(
+      salesApi,
+      storeId,
+      dateFrom: window.from,
+      dateTo: window.to,
+    );
+
+    final inRange = <SalesListItem>[];
+    for (final it in items) {
+      if (!_isCountableSale(it)) continue;
+      final created = DateTime.tryParse(it.createdAt ?? '');
+      if (created == null) continue;
+      final day = DashboardLocalDates.calendarDateInCaracas(created);
+      if (day.isBefore(range.from) || day.isAfter(range.to)) continue;
+      inRange.add(it);
+    }
+
+    var gross = 0.0;
+    for (final it in inRange) {
+      gross += _parseMoney(it.totalFunctional);
+    }
+    final tickets = inRange.length;
+    final avg = tickets == 0 ? 0.0 : gross / tickets;
+    final from = DashboardLocalDates.formatYmd(range.from);
+    final to = DashboardLocalDates.formatYmd(range.to);
+
+    return DashboardSummary(
+      storeId: server.storeId.isNotEmpty ? server.storeId : storeId,
+      currencyCode: server.currencyCode.isNotEmpty
+          ? server.currencyCode
+          : 'USD',
+      from: from,
+      to: to,
+      timezone: 'America/Caracas',
+      grossSales: _moneyString(gross),
+      returns: '0',
+      netSales: _moneyString(gross),
+      tickets: tickets,
+      avgTicket: _moneyString(avg),
+      returnRate: null,
+      preset: server.preset,
+      rangeInterpretation:
+          'Totales recalculados en el dispositivo con calendario '
+          'America/Caracas (UTC−4). La tienda en el servidor sigue en UTC; '
+          'conviene cambiar timezone de la tienda a America/Caracas.',
+    );
+  }
+
+  Future<List<SalesListItem>> _loadAllSalesInWindow(
+    SalesApi salesApi,
+    String storeId, {
+    required String dateFrom,
+    required String dateTo,
+  }) async {
+    final all = <SalesListItem>[];
+    String? cursor;
+    for (var page = 0; page < 20; page++) {
+      final batch = await salesApi.listSales(
+        storeId,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        limit: 200,
+        cursor: cursor,
+      );
+      all.addAll(batch.items);
+      if (!batch.hasMore) break;
+      cursor = batch.nextCursor;
+      if (cursor == null || cursor.isEmpty) break;
+    }
+    return all;
+  }
+
+  static bool _isCountableSale(SalesListItem it) {
+    final s = (it.status ?? '').trim().toUpperCase();
+    if (s.isEmpty) return true;
+    if (s.contains('CANCEL') || s.contains('VOID') || s == 'DRAFT') {
+      return false;
+    }
+    return true;
+  }
+
+  static double _parseMoney(String? raw) {
+    if (raw == null) return 0;
+    final t = raw.trim().replaceAll(',', '.');
+    if (t.isEmpty) return 0;
+    return double.tryParse(t) ?? 0;
+  }
+
+  static String _moneyString(double v) => v.toStringAsFixed(2);
 
   Future<DeviceDashboardPayload> loadKiosk({
     required String deviceId,

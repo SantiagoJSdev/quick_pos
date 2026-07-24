@@ -160,6 +160,27 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
                   color: PosSaleUi.textMuted,
                 ),
               ),
+              if (data.totalsCorrectedForCaracas) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8A34A).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Totales ajustados al día en Venezuela (UTC−4). '
+                    'En el servidor la tienda está en UTC; pedile al backend '
+                    'cambiar timezone a America/Caracas.',
+                    style: TextStyle(
+                      color: Color(0xFFE8A34A),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               KpiRow(data: data),
               const SizedBox(height: 16),
