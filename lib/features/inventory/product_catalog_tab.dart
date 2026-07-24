@@ -148,10 +148,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     }).toList();
   }
 
-  Future<void> _openForm({
-    CatalogProduct? existing,
-    String? prefilledBarcode,
-  }) async {
+  Future<void> _openForm({CatalogProduct? existing}) async {
     await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
@@ -164,21 +161,10 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           uploadsApi: widget.uploadsApi,
           shellOnline: widget.shellOnline,
           existing: existing,
-          initialBarcode: existing == null ? prefilledBarcode : null,
         ),
       ),
     );
     if (mounted) await _load();
-  }
-
-  bool _anyProductExactBarcode(String raw) {
-    final c = raw.trim().toLowerCase();
-    if (c.isEmpty) return false;
-    for (final p in _all) {
-      final b = p.barcode?.trim().toLowerCase();
-      if (b != null && b.isNotEmpty && b == c) return true;
-    }
-    return false;
   }
 
   Future<void> _onScanPressed() async {
@@ -194,20 +180,7 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
     FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
-    setState(() => _searchController.text = code);
-    if (!_anyProductExactBarcode(code)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'No hay producto activo con este código de barras.',
-          ),
-          action: SnackBarAction(
-            label: 'Crear producto',
-            onPressed: () => _openForm(prefilledBarcode: code),
-          ),
-        ),
-      );
-    }
+    setState(() => _searchController.text = code.trim());
   }
 
   Future<void> _confirmDeactivate(CatalogProduct p) async {

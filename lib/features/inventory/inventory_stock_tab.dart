@@ -247,20 +247,25 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   /// Solo líneas cuyo producto sigue en catálogo **activo** más filas sintéticas
   /// (catálogo sin movimientos en inventario). El API de inventario puede seguir
   /// devolviendo stock de productos dados de baja en catálogo; no los listamos acá.
+  ///
+  /// Enriquece `product.barcode`/`sku`/`name` desde el catálogo porque
+  /// `GET /inventory` a menudo no trae el código de barras embebido.
   List<InventoryLine> _mergeInventoryWithCatalog(
     List<InventoryLine> list,
     List<CatalogProduct> catalogRaw,
   ) {
     final catalog = catalogRaw.where((p) => p.active).toList();
-    final activeIds = catalog
-        .map((p) => p.id.trim())
-        .where((id) => id.isNotEmpty)
-        .toSet();
-    final filteredList = list.where((l) {
+    final byId = <String, CatalogProduct>{
+      for (final p in catalog)
+        if (p.id.trim().isNotEmpty) p.id.trim(): p,
+    };
+    final activeIds = byId.keys.toSet();
+    final filteredList = <InventoryLine>[];
+    for (final l in list) {
       final pid = _lineProductId(l);
-      if (pid.isEmpty) return false;
-      return activeIds.contains(pid);
-    }).toList();
+      if (pid.isEmpty || !activeIds.contains(pid)) continue;
+      filteredList.add(_enrichLineFromCatalog(l, byId[pid]!));
+    }
     final inInventory = filteredList
         .map(_lineProductId)
         .where((id) => id.isNotEmpty)
@@ -286,33 +291,28 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     );
   }
 
-  bool _anyLineExactBarcode(String raw) {
-    final c = raw.trim().toLowerCase();
-    if (c.isEmpty) return false;
-    for (final line in _all) {
-      final b = line.product?.barcode?.trim().toLowerCase();
-      if (b != null && b.isNotEmpty && b == c) return true;
-    }
-    return false;
-  }
-
-  Future<void> _openNewProductWithBarcode(String code) async {
-    final result = await Navigator.of(context).push<Object?>(
-      MaterialPageRoute(
-        builder: (ctx) => ProductFormScreen(
-          storeId: widget.storeId,
-          productsApi: widget.productsApi,
-          suppliersApi: widget.suppliersApi,
-          localPrefs: widget.localPrefs,
-          storesApi: widget.storesApi,
-          catalogInvalidationBus: widget.catalogInvalidationBus,
-          uploadsApi: widget.uploadsApi,
-          shellOnline: widget.shellOnline,
-          initialBarcode: code,
-        ),
+  InventoryLine _enrichLineFromCatalog(InventoryLine line, CatalogProduct p) {
+    final existing = line.product;
+    final barcode = (p.barcode?.trim().isNotEmpty == true)
+        ? p.barcode
+        : existing?.barcode;
+    final sku = p.sku.trim().isNotEmpty ? p.sku : existing?.sku;
+    final name = p.name.trim().isNotEmpty ? p.name : existing?.name;
+    return InventoryLine(
+      id: line.id,
+      productId: line.productId.trim().isNotEmpty ? line.productId : p.id,
+      quantity: line.quantity,
+      reserved: line.reserved,
+      minStock: line.minStock,
+      averageUnitCostFunctional: line.averageUnitCostFunctional,
+      totalCostFunctional: line.totalCostFunctional,
+      product: InventoryProductSummary(
+        id: (existing?.id.trim().isNotEmpty == true) ? existing!.id : p.id,
+        sku: sku,
+        name: name,
+        barcode: barcode,
       ),
     );
-    if (result != null && mounted) await _load();
   }
 
   Future<void> _onScanPressed() async {
@@ -328,20 +328,7 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
     FocusManager.instance.primaryFocus?.unfocus();
     final code = await BarcodeScannerScreen.open(context);
     if (!mounted || code == null || code.isEmpty) return;
-    setState(() => _searchController.text = code);
-    if (!_anyLineExactBarcode(code)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'No hay producto en stock con este código de barras.',
-          ),
-          action: SnackBarAction(
-            label: 'Crear producto',
-            onPressed: () => _openNewProductWithBarcode(code),
-          ),
-        ),
-      );
-    }
+    setState(() => _searchController.text = code.trim());
   }
 
   Future<void> _openEditForLine(InventoryLine line) async {
