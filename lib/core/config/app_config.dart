@@ -10,6 +10,7 @@
 ///
 /// Por defecto en código: [defaultAdminPin]. Solo si al compilar pasás un valor **no vacío**:
 /// `flutter run --dart-define=CONFIG_ADMIN_PIN=otra_clave`
+/// flutter build apk --release
 class AppConfig {
   AppConfig._();
 
