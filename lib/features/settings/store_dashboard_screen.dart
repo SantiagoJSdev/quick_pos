@@ -31,6 +31,8 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.onlineStatus,
     required this.onConnectivityModeButtonPressed,
     required this.onBackendTransportFailure,
+    this.syncBusy = false,
+    this.onRequestSync,
   });
 
   final String storeId;
@@ -45,6 +47,10 @@ class StoreDashboardScreen extends StatefulWidget {
 
   /// Timeout / sin red al cargar settings: el shell marca backend inalcanzable para pasar a offline efectivo.
   final VoidCallback onBackendTransportFailure;
+
+  /// Sync manual (cola + catálogo/precios + tasa). Lo provee [MainShell].
+  final bool syncBusy;
+  final Future<void> Function()? onRequestSync;
 
   @override
   State<StoreDashboardScreen> createState() => _StoreDashboardScreenState();
@@ -686,6 +692,42 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   label: const Text('Registrar nueva tasa'),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(44),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: widget.syncBusy || widget.onRequestSync == null
+                      ? null
+                      : () async {
+                          await widget.onRequestSync!();
+                          if (!mounted) return;
+                          setState(() {
+                            _future = _loadSettingsWithCache();
+                          });
+                        },
+                  icon: widget.syncBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync),
+                  label: Text(
+                    widget.syncBusy ? 'Sincronizando…' : 'Sincronizar',
+                  ),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    backgroundColor: PosSaleUi.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Actualiza precios, tasa de cambio y envía ventas pendientes. '
+                  'No hace falta entrar al POS.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: PosSaleUi.textMuted,
+                    height: 1.35,
                   ),
                 ),
                 const SizedBox(height: 10),

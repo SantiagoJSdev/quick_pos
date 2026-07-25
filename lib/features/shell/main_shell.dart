@@ -84,6 +84,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   List<ConnectivityResult>? _lastConn;
   DateTime? _lastAutoSyncAt;
   bool _autoSyncBusy = false;
+  bool _manualHomeSyncBusy = false;
   bool _isOnline = true;
   bool _backendReachable = true;
   bool _manualForceOffline = false;
@@ -257,6 +258,179 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
+  /// Sync manual desde Inicio: cola + pull + catálogo + tasa (con feedback).
+  Future<void> _runManualSyncFromHome() async {
+    if (!mounted || _manualHomeSyncBusy) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (_manualForceOffline || !_isOnline) {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sin conexión: poné Online para sincronizar precios, tasa y cola.',
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _manualHomeSyncBusy = true);
+    messenger?.showSnackBar(
+      const SnackBar(
+        content: Text('Sincronizando…'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    try {
+      // Evitar que el auto-sync concurrente pise este ciclo.
+      while (_autoSyncBusy) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        if (!mounted) return;
+      }
+      _autoSyncBusy = true;
+      _lastAutoSyncAt = DateTime.now();
+
+      final t = await PosTerminalInfo.load(widget.localPrefs);
+      if (!mounted) return;
+
+      final cycle = await runSyncCycle(
+        storeId: widget.storeId,
+        prefs: widget.localPrefs,
+        syncApi: widget.syncApi,
+        deviceId: t.deviceId,
+        appVersion: t.appVersion,
+        catalogInvalidation: widget.catalogInvalidationBus,
+        doPull: true,
+        doFlush: true,
+      );
+
+      await flushPendingCatalogMutations(
+        storeId: widget.storeId,
+        prefs: widget.localPrefs,
+        productsApi: widget.productsApi,
+        catalogInvalidation: widget.catalogInvalidationBus,
+      );
+
+      // Forzar catálogo fresco (precios) aunque el pull no traiga ops.
+      var catalogOk = false;
+      try {
+        final list = await widget.productsApi.listProducts(
+          widget.storeId,
+          includeInactive: false,
+        );
+        await widget.localPrefs.saveCatalogProductsCache(list);
+        widget.catalogInvalidationBus.invalidateFromLocalMutation();
+        catalogOk = true;
+      } catch (e) {
+        traceApiConnectivity('manual sync catalog refresh failed: $e');
+      }
+
+      // Settings + tasa del par de la tienda.
+      var fxOk = false;
+      try {
+        final settings = await widget.storesApi.getBusinessSettings(
+          widget.storeId,
+        );
+        await widget.localPrefs.saveBusinessSettingsCache(
+          widget.storeId,
+          {
+            'id': settings.id,
+            'storeId': settings.storeId,
+            'defaultMarginPercent': settings.defaultMarginPercent,
+            'functionalCurrency': {
+              'code': settings.functionalCurrency.code,
+              'name': settings.functionalCurrency.name,
+            },
+            'defaultSaleDocCurrency': settings.defaultSaleDocCurrency == null
+                ? null
+                : {
+                    'code': settings.defaultSaleDocCurrency!.code,
+                    'name': settings.defaultSaleDocCurrency!.name,
+                  },
+            'store': {
+              'name': settings.storeName,
+              'type': settings.storeType,
+            },
+          },
+        );
+        final func = settings.functionalCurrency.code;
+        final doc =
+            settings.defaultSaleDocCurrency?.code ?? func;
+        if (func.toUpperCase() != doc.toUpperCase()) {
+          try {
+            final rate = await widget.exchangeRatesApi.getLatest(
+              widget.storeId,
+              baseCurrencyCode: func,
+              quoteCurrencyCode: doc,
+            );
+            await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
+              storeId: widget.storeId,
+              fetchedBase: func,
+              fetchedQuote: doc,
+              rate: rate,
+            );
+            fxOk = true;
+          } catch (_) {
+            try {
+              final rate = await widget.exchangeRatesApi.getLatest(
+                widget.storeId,
+                baseCurrencyCode: doc,
+                quoteCurrencyCode: func,
+              );
+              await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
+                storeId: widget.storeId,
+                fetchedBase: doc,
+                fetchedQuote: func,
+                rate: rate,
+              );
+              fxOk = true;
+            } catch (e) {
+              traceApiConnectivity('manual sync FX refresh failed: $e');
+            }
+          }
+        } else {
+          fxOk = true;
+        }
+      } catch (e) {
+        traceApiConnectivity('manual sync settings/FX failed: $e');
+      }
+
+      if (!mounted) return;
+      final parts = <String>[];
+      if (cycle.flush.removedCount > 0) {
+        parts.add('${cycle.flush.removedCount} op. enviadas');
+      }
+      if (cycle.pullOpsReceived > 0) {
+        parts.add('${cycle.pullOpsReceived} cambios recibidos');
+      }
+      if (catalogOk) parts.add('catálogo/precios');
+      if (fxOk) parts.add('tasa');
+      if (cycle.pullError != null) {
+        parts.add('pull: ${cycle.pullError}');
+      }
+      final msg = parts.isEmpty
+          ? 'Sincronización lista (sin cambios pendientes).'
+          : 'Sincronizado: ${parts.join(' · ')}.';
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 4)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text('No se pudo sincronizar: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      _autoSyncBusy = false;
+      if (mounted) setState(() => _manualHomeSyncBusy = false);
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -294,6 +468,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 localPrefs: widget.localPrefs,
                 forcedOffline: _manualForceOffline,
                 onlineStatus: _isOnline,
+                syncBusy: _manualHomeSyncBusy,
+                onRequestSync: _runManualSyncFromHome,
                 onBackendTransportFailure: () {
                   if (!mounted) return;
                   setState(() {
