@@ -1,4 +1,9 @@
-/// Filtros de reportes — solo query params; el backend calcula fechas con `preset`.
+import 'dashboard_local_dates.dart';
+
+/// Filtros de reportes — query params.
+///
+/// Los presets se expanden a `dateFrom`/`dateTo` con el calendario **local**
+/// del dispositivo (no se envía `preset`), para no depender del UTC del servidor.
 class DashboardFilters {
   const DashboardFilters({
     this.preset,
@@ -22,10 +27,15 @@ class DashboardFilters {
   final String? dateTo;
   final String? deviceId;
 
-  Map<String, String> toQueryParams() {
+  Map<String, String> toQueryParams({DateTime? now}) {
     final q = <String, String>{};
+    if (deviceId != null && deviceId!.isNotEmpty) {
+      q['deviceId'] = deviceId!;
+    }
     if (preset != null) {
-      q['preset'] = preset!.apiValue;
+      final range = DashboardLocalDates.rangeForPreset(preset!, now: now);
+      q['dateFrom'] = range.from;
+      q['dateTo'] = range.to;
       return q;
     }
     if (dateFrom != null && dateFrom!.isNotEmpty) {
@@ -33,9 +43,6 @@ class DashboardFilters {
     }
     if (dateTo != null && dateTo!.isNotEmpty) {
       q['dateTo'] = dateTo!;
-    }
-    if (deviceId != null && deviceId!.isNotEmpty) {
-      q['deviceId'] = deviceId!;
     }
     return q;
   }

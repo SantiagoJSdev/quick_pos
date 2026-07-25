@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/active_pos_cart_draft.dart';
 import '../models/held_ticket.dart';
 import '../models/local_supplier.dart';
 import '../models/recent_sale_ticket.dart';
@@ -33,6 +34,7 @@ const _kSyncPullSinceV1 = 'sync_pull_since_v1';
 const _kRecentSalesV1 = 'recent_sales_v1';
 const _kTicketDisplaySeqStateV1 = 'ticket_display_seq_state_v1';
 const _kHeldTicketsV1 = 'held_tickets_v1';
+const _kActivePosCartPrefix = 'active_pos_cart_v1_';
 const _kCatalogProductsCacheV1 = 'catalog_products_cache_v1';
 const _kPendingCatalogMutationsV1 = 'pending_catalog_mutations_v1';
 const _kBusinessSettingsCachePrefix = 'business_settings_cache_v1_';
@@ -294,8 +296,42 @@ class LocalPrefs {
 
   Future<void> appendPendingSale(PendingSaleEntry entry) async {
     final list = await loadPendingSales();
+    final saleId = entry.sale['id']?.toString().trim() ?? '';
+    if (saleId.isNotEmpty) {
+      final i = list.indexWhere(
+        (e) =>
+            e.storeId == entry.storeId &&
+            (e.sale['id']?.toString().trim() ?? '') == saleId,
+      );
+      if (i >= 0) {
+        // Mismo cobro: conservar opId original (evita doble factura al reintentar).
+        list[i] = PendingSaleEntry(
+          opId: list[i].opId,
+          storeId: entry.storeId,
+          sale: entry.sale,
+          opTimestampIso: list[i].opTimestampIso,
+        );
+        await savePendingSales(list);
+        return;
+      }
+    }
     list.add(entry);
     await savePendingSales(list);
+  }
+
+  /// `opId` ya en cola para este `sale.id`, o null.
+  Future<String?> findPendingSaleOpId({
+    required String storeId,
+    required String saleId,
+  }) async {
+    final sid = saleId.trim();
+    if (sid.isEmpty) return null;
+    final list = await loadPendingSales();
+    for (final e in list) {
+      if (e.storeId != storeId) continue;
+      if ((e.sale['id']?.toString().trim() ?? '') == sid) return e.opId;
+    }
+    return null;
   }
 
   Future<int> countPendingSalesForStore(String storeId) async {
@@ -1021,6 +1057,44 @@ class LocalPrefs {
       deviceId: deviceId,
     );
     return list.length;
+  }
+
+  String _activePosCartKey(String storeId, String deviceId) =>
+      '$_kActivePosCartPrefix${storeId}_$deviceId';
+
+  /// Ticket activo del POS (no es “en espera” ni cola de sync).
+  Future<ActivePosCartDraft?> loadActivePosCartDraft({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    final raw = _prefs.getString(_activePosCartKey(storeId, deviceId));
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final draft = ActivePosCartDraft.tryFromJson(
+        Map<String, dynamic>.from(decoded),
+      );
+      if (draft == null) return null;
+      if (draft.storeId != storeId || draft.deviceId != deviceId) return null;
+      return draft;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveActivePosCartDraft(ActivePosCartDraft draft) async {
+    await _prefs.setString(
+      _activePosCartKey(draft.storeId, draft.deviceId),
+      jsonEncode(draft.toJson()),
+    );
+  }
+
+  Future<void> clearActivePosCartDraft({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    await _prefs.remove(_activePosCartKey(storeId, deviceId));
   }
 
   /// Historial local de tickets: **hoy y ayer** (calendario local del dispositivo); al cargar se purgan entradas más viejas.

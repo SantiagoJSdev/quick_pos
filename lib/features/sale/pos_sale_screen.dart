@@ -14,6 +14,7 @@ import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/network/product_image_url.dart';
 import '../../core/idempotency/client_mutation_id.dart';
+import '../../core/models/active_pos_cart_draft.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/held_ticket.dart';
@@ -75,7 +76,8 @@ class PosSaleScreen extends StatefulWidget {
   State<PosSaleScreen> createState() => _PosSaleScreenState();
 }
 
-class _PosSaleScreenState extends State<PosSaleScreen> {
+class _PosSaleScreenState extends State<PosSaleScreen>
+    with WidgetsBindingObserver {
   static const double _kSearchRowExtent = 72;
   static const int _kSearchVisibleRows = 5;
 
@@ -109,6 +111,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   int _pendingSyncCount = 0;
   bool _flushBusy = false;
   Timer? _pendingCountPoll;
+  Timer? _cartDraftPersistTimer;
 
   String? _cartFeedback;
   bool _cartFeedbackIsError = false;
@@ -130,6 +133,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _search.addListener(() => setState(() {}));
     _searchFocus.addListener(() => setState(() {}));
     PosTerminalInfo.load(widget.localPrefs).then((t) {
@@ -143,6 +147,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       const Duration(seconds: 5),
       (_) => _refreshPendingCount(),
     );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _cartDraftPersistTimer?.cancel();
+      unawaited(_persistActiveCartDraftNow());
+    }
   }
 
   @override
@@ -301,7 +316,6 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     Duration? duration,
   }) {
     _cartFeedbackTimer?.cancel();
-    _pendingCountPoll?.cancel();
     final d = duration ?? Duration(seconds: error ? 4 : 3);
     if (_checkoutPanelVisible) {
       setState(() {
@@ -332,12 +346,97 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cartDraftPersistTimer?.cancel();
+    unawaited(_persistActiveCartDraftNow());
     _cartFeedbackTimer?.cancel();
+    _pendingCountPoll?.cancel();
     widget.catalogInvalidationBus.removeListener(_onCatalogInvalidated);
     _search.dispose();
     _searchFocus.dispose();
     _paymentFunctionalCtrl.dispose();
     super.dispose();
+  }
+
+  void _schedulePersistActiveCartDraft() {
+    _cartDraftPersistTimer?.cancel();
+    _cartDraftPersistTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_persistActiveCartDraftNow());
+    });
+  }
+
+  Future<void> _persistActiveCartDraftNow() async {
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      final terminal = _terminal;
+      final doc = _selectedDocumentCurrency;
+      if (terminal == null) return;
+      if (_cart.isEmpty || doc == null || doc.trim().isEmpty) {
+        await widget.localPrefs.clearActivePosCartDraft(
+          storeId: widget.storeId,
+          deviceId: terminal.deviceId,
+        );
+        return;
+      }
+      await widget.localPrefs.saveActivePosCartDraft(
+        ActivePosCartDraft(
+          storeId: widget.storeId,
+          deviceId: terminal.deviceId,
+          documentCurrencyCode: doc,
+          lines: _cart.map(_cloneCartLine).toList(),
+          updatedAtIso: DateTime.now().toUtc().toIso8601String(),
+          activeHeldTicketId: _activeHeldTicketId,
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[POS cart draft] persist failed: $e\n$st');
+    }
+  }
+
+  Future<void> _clearActiveCartDraftNow() async {
+    _cartDraftPersistTimer?.cancel();
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      final terminal = _terminal;
+      if (terminal == null) return;
+      await widget.localPrefs.clearActivePosCartDraft(
+        storeId: widget.storeId,
+        deviceId: terminal.deviceId,
+      );
+    } catch (e, st) {
+      debugPrint('[POS cart draft] clear failed: $e\n$st');
+    }
+  }
+
+  Future<void> _restoreActiveCartDraftIfNeeded() async {
+    if (!mounted || _cart.isNotEmpty || _settings == null) return;
+    try {
+      _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
+      if (!mounted || _terminal == null) return;
+      final draft = await widget.localPrefs.loadActivePosCartDraft(
+        storeId: widget.storeId,
+        deviceId: _terminal!.deviceId,
+      );
+      if (!mounted || draft == null || draft.lines.isEmpty) return;
+      final docCode = _matchDocumentCurrencyOption(draft.documentCurrencyCode);
+      if (docCode == null) {
+        debugPrint(
+          '[POS cart draft] moneda ${draft.documentCurrencyCode} no disponible',
+        );
+        return;
+      }
+      setState(() {
+        _selectedDocumentCurrency = docCode;
+        _cart
+          ..clear()
+          ..addAll(draft.lines.map(_cloneCartLine));
+        _activeHeldTicketId = draft.activeHeldTicketId;
+        _invalidateCheckoutIdempotency();
+      });
+      await _reloadFxForDocumentCurrency(rebuildDocumentLinePrices: false);
+    } catch (e, st) {
+      debugPrint('[POS cart draft] restore failed: $e\n$st');
+    }
   }
 
   List<String> get _documentCurrencyOptions {
@@ -579,6 +678,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     _cart
       ..clear()
       ..addAll(next);
+    _schedulePersistActiveCartDraft();
   }
 
   void _invalidateCheckoutIdempotency() {
@@ -653,6 +753,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
     });
     _clearMixedPaymentInputs();
+    await _clearActiveCartDraftNow();
     await _refreshHeldCount();
     if (mounted) _showCartFeedback('Ticket guardado en espera');
   }
@@ -692,6 +793,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
     });
     _clearMixedPaymentInputs();
+    _schedulePersistActiveCartDraft();
     await _reloadFxForDocumentCurrency(rebuildDocumentLinePrices: false);
     if (mounted) _showCartFeedback('Ticket recuperado desde guardados');
   }
@@ -715,6 +817,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
           _activeHeldTicketId = null;
           _invalidateCheckoutIdempotency();
         });
+        await _clearActiveCartDraftNow();
       }
     }
     await _applyHeldTicketToCart(t);
@@ -802,7 +905,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         _all = active;
         _settings = cached;
         _contextError = null;
-        _selectedDocumentCurrency = doc;
+        if (_cart.isEmpty) {
+          _selectedDocumentCurrency = doc;
+        }
         _error = active.isEmpty
             ? 'Sin productos en caché. Conectate para sincronizar el catálogo.'
             : null;
@@ -905,7 +1010,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       setState(() {
         _settings = settings;
         _contextError = null;
-        _selectedDocumentCurrency = doc;
+        if (_cart.isEmpty) {
+          _selectedDocumentCurrency = doc;
+        }
       });
       await _reloadFxForDocumentCurrency();
     } on ApiError catch (e) {
@@ -920,7 +1027,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         setState(() {
           _settings = cached;
           _contextError = null;
-          _selectedDocumentCurrency = doc;
+          if (_cart.isEmpty) {
+            _selectedDocumentCurrency = doc;
+          }
         });
         await _reloadFxForDocumentCurrency();
       } else {
@@ -943,7 +1052,9 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         setState(() {
           _settings = cached;
           _contextError = null;
-          _selectedDocumentCurrency = doc;
+          if (_cart.isEmpty) {
+            _selectedDocumentCurrency = doc;
+          }
         });
         await _reloadFxForDocumentCurrency();
       } else {
@@ -971,6 +1082,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       await _bootstrapShellOfflineLoad();
       if (!mounted) return;
       setState(() => _loading = false);
+      await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
       debugPrint('[POS load] end offline branch');
@@ -987,6 +1099,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       await _bootstrapShellOfflineLoad();
       if (!mounted) return;
       setState(() => _loading = false);
+      await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
       debugPrint('[POS load] end online timeout→cache branch');
@@ -996,6 +1109,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     if (!mounted) return;
     if (shouldFinalizeLoading) {
       setState(() => _loading = false);
+      await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
     }
@@ -1130,6 +1244,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       setState(() {
         _cart.removeWhere((l) => l.productId == p.id);
       });
+      _schedulePersistActiveCartDraft();
       _search.clear();
       _searchFocus.unfocus();
       _showCartFeedback('${p.name} quitado del ticket');
@@ -1160,6 +1275,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         _cart.add(line);
       }
     });
+    _schedulePersistActiveCartDraft();
     _search.clear();
     _searchFocus.unfocus();
     _showCartFeedback('${p.name} · ${res.displayGrams} g en el ticket');
@@ -1227,6 +1343,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         );
       }
     });
+    _schedulePersistActiveCartDraft();
     _search.clear();
     _searchFocus.unfocus();
     _showCartFeedback('${p.name} × $add en el ticket');
@@ -1400,6 +1517,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
+    unawaited(_clearActiveCartDraftNow());
 
     if (!mounted) return;
     _showCheckoutPanelMessage(
@@ -1438,6 +1556,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _paymentFunctionalCtrl.text = mixedPaymentText;
       _appliedFunctionalPayment = mixedPaymentApplied;
     });
+    _schedulePersistActiveCartDraft();
   }
 
   PosCartLine _cloneCartLine(PosCartLine l) {
@@ -1459,18 +1578,27 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   }
 
   /// Encola venta y ticket local sin tocar el carrito (tras cobro optimista).
+  /// Reutiliza el mismo `opId` si ya hay cola para este `sale.id` (evita doble factura).
   Future<void> _persistQueuedSaleNoCartClear({
     required Map<String, dynamic> restBody,
     required String doc,
     required String? clientSaleId,
     required String? totalDocument,
   }) async {
-    final syncOpId = ClientMutationId.newId();
     final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
       restBody,
       widget.storeId,
       fxSource: 'POS_OFFLINE',
     );
+    final saleId =
+        (clientSaleId ?? saleMap['id']?.toString() ?? '').trim();
+    final existingOpId = saleId.isEmpty
+        ? null
+        : await widget.localPrefs.findPendingSaleOpId(
+            storeId: widget.storeId,
+            saleId: saleId,
+          );
+    final syncOpId = existingOpId ?? ClientMutationId.newId();
     await widget.localPrefs.appendPendingSale(
       PendingSaleEntry(
         opId: syncOpId,
@@ -1479,14 +1607,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         opTimestampIso: DateTime.now().toUtc().toIso8601String(),
       ),
     );
-    if (clientSaleId != null &&
-        clientSaleId.isNotEmpty &&
-        totalDocument != null) {
+    if (saleId.isNotEmpty && totalDocument != null) {
       final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
       await widget.localPrefs.prependRecentSaleTicket(
         RecentSaleTicket(
           storeId: widget.storeId,
-          saleId: clientSaleId,
+          saleId: saleId,
           totalDocument: totalDocument,
           documentCurrencyCode: doc,
           recordedAtIso: DateTime.now().toIso8601String(),
@@ -1574,19 +1700,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         mixedPaymentText: mixedPaymentTextSnapshot,
         mixedPaymentApplied: mixedPaymentAppliedSnapshot,
       );
-      final raw = e.userMessageForSupport;
-      final msg = raw.contains('PAYMENTS_TOTAL_MISMATCH')
-          ? 'El total pagado no cuadra con el total del ticket.'
-          : raw.contains('PAYMENTS_MISSING_FX_SNAPSHOT')
-          ? 'Falta la tasa (fxSnapshot) para convertir uno de los pagos.'
-          : raw.contains('PAYMENTS_FX_PAIR_MISMATCH')
-          ? 'La tasa enviada no coincide con el par de monedas del ticket.'
-          : raw.contains('PAYMENTS_INVALID_AMOUNT')
-          ? 'Hay un monto de pago inválido. Revisá los campos de cobro.'
-          : raw;
+      final msg = e.posCheckoutMessageEs;
       _logPosCheckoutApiFailure(e, msg);
       _showCheckoutPanelMessage(
-        'El servidor rechazó la venta. Ticket restaurado. $msg',
+        e.looksLikeInsufficientStock
+            ? msg
+            : 'El servidor rechazó la venta. Ticket restaurado. $msg',
         error: true,
         duration: const Duration(seconds: 6),
       );
@@ -1628,12 +1747,20 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     String doc, {
     bool queuedBecauseShellOffline = false,
   }) async {
-    final syncOpId = ClientMutationId.newId();
     final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
       restBody,
       widget.storeId,
       fxSource: 'POS_OFFLINE',
     );
+    final clientSid = _pendingSaleId;
+    final saleId = (clientSid ?? saleMap['id']?.toString() ?? '').trim();
+    final existingOpId = saleId.isEmpty
+        ? null
+        : await widget.localPrefs.findPendingSaleOpId(
+            storeId: widget.storeId,
+            saleId: saleId,
+          );
+    final syncOpId = existingOpId ?? ClientMutationId.newId();
     await widget.localPrefs.appendPendingSale(
       PendingSaleEntry(
         opId: syncOpId,
@@ -1643,13 +1770,12 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       ),
     );
     final totalDoc = _cartTotalDocument;
-    final clientSid = _pendingSaleId;
-    if (clientSid != null && clientSid.isNotEmpty && totalDoc != null) {
+    if (saleId.isNotEmpty && totalDoc != null) {
       final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
       await widget.localPrefs.prependRecentSaleTicket(
         RecentSaleTicket(
           storeId: widget.storeId,
-          saleId: clientSid,
+          saleId: saleId,
           totalDocument: totalDoc,
           documentCurrencyCode: doc,
           recordedAtIso: DateTime.now().toIso8601String(),
@@ -1668,6 +1794,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
+    await _clearActiveCartDraftNow();
     if (heldId != null) {
       await widget.localPrefs.deleteHeldTicket(heldId);
       await _refreshHeldCount();
@@ -1969,15 +2096,18 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     );
   }
 
-  void _showCartLinePriceDetail({
+  Future<void> _showCartLinePriceDetail({
     required PosCartLine line,
     required String unitFunctional,
     required String lineTotalFunctional,
     required String functionalCode,
     required String documentCode,
-  }) {
+  }) async {
     if (!mounted) return;
+    _ensureSearchUnfocusedForCheckout();
     final docC = documentCode.trim();
+    final stockLabel = await _stockLabelFromLocalCache(line.productId);
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -2019,6 +2149,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
             children: [
               if (line.isByWeight && line.displayGrams != null)
                 _posCartDetailRow('Peso', '${line.displayGrams} g'),
+              _posCartDetailRow('Stock disponible', stockLabel),
               _posCartDetailRow('Costo $functionalCode', unitFunctional),
               _posCartDetailRow('Costo $docC', line.documentUnitPrice),
               _posCartDetailRow(
@@ -2042,6 +2173,35 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
         );
       },
     );
+  }
+
+  /// Stock desde caché local de inventario (sin llamar al API).
+  Future<String> _stockLabelFromLocalCache(String productId) async {
+    final pid = productId.trim();
+    if (pid.isEmpty) return 'Sin dato local';
+    try {
+      final inv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      for (final row in inv) {
+        final id = row.productId.trim().isNotEmpty
+            ? row.productId.trim()
+            : (row.product?.id.trim() ?? '');
+        if (id != pid) continue;
+        final q = row.quantity.trim();
+        final r = row.reserved.trim();
+        final qty = double.tryParse(q.replaceAll(',', '.'));
+        final reserved = double.tryParse(r.replaceAll(',', '.')) ?? 0;
+        if (qty == null) return q.isEmpty ? 'Sin dato local' : q;
+        final available = qty - reserved;
+        final availStr = available == available.roundToDouble()
+            ? '${available.round()}'
+            : available.toStringAsFixed(2);
+        if (reserved > 0) {
+          return '$availStr (disp.) · $q en inventario';
+        }
+        return availStr;
+      }
+    } catch (_) {}
+    return 'Sin dato local';
   }
 
   String _posCurrencyLabel(String code) {
@@ -2084,10 +2244,20 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
   bool _isCompactPosLayout(BuildContext context) =>
       MediaQuery.sizeOf(context).shortestSide < 600;
 
-  /// En móvil, al enfocar el buscador ocultamos el panel de cobro para que no compita
-  /// por altura con el ticket y no quede pegado al input.
-  bool _hideCheckoutWhileSearchFocused(BuildContext context) =>
-      _isCompactPosLayout(context) && _searchFocus.hasFocus;
+  /// En móvil, ocultar cobro solo mientras se busca de verdad (texto o teclado).
+  /// Si el foco queda “pegado” sin teclado ni texto, el botón Cobrar no debe desaparecer.
+  bool _hideCheckoutWhileSearchFocused(BuildContext context) {
+    if (!_isCompactPosLayout(context)) return false;
+    if (!_searchFocus.hasFocus) return false;
+    if (_search.text.trim().isNotEmpty) return true;
+    return MediaQuery.viewInsetsOf(context).bottom > 0;
+  }
+
+  void _ensureSearchUnfocusedForCheckout() {
+    if (!_searchFocus.hasFocus) return;
+    _searchFocus.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
 
   /// Panel modal a pantalla completa en el Stack raíz (no dentro del `Expanded`).
   bool _keyboardSuggestionOverlayActive(BuildContext context) {
@@ -2253,11 +2423,13 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
     final next = cur + delta;
     if (next <= 0) {
       setState(() => _cart.removeAt(index));
+      _schedulePersistActiveCartDraft();
       return;
     }
     setState(() {
       _cart[index].quantity = PosCartQuantity.stringify(next);
     });
+    _schedulePersistActiveCartDraft();
   }
 
   Future<void> _onLineQtyTap(int index) async {
@@ -2280,6 +2452,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
       _cart[index].quantity = n;
     });
+    _schedulePersistActiveCartDraft();
   }
 
   void _removeLineByProductId(String productId) {
@@ -2287,6 +2460,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _invalidateCheckoutIdempotency();
       _cart.removeWhere((l) => l.productId == productId);
     });
+    _schedulePersistActiveCartDraft();
   }
 
   void _clearCart() {
@@ -2297,6 +2471,7 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
+    unawaited(_clearActiveCartDraftNow());
   }
 
   void _simulateRandomScan() {
@@ -2621,7 +2796,17 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                               : RefreshIndicator(
                                                   color: PosSaleUi.primary,
                                                   onRefresh: _load,
-                                                  child: ListView.separated(
+                                                  child: NotificationListener<
+                                                    ScrollNotification
+                                                  >(
+                                                    onNotification: (n) {
+                                                      if (n
+                                                          is ScrollStartNotification) {
+                                                        _ensureSearchUnfocusedForCheckout();
+                                                      }
+                                                      return false;
+                                                    },
+                                                    child: ListView.separated(
                                                     itemCount: _cart.length,
                                                     separatorBuilder:
                                                         (context, i) =>
@@ -2653,20 +2838,28 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                         lineTotalFunctional: lf,
                                                         functionalCode: func,
                                                         documentCode: dCode,
-                                                        onMinus: () =>
-                                                            _bumpLine(i, -1),
-                                                        onPlus: () =>
-                                                            _bumpLine(i, 1),
-                                                        onQtyTap: () =>
-                                                            _onLineQtyTap(i),
+                                                        onMinus: () {
+                                                          _ensureSearchUnfocusedForCheckout();
+                                                          _bumpLine(i, -1);
+                                                        },
+                                                        onPlus: () {
+                                                          _ensureSearchUnfocusedForCheckout();
+                                                          _bumpLine(i, 1);
+                                                        },
+                                                        onQtyTap: () {
+                                                          _ensureSearchUnfocusedForCheckout();
+                                                          _onLineQtyTap(i);
+                                                        },
                                                         onDismissed: () =>
                                                             _removeLineByProductId(
                                                               l.productId,
                                                             ),
-                                                        onShowPriceDetail: () =>
+                                                        onShowPriceDetail: () {
+                                                          unawaited(
                                                             _showCartLinePriceDetail(
                                                               line: l,
-                                                              unitFunctional: uf,
+                                                              unitFunctional:
+                                                                  uf,
                                                               lineTotalFunctional:
                                                                   lf,
                                                               functionalCode:
@@ -2674,8 +2867,11 @@ class _PosSaleScreenState extends State<PosSaleScreen> {
                                                               documentCode:
                                                                   dCode,
                                                             ),
+                                                          );
+                                                        },
                                                       );
                                                     },
+                                                  ),
                                                   ),
                                                 ),
                                         ),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../api/api_error.dart';
@@ -30,9 +32,64 @@ class SyncFlushResult {
 /// Compatibilidad con código que aún nombre el tipo anterior.
 typedef PendingSalesFlushResult = SyncFlushResult;
 
+Completer<void>? _flushGate;
+
+/// Un solo flush a la vez (shell auto-sync + POS sincronizar).
+Future<T> _withSyncFlushLock<T>(Future<T> Function() action) async {
+  while (_flushGate != null) {
+    await _flushGate!.future;
+  }
+  final gate = Completer<void>();
+  _flushGate = gate;
+  try {
+    return await action();
+  } finally {
+    if (identical(_flushGate, gate)) {
+      _flushGate = null;
+    }
+    if (!gate.isCompleted) gate.complete();
+  }
+}
+
+bool _failedOpAlreadyApplied(Object? details) {
+  final d = details?.toString().toLowerCase() ?? '';
+  if (d.isEmpty) return false;
+  const keys = <String>[
+    'already',
+    'duplicate',
+    'idempotent',
+    'skipped',
+    'already applied',
+    'already exists',
+    'sale already',
+  ];
+  for (final k in keys) {
+    if (d.contains(k)) return true;
+  }
+  return false;
+}
+
 /// Mezcla `SALE`, `INVENTORY_ADJUST`, `PURCHASE_RECEIVE`, `SALE_RETURN` y
 /// `SUPPLIER_*` pendientes (orden por `timestamp`), hasta 200 ops.
 Future<SyncFlushResult> flushPendingSyncOpsForStore({
+  required String storeId,
+  required LocalPrefs prefs,
+  required SyncApi syncApi,
+  required String deviceId,
+  required String appVersion,
+}) {
+  return _withSyncFlushLock(
+    () => _flushPendingSyncOpsForStoreUnlocked(
+      storeId: storeId,
+      prefs: prefs,
+      syncApi: syncApi,
+      deviceId: deviceId,
+      appVersion: appVersion,
+    ),
+  );
+}
+
+Future<SyncFlushResult> _flushPendingSyncOpsForStoreUnlocked({
   required String storeId,
   required LocalPrefs prefs,
   required SyncApi syncApi,
@@ -154,6 +211,40 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
 
     collectOpIds('acked');
     collectOpIds('skipped');
+    collectOpIds('applied');
+
+    String? pushFailedSummary;
+    var pushFailedCount = 0;
+    final failedRaw = res['failed'];
+    if (failedRaw is List && failedRaw.isNotEmpty) {
+      final lines = <String>[];
+      for (final item in failedRaw) {
+        if (item is! Map) continue;
+        final id = item['opId']?.toString() ?? '?';
+        final details = item['details'];
+        final d = details == null ? '' : details.toString();
+        debugPrint('[sync/push] failed opId=$id details=$d');
+        // Ya aplicada / idempotente → sacar de cola (evita re-facturar).
+        if (id != '?' && id.isNotEmpty && _failedOpAlreadyApplied(details)) {
+          remove.add(id);
+          continue;
+        }
+        pushFailedCount++;
+        if (d.isNotEmpty) {
+          lines.add('$id: $d');
+        } else {
+          lines.add(id);
+        }
+      }
+      if (lines.isNotEmpty) {
+        pushFailedSummary = lines.length <= 5
+            ? lines.join('\n')
+            : '${lines.take(5).join('\n')}\n… (+${lines.length - 5})';
+      } else if (pushFailedCount > 0) {
+        pushFailedSummary =
+            '$pushFailedCount operación(es) en failed[] (sin detalle en respuesta).';
+      }
+    }
 
     final ackedRaw = res['acked'];
     final clientToServer = ackedRaw is List
@@ -197,34 +288,6 @@ Future<SyncFlushResult> flushPendingSyncOpsForStore({
       final cid = e.sale['id']?.toString();
       if (cid != null && cid.isNotEmpty) {
         await prefs.markRecentSaleTicketSyncedByClientId(cid);
-      }
-    }
-
-    String? pushFailedSummary;
-    var pushFailedCount = 0;
-    final failedRaw = res['failed'];
-    if (failedRaw is List && failedRaw.isNotEmpty) {
-      pushFailedCount = failedRaw.length;
-      final lines = <String>[];
-      for (final item in failedRaw) {
-        if (item is! Map) continue;
-        final id = item['opId']?.toString() ?? '?';
-        final details = item['details'];
-        final d = details == null ? '' : details.toString();
-        debugPrint('[sync/push] failed opId=$id details=$d');
-        if (d.isNotEmpty) {
-          lines.add('$id: $d');
-        } else {
-          lines.add(id);
-        }
-      }
-      if (lines.isNotEmpty) {
-        pushFailedSummary = lines.length <= 5
-            ? lines.join('\n')
-            : '${lines.take(5).join('\n')}\n… (+${lines.length - 5})';
-      } else if (pushFailedCount > 0) {
-        pushFailedSummary =
-            '$pushFailedCount operación(es) en failed[] (sin detalle en respuesta).';
       }
     }
 

@@ -35,6 +35,26 @@ class StockMovement {
   final DateTime? createdAt;
   final InventoryProductSummary? product;
 
+  /// Etiqueta en español para UI (el API sigue enviando `IN_ADJUST` / `OUT_ADJUST`).
+  String get typeLabelEs {
+    switch (type.trim().toUpperCase()) {
+      case 'IN_ADJUST':
+        return 'Entrada';
+      case 'OUT_ADJUST':
+        return 'Salida';
+      case 'OUT_SALE':
+        return 'Venta';
+      case 'IN_SALE_RETURN':
+      case 'IN_RETURN':
+        return 'Devolución';
+      case 'IN_PURCHASE':
+      case 'PURCHASE_RECEIVE':
+        return 'Compra';
+      default:
+        return type;
+    }
+  }
+
   static StockMovement fromJson(Map<String, dynamic> json) {
     InventoryProductSummary? product;
     final productRaw = json['product'];

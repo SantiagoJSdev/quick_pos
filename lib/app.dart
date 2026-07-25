@@ -73,6 +73,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _dashboardApi = DashboardApi(_apiClient);
     _dashboardRepository = DashboardRepository(
       api: _dashboardApi,
+      salesApi: _salesApi,
       localPrefs: widget.localPrefs,
     );
     _bootstrap();
