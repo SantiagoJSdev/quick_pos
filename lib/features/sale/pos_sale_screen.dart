@@ -786,6 +786,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (mounted) setState(() {});
   }
 
+  /// Reconvierte el ticket a la moneda documento / FX actuales **sin** tomar
+  /// precios nuevos del catálogo (precio congelado al agregar).
   void _rebuildCartDocumentPrices() {
     final s = _settings;
     final doc = _selectedDocumentCurrency;
@@ -793,50 +795,22 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     final func = s.functionalCurrency.code;
     final next = <PosCartLine>[];
     for (final old in _cart) {
+      final docPrice = PosSalePricing.documentUnitPrice(
+        catalogPrice: old.catalogUnitPrice,
+        catalogCurrency: old.catalogCurrency,
+        documentCurrencyCode: doc,
+        functionalCurrencyCode: func,
+        pair: _fxPair,
+      );
+      if (docPrice == null) continue;
+
       if (old.isByWeight) {
-        final p = _catalogByProductId(old.productId);
-        if (p != null) {
-          final docPrice = PosSalePricing.documentUnitPrice(
-            catalogPrice: p.price,
-            catalogCurrency: p.currency,
-            documentCurrencyCode: doc,
-            functionalCurrencyCode: func,
-            pair: _fxPair,
-          );
-          final funcPrice = _tryPerKgFunctionalPrice(p, func, doc);
-          if (docPrice != null &&
-              funcPrice != null &&
-              PosCartQuantity.parse(funcPrice) > 0) {
-            final qty = old.quantity;
-            next.add(
-              PosCartLine(
-                productId: p.id,
-                name: p.name,
-                sku: p.sku,
-                catalogUnitPrice: p.price,
-                catalogCurrency: p.currency,
-                documentUnitPrice: docPrice,
-                documentCurrencyCode: doc,
-                quantity: qty,
-                isByWeight: true,
-                displayGrams: old.displayGrams,
-                pricePerKgFunctional: funcPrice,
-                lineAmountFunctional:
-                    MoneyStringMath.multiply(funcPrice, qty),
-                lineAmountDocument: MoneyStringMath.multiply(docPrice, qty),
-              ),
-            );
-            continue;
-          }
-        }
-        final docPrice = PosSalePricing.documentUnitPrice(
-          catalogPrice: old.catalogUnitPrice,
-          catalogCurrency: old.catalogCurrency,
-          documentCurrencyCode: doc,
-          functionalCurrencyCode: func,
-          pair: _fxPair,
-        );
-        if (docPrice == null) continue;
+        final funcPrice = old.pricePerKgFunctional;
+        final qty = old.quantity;
+        final lineFunc = (funcPrice != null &&
+                PosCartQuantity.parse(funcPrice) > 0)
+            ? MoneyStringMath.multiply(funcPrice, qty)
+            : old.lineAmountFunctional;
         next.add(
           PosCartLine(
             productId: old.productId,
@@ -846,37 +820,24 @@ class _PosSaleScreenState extends State<PosSaleScreen>
             catalogCurrency: old.catalogCurrency,
             documentUnitPrice: docPrice,
             documentCurrencyCode: doc,
-            quantity: old.quantity,
+            quantity: qty,
             isByWeight: true,
             displayGrams: old.displayGrams,
-            pricePerKgFunctional: old.pricePerKgFunctional,
-            lineAmountFunctional: old.lineAmountFunctional,
-            lineAmountDocument: old.lineAmountDocument,
+            pricePerKgFunctional: funcPrice,
+            lineAmountFunctional: lineFunc,
+            lineAmountDocument: MoneyStringMath.multiply(docPrice, qty),
           ),
         );
         continue;
       }
 
-      final p = _catalogByProductId(old.productId);
-      final catalogPrice = p?.price ?? old.catalogUnitPrice;
-      final catalogCurrency = p?.currency ?? old.catalogCurrency;
-      final name = p?.name ?? old.name;
-      final sku = p?.sku ?? old.sku;
-      final docPrice = PosSalePricing.documentUnitPrice(
-        catalogPrice: catalogPrice,
-        catalogCurrency: catalogCurrency,
-        documentCurrencyCode: doc,
-        functionalCurrencyCode: func,
-        pair: _fxPair,
-      );
-      if (docPrice == null) continue;
       next.add(
         PosCartLine(
           productId: old.productId,
-          name: name,
-          sku: sku,
-          catalogUnitPrice: catalogPrice,
-          catalogCurrency: catalogCurrency,
+          name: old.name,
+          sku: old.sku,
+          catalogUnitPrice: old.catalogUnitPrice,
+          catalogCurrency: old.catalogCurrency,
           documentUnitPrice: docPrice,
           documentCurrencyCode: doc,
           quantity: old.quantity,
@@ -1474,22 +1435,57 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     return grams.toStringAsFixed(1);
   }
 
-  Future<void> _openWeightedAddSheet(
-    CatalogProduct p, {
+  /// Alta/edición por peso. Si [existing] está presente, congela precios del
+  /// ticket (no toma precio nuevo del catálogo aunque [product] exista).
+  Future<void> _openWeightedAddSheet({
+    CatalogProduct? product,
     PosCartLine? existing,
   }) async {
+    final productId = product?.id ?? existing?.productId;
+    if (productId == null) return;
+    final name = existing?.name ?? product?.name ?? '';
+    final sku = existing?.sku ?? product?.sku ?? '';
+    final catalogPrice =
+        existing?.catalogUnitPrice ?? product?.price;
+    final catalogCurrency =
+        existing?.catalogCurrency ?? product?.currency;
+    if (catalogPrice == null || catalogCurrency == null) return;
+
     final s = _settings;
     final doc = _selectedDocumentCurrency;
     if (s == null || doc == null) return;
     final func = s.functionalCurrency.code;
     final docPrice = PosSalePricing.documentUnitPrice(
-      catalogPrice: p.price,
-      catalogCurrency: p.currency,
+      catalogPrice: catalogPrice,
+      catalogCurrency: catalogCurrency,
       documentCurrencyCode: doc,
       functionalCurrencyCode: func,
       pair: _fxPair,
     );
-    final funcPrice = _tryPerKgFunctionalPrice(p, func, doc);
+    String? funcPrice = existing?.pricePerKgFunctional;
+    if (funcPrice == null || PosCartQuantity.parse(funcPrice) <= 0) {
+      if (product != null) {
+        funcPrice = _tryPerKgFunctionalPrice(product, func, doc);
+      } else {
+        // Snapshot de línea: convertir precio catálogo congelado → funcional.
+        final pc = catalogCurrency.toUpperCase();
+        final f = func.toUpperCase();
+        final d = doc.toUpperCase();
+        if (pc == f) {
+          funcPrice = catalogPrice;
+        } else if (pc == d && f == d) {
+          funcPrice = catalogPrice;
+        } else {
+          funcPrice = PosSalePricing.documentUnitPrice(
+            catalogPrice: catalogPrice,
+            catalogCurrency: catalogCurrency,
+            documentCurrencyCode: func,
+            functionalCurrencyCode: func,
+            pair: _fxPair,
+          );
+        }
+      }
+    }
     if (docPrice == null || funcPrice == null) {
       _showCheckoutPanelMessage(
         'No se puede abrir modo peso: revisá moneda del ticket y tasa.',
@@ -1509,7 +1505,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         : MoneyStringMath.divide(docPrice, funcPrice, fractionDigits: 6);
     final outcome = await showPosWeightedAddSheet(
       context,
-      productName: p.name,
+      productName: name,
       functionalCode: func,
       documentCode: doc,
       pricePerKgFunctional: funcPrice,
@@ -1524,24 +1520,24 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (outcome is PosWeightedSheetRemoved) {
       _invalidateCheckoutIdempotency();
       setState(() {
-        _cart.removeWhere((l) => l.productId == p.id);
+        _cart.removeWhere((l) => l.productId == productId);
       });
       _schedulePersistActiveCartDraft();
       _search.clear();
       _searchFocus.unfocus();
-      _showCartFeedback('${p.name} quitado del ticket');
+      _showCartFeedback('$name quitado del ticket');
       return;
     }
     final res = (outcome as PosWeightedSheetAdded).result;
     _invalidateCheckoutIdempotency();
-    final i = _cart.indexWhere((l) => l.productId == p.id);
+    final i = _cart.indexWhere((l) => l.productId == productId);
     setState(() {
       final line = PosCartLine(
-        productId: p.id,
-        name: p.name,
-        sku: p.sku,
-        catalogUnitPrice: p.price,
-        catalogCurrency: p.currency,
+        productId: productId,
+        name: name,
+        sku: sku,
+        catalogUnitPrice: catalogPrice,
+        catalogCurrency: catalogCurrency,
         documentUnitPrice: docPrice,
         documentCurrencyCode: doc,
         quantity: PosCartQuantity.normalizeWeightKg(res.quantityKg),
@@ -1560,13 +1556,20 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     _schedulePersistActiveCartDraft();
     _search.clear();
     _searchFocus.unfocus();
-    _showCartFeedback('${p.name} · ${res.displayGrams} g en el ticket');
+    _showCartFeedback('$name · ${res.displayGrams} g en el ticket');
   }
 
   Future<void> _addProductToCart(
     CatalogProduct p, {
     String addQty = '1',
   }) async {
+    if (!p.active) {
+      _showCheckoutPanelMessage(
+        'Producto desactivado: no se puede agregar al ticket.',
+        error: true,
+      );
+      return;
+    }
     _invalidateCheckoutIdempotency();
     final s = _settings;
     final doc = _selectedDocumentCurrency;
@@ -1601,7 +1604,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       return;
     }
     if (_isProductByWeight(p)) {
-      await _openWeightedAddSheet(p);
+      await _openWeightedAddSheet(product: p);
       return;
     }
 
@@ -2520,10 +2523,13 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   void _bumpLine(int index, double delta) {
     final line = _cart[index];
     if (line.isByWeight) {
-      final p = _catalogByProductId(line.productId);
-      if (p != null) {
-        unawaited(_openWeightedAddSheet(p, existing: line));
-      }
+      // Editar desde snapshot del ticket (sirve si el producto ya no está activo).
+      unawaited(
+        _openWeightedAddSheet(
+          product: _catalogByProductId(line.productId),
+          existing: line,
+        ),
+      );
       return;
     }
     _invalidateCheckoutIdempotency();
@@ -2543,10 +2549,10 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   Future<void> _onLineQtyTap(int index) async {
     final line = _cart[index];
     if (line.isByWeight) {
-      final p = _catalogByProductId(line.productId);
-      if (p != null) {
-        await _openWeightedAddSheet(p, existing: line);
-      }
+      await _openWeightedAddSheet(
+        product: _catalogByProductId(line.productId),
+        existing: line,
+      );
       return;
     }
     final res = await showPosQuantityNumpadSheet(
