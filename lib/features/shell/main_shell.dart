@@ -249,6 +249,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           );
         },
       );
+      await widget.localPrefs.markLastSuccessfulSyncNow();
     } catch (e) {
       traceApiConnectivity(
         'runSyncCycle / post-sync falló (no cambia online): $e',
@@ -397,6 +398,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
 
       if (!mounted) return;
+      await widget.localPrefs.markLastSuccessfulSyncNow();
       final parts = <String>[];
       if (cycle.flush.removedCount > 0) {
         parts.add('${cycle.flush.removedCount} op. enviadas');

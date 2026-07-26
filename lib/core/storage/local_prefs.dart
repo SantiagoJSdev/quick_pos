@@ -43,6 +43,7 @@ const _kInventoryCachePrefix = 'inventory_cache_v1_';
 const _kSalesGeneralCachePrefix = 'sales_general_cache_v1_';
 const _kLatestRateCachePrefix = 'latest_rate_cache_v1_';
 const _kApiBaseUrlOverrideV1 = 'api_base_url_override_v1';
+const _kLastSuccessfulSyncAtV1 = 'last_successful_sync_at_v1';
 const _kPendingProductPhotoUploadsV1 = 'pending_product_photo_uploads_v1';
 const _kDashboardAccessTokenPrefix = 'dashboard_access_token_v1_';
 const _kDashboardKioskCachePrefix = 'dashboard_kiosk_cache_v1_';
@@ -105,6 +106,30 @@ class LocalPrefs {
     await _prefs.remove('api_follow_cloud_resolver_v1');
     await _prefs.remove('pos_api_origin');
     await _prefs.remove('pos_api_origin_updated_at');
+  }
+
+  Future<void> markLastSuccessfulSyncNow() async {
+    await _prefs.setString(
+      _kLastSuccessfulSyncAtV1,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  Future<DateTime?> loadLastSuccessfulSyncAt() async {
+    final raw = _prefs.getString(_kLastSuccessfulSyncAtV1)?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toLocal();
+  }
+
+  /// Umbral para UX “puede estar desactualizado” (catálogo / historial).
+  static const Duration catalogStaleThreshold = Duration(minutes: 30);
+
+  Future<bool> isCatalogLikelyStale({
+    Duration threshold = catalogStaleThreshold,
+  }) async {
+    final at = await loadLastSuccessfulSyncAt();
+    if (at == null) return true;
+    return DateTime.now().difference(at) > threshold;
   }
 
   Future<List<PendingProductPhotoUploadEntry>>

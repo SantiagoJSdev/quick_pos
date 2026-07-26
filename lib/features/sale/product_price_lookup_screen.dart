@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/storage/local_prefs.dart';
+import '../shell/shell_online_scope.dart';
 import 'barcode_scanner_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 
 /// Consulta rápida de precio de lista (catálogo) sin agregar al ticket.
+/// Offline-first: lee cache local; la red solo en pull-to-refresh o refresh silencioso.
 class ProductPriceLookupScreen extends StatefulWidget {
   const ProductPriceLookupScreen({
     super.key,
@@ -29,13 +33,17 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
   final _search = TextEditingController();
   List<CatalogProduct> _all = [];
   bool _loading = true;
+  bool _refreshing = false;
   String? _error;
+  bool _fromCacheOnly = false;
+  bool _likelyStale = false;
+  DateTime? _lastSyncAt;
 
   @override
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
-    _load();
+    unawaited(_bootstrapFromCacheThenMaybeSilentRefresh());
   }
 
   @override
@@ -59,22 +67,79 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
     setState(() => _search.text = code);
   }
 
-  Future<void> _load() async {
+  Future<void> _refreshStaleFlags() async {
+    final at = await widget.localPrefs.loadLastSuccessfulSyncAt();
+    final stale = await widget.localPrefs.isCatalogLikelyStale();
+    if (!mounted) return;
     setState(() {
-      _loading = true;
-      _error = null;
+      _lastSyncAt = at;
+      _likelyStale = stale;
     });
+  }
+
+  Future<void> _bootstrapFromCacheThenMaybeSilentRefresh() async {
+    final cached = await widget.localPrefs.loadCatalogProductsCache();
+    if (!mounted) return;
+    if (cached.isNotEmpty) {
+      setState(() {
+        _all = cached.where((p) => p.active).toList();
+        _loading = false;
+        _error = null;
+        _fromCacheOnly = true;
+      });
+      await _refreshStaleFlags();
+      if (!mounted) return;
+      final online = ShellOnlineScope.of(context);
+      if (online) {
+        unawaited(_silentNetworkRefresh());
+      }
+      return;
+    }
+
+    // Sin cache: solo entonces spinner + red (si hay).
+    if (!mounted) return;
+    final online = ShellOnlineScope.of(context);
+    if (!online) {
+      setState(() {
+        _loading = false;
+        _error =
+            'Sin catálogo en este dispositivo. Conectate y usá Sincronizar en Inicio.';
+      });
+      return;
+    }
+    await _loadFromNetwork(showSpinner: true);
+  }
+
+  Future<void> _silentNetworkRefresh() async {
+    if (_refreshing) return;
+    await _loadFromNetwork(showSpinner: false);
+  }
+
+  Future<void> _loadFromNetwork({required bool showSpinner}) async {
+    if (showSpinner) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    } else {
+      setState(() => _refreshing = true);
+    }
     try {
       final list = await widget.productsApi.listProducts(
         widget.storeId,
         includeInactive: false,
       );
       await widget.localPrefs.saveCatalogProductsCache(list);
+      await widget.localPrefs.markLastSuccessfulSyncNow();
       if (!mounted) return;
       setState(() {
         _all = list.where((p) => p.active).toList();
         _loading = false;
+        _refreshing = false;
+        _error = null;
+        _fromCacheOnly = false;
       });
+      await _refreshStaleFlags();
     } on ApiError catch (e) {
       final cached = await widget.localPrefs.loadCatalogProductsCache();
       if (!mounted) return;
@@ -83,11 +148,15 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
           _all = cached.where((p) => p.active).toList();
           _error = null;
           _loading = false;
+          _refreshing = false;
+          _fromCacheOnly = true;
         });
+        await _refreshStaleFlags();
       } else {
         setState(() {
           _error = e.userMessageForSupport;
           _loading = false;
+          _refreshing = false;
         });
       }
     } catch (e) {
@@ -98,11 +167,15 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
           _all = cached.where((p) => p.active).toList();
           _error = null;
           _loading = false;
+          _refreshing = false;
+          _fromCacheOnly = true;
         });
+        await _refreshStaleFlags();
       } else {
         setState(() {
           _error = e.toString();
           _loading = false;
+          _refreshing = false;
         });
       }
     }
@@ -118,8 +191,23 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
     }).toList();
   }
 
+  String? get _staleBannerText {
+    if (_all.isEmpty) return null;
+    if (_fromCacheOnly || _likelyStale) {
+      final when = _lastSyncAt;
+      final whenLabel = when == null
+          ? 'sin sync reciente'
+          : 'última sync ${when.hour.toString().padLeft(2, '0')}:'
+                '${when.minute.toString().padLeft(2, '0')}';
+      return 'Precios desde cache local ($whenLabel). '
+          'Deslizá para actualizar o usá Sincronizar en Inicio.';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final banner = _staleBannerText;
     return Theme(
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: PosSaleUi.bg,
@@ -137,10 +225,44 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
             onPressed: () => Navigator.of(context).pop(),
           ),
           title: const Text('Buscar precio'),
+          actions: [
+            if (_refreshing)
+              const Padding(
+                padding: EdgeInsets.only(right: 16),
+                child: Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: PosSaleUi.primary,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (banner != null)
+              Material(
+                color: Colors.orange.withValues(alpha: 0.12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  child: Text(
+                    banner,
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: TextField(
@@ -204,7 +326,8 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                             ),
                             const SizedBox(height: 16),
                             FilledButton(
-                              onPressed: _load,
+                              onPressed: () =>
+                                  _loadFromNetwork(showSpinner: true),
                               child: const Text('Reintentar'),
                             ),
                           ],
@@ -213,7 +336,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                     )
                   : RefreshIndicator(
                       color: PosSaleUi.primary,
-                      onRefresh: _load,
+                      onRefresh: () => _loadFromNetwork(showSpinner: false),
                       child: _filtered.isEmpty
                           ? ListView(
                               physics: const AlwaysScrollableScrollPhysics(),
@@ -227,6 +350,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                               ],
                             )
                           : ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 8,

@@ -11,6 +11,7 @@ import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/sales_list_page.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
+import '../shell/shell_online_scope.dart';
 import 'pos_sale_ui_tokens.dart';
 
 String _ticketShortNumberLabel(String? displayCode) {
@@ -328,7 +329,7 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
           content: SingleChildScrollView(
             child: Text(
               'Se enviará sola al reconectar (sync en segundo plano al abrir la app '
-              'o cada ~90 s). No hace falta un botón de envío manual.\n\n'
+              'o cada ~240 s). También podés usar Sincronizar en Inicio.\n\n'
               'Total: ${t.totalDocument} ${t.documentCurrencyCode}\n'
               '${noLabel.isNotEmpty ? 'Nº ticket: ${noLabel.replaceFirst('#', '')}\n' : ''}'
               '\nProductos (copia local):\n$lines\n\n'
@@ -571,7 +572,6 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
           _DeviceHistoryTab(
             storeId: widget.storeId,
             localPrefs: widget.localPrefs,
-            salesApi: widget.salesApi,
             onOpenDetail: _openDetail,
           ),
           _GeneralHistoryTab(
@@ -599,13 +599,11 @@ class _DeviceHistoryTab extends StatefulWidget {
   const _DeviceHistoryTab({
     required this.storeId,
     required this.localPrefs,
-    required this.salesApi,
     required this.onOpenDetail,
   });
 
   final String storeId;
   final LocalPrefs localPrefs;
-  final SalesApi salesApi;
   final void Function(RecentSaleTicket t) onOpenDetail;
 
   @override
@@ -615,38 +613,31 @@ class _DeviceHistoryTab extends StatefulWidget {
 class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
   List<RecentSaleTicket> _items = [];
   bool _loading = true;
+  bool _likelyStale = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    unawaited(_loadLocalOnly());
   }
 
-  Future<void> _load() async {
+  /// Solo datos locales — no sondea GET /sales (rompe offline).
+  Future<void> _loadLocalOnly() async {
     setState(() => _loading = true);
     await widget.localPrefs.reconcileRecentQueuedTicketsWithPendingSales(
       widget.storeId,
     );
-    var all = await widget.localPrefs.loadRecentSaleTickets();
+    final all = await widget.localPrefs.loadRecentSaleTickets();
     final sid = widget.storeId.trim();
-    var forStore = all
+    final forStore = all
         .where((e) => e.storeId.trim() == sid)
         .toList(growable: false);
-    for (final t in forStore) {
-      if (t.status != RecentSaleTicket.statusQueued) continue;
-      try {
-        await widget.salesApi.getSale(widget.storeId, t.saleId);
-        await widget.localPrefs.markRecentSaleTicketSyncedByClientId(t.saleId);
-      } catch (_) {}
-    }
-    all = await widget.localPrefs.loadRecentSaleTickets();
-    forStore = all
-        .where((e) => e.storeId.trim() == sid)
-        .toList(growable: false);
+    final stale = await widget.localPrefs.isCatalogLikelyStale();
     if (!mounted) return;
     setState(() {
       _items = forStore;
       _loading = false;
+      _likelyStale = stale;
     });
   }
 
@@ -657,78 +648,103 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
         child: CircularProgressIndicator(color: PosSaleUi.primary),
       );
     }
-    return RefreshIndicator(
-      color: PosSaleUi.primary,
-      onRefresh: _load,
-      child: _items.isEmpty
-          ? ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: const [
-                SizedBox(height: 80),
-                Icon(
-                  Icons.smartphone_outlined,
-                  size: 56,
-                  color: PosSaleUi.textFaint,
+    return Column(
+      children: [
+        if (_likelyStale)
+          Material(
+            color: Colors.orange.withValues(alpha: 0.12),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Text(
+                'Historial local. El estado puede no estar al día hasta '
+                'Sincronizar en Inicio.',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontSize: 12,
+                  height: 1.35,
                 ),
-                SizedBox(height: 16),
-                Text(
-                  'No hay ventas recientes en este dispositivo',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: PosSaleUi.textMuted),
-                ),
-                SizedBox(height: 8),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 32),
-                  child: Text(
-                    'Se listan cobros de hoy y ayer guardados en este equipo. '
-                    'Si la venta está en el servidor pero no acá, revisá la pestaña General '
-                    '(rango amplio por defecto). Con «Solo este dispositivo» desactivado evitás '
-                    'filtrar por ID de equipo.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: PosSaleUi.textFaint, fontSize: 12),
-                  ),
-                ),
-              ],
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: _items.length,
-              separatorBuilder: (context, i) =>
-                  const Divider(height: 1, color: PosSaleUi.divider),
-              itemBuilder: (context, i) {
-                final t = _items[i];
-                final queued = t.status == RecentSaleTicket.statusQueued;
-                final dt = DateTime.tryParse(t.recordedAtIso);
-                final sub = dt != null
-                    ? '${dt.toLocal().toString().substring(0, 19)} · '
-                          '${queued ? "Pendiente envío (sync auto.)" : "En servidor"}'
-                    : t.status;
-                final no = _ticketShortNumberLabel(t.displayCode);
-                return ListTile(
-                  title: Text(
-                    no.isEmpty
-                        ? '${t.totalDocument} ${t.documentCurrencyCode}'
-                        : '$no · ${t.totalDocument} ${t.documentCurrencyCode}',
-                    style: const TextStyle(
-                      color: PosSaleUi.text,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  subtitle: Text(
-                    sub,
-                    style: const TextStyle(
-                      color: PosSaleUi.textMuted,
-                      fontSize: 12,
-                    ),
-                  ),
-                  trailing: Icon(
-                    queued ? Icons.cloud_queue : Icons.chevron_right,
-                    color: PosSaleUi.textMuted,
-                  ),
-                  onTap: () => widget.onOpenDetail(t),
-                );
-              },
+              ),
             ),
+          ),
+        Expanded(
+          child: RefreshIndicator(
+            color: PosSaleUi.primary,
+            onRefresh: _loadLocalOnly,
+            child: _items.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: const [
+                      SizedBox(height: 80),
+                      Icon(
+                        Icons.smartphone_outlined,
+                        size: 56,
+                        color: PosSaleUi.textFaint,
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'No hay ventas recientes en este dispositivo',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: PosSaleUi.textMuted),
+                      ),
+                      SizedBox(height: 8),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          'Se listan cobros de hoy y ayer guardados en este equipo. '
+                          'Funciona sin red. La pestaña General consulta el servidor '
+                          '(o cache si estás offline).',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: PosSaleUi.textFaint,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: _items.length,
+                    separatorBuilder: (context, i) =>
+                        const Divider(height: 1, color: PosSaleUi.divider),
+                    itemBuilder: (context, i) {
+                      final t = _items[i];
+                      final queued = t.status == RecentSaleTicket.statusQueued;
+                      final dt = DateTime.tryParse(t.recordedAtIso);
+                      final sub = dt != null
+                          ? '${dt.toLocal().toString().substring(0, 19)} · '
+                                '${queued ? "Pendiente envío (sync auto.)" : "Registrada"}'
+                          : t.status;
+                      final no = _ticketShortNumberLabel(t.displayCode);
+                      return ListTile(
+                        title: Text(
+                          no.isEmpty
+                              ? '${t.totalDocument} ${t.documentCurrencyCode}'
+                              : '$no · ${t.totalDocument} ${t.documentCurrencyCode}',
+                          style: const TextStyle(
+                            color: PosSaleUi.text,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          sub,
+                          style: const TextStyle(
+                            color: PosSaleUi.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                        trailing: Icon(
+                          queued ? Icons.cloud_queue : Icons.chevron_right,
+                          color: PosSaleUi.textMuted,
+                        ),
+                        onTap: () => widget.onOpenDetail(t),
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -777,10 +793,48 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
     from = DateTime(from.year, from.month, from.day);
     _from = from;
     _primeDeviceId();
-    // Carga automática al abrir (sin tocar «Consultar»).
+    // Cache primero; red solo si online (no spinner eterno offline).
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_fetch(reset: true));
+      if (mounted) unawaited(_bootstrap());
     });
+  }
+
+  Future<void> _bootstrap() async {
+    final cached = await widget.localPrefs.loadSalesGeneralCache(
+      widget.storeId,
+    );
+    if (!mounted) return;
+    if (cached != null && cached.rows.isNotEmpty) {
+      setState(() {
+        _rows = cached.rows;
+        _meta = cached.meta;
+        _nextCursor = null;
+        _hasFetched = true;
+        _usingCachedData = true;
+        _loading = false;
+        if (cached.dateFrom != null) {
+          final p = DateTime.tryParse(cached.dateFrom!);
+          if (p != null) _from = DateTime(p.year, p.month, p.day);
+        }
+        if (cached.dateTo != null) {
+          final p = DateTime.tryParse(cached.dateTo!);
+          if (p != null) _to = DateTime(p.year, p.month, p.day);
+        }
+        if (cached.onlyThisDevice != null) {
+          _onlyThisDevice = cached.onlyThisDevice!;
+        }
+      });
+    }
+    if (ShellOnlineScope.of(context)) {
+      await _fetch(reset: true);
+    } else if (!_hasFetched) {
+      setState(() {
+        _loading = false;
+        _error =
+            'Sin red y sin historial cacheado. Conectate o usá la pestaña '
+            '«Este dispositivo».';
+      });
+    }
   }
 
   Future<void> _primeDeviceId() async {
