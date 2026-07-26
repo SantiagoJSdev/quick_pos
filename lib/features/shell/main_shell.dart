@@ -75,7 +75,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _index = 0;
 
   static const _syncDebounce = Duration(seconds: 8);
-  static const _syncPeriodic = Duration(seconds: 90);
+  static const _syncPeriodic = Duration(seconds: 240);
   static const _healthProbePeriodic = Duration(seconds: 15);
 
   Timer? _periodicSync;

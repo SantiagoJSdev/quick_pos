@@ -11,7 +11,6 @@ import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/network/network_errors.dart';
 import '../../core/network/product_image_url.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/active_pos_cart_draft.dart';
@@ -187,7 +186,35 @@ class _PosSaleScreenState extends State<PosSaleScreen>
 
   void _onCatalogInvalidated() {
     if (!mounted) return;
-    unawaited(_load());
+    // Nunca reabrir spinner de POS por un pull: refresco silencioso.
+    unawaited(_refreshCatalogSilent());
+  }
+
+  /// Catálogo desde cache (+ red en background si online). No toca [_loading].
+  Future<void> _refreshCatalogSilent() async {
+    final cached = await widget.localPrefs.loadCatalogProductsCache();
+    if (!mounted) return;
+    if (cached.isNotEmpty) {
+      final active = cached.where((p) => p.active).toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      setState(() {
+        _all = active.isNotEmpty ? active : cached;
+        if (_error != null && _all.isNotEmpty) _error = null;
+      });
+    }
+    if (!_shellOnline) return;
+    try {
+      final list = await widget.productsApi.listProducts(
+        widget.storeId,
+        includeInactive: false,
+      );
+      if (!mounted) return;
+      await widget.localPrefs.saveCatalogProductsCache(list);
+      if (!mounted) return;
+      setState(() => _all = list);
+    } catch (e) {
+      debugPrint('[POS] silent catalog refresh failed: $e');
+    }
   }
 
   Future<void> _refreshPendingCount() async {
@@ -298,17 +325,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       _shellManualForceOffline &&
       _shellBackendReachable &&
       _pendingSyncCount > 0;
-
-  void _logPosCheckoutApiFailure(ApiError e, String uiMessage) {
-    final summary = _cart
-        .map((l) => '${l.productId} x${l.quantity} (${l.name})')
-        .join('; ');
-    debugPrint(
-      '[POS checkout] storeId=${widget.storeId} http=${e.statusCode} '
-      'error=${e.error} messages=${e.messages} requestId=${e.requestId} '
-      'uiMessage=${uiMessage.replaceAll('\n', ' ')} cart=[$summary]',
-    );
-  }
 
   void _showCheckoutPanelMessage(
     String message, {
@@ -483,10 +499,13 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     final doc = _selectedDocumentCurrency;
     if (s == null || doc == null) return;
     final func = s.functionalCurrency.code;
-    setState(() {
-      _fxLoadError = null;
-      _fxPair = null;
-    });
+    // En refresh silencioso no vaciar la tasa en uso (evitar flash que bloquee cobro).
+    if (rebuildDocumentLinePrices) {
+      setState(() {
+        _fxLoadError = null;
+        _fxPair = null;
+      });
+    }
     if (func.toUpperCase() == doc.toUpperCase()) {
       if (rebuildDocumentLinePrices) {
         _rebuildCartDocumentPrices();
@@ -958,7 +977,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   }
 
   /// `true` → [_load] debe hacer `loading=false` y refrescos; `false` → ya se cerró el loading (p. ej. catálogo vacío).
-  Future<bool> _loadFromNetworkWithCacheFallback() async {
+  Future<bool> _loadFromNetworkWithCacheFallback({
+    bool rebuildCartPrices = true,
+  }) async {
     try {
       final list = await widget.productsApi.listProducts(
         widget.storeId,
@@ -1014,7 +1035,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
           _selectedDocumentCurrency = doc;
         }
       });
-      await _reloadFxForDocumentCurrency();
+      await _reloadFxForDocumentCurrency(
+        rebuildDocumentLinePrices: rebuildCartPrices,
+      );
     } on ApiError catch (e) {
       final cached = await widget.localPrefs.loadBusinessSettingsCache(
         widget.storeId,
@@ -1031,7 +1054,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
             _selectedDocumentCurrency = doc;
           }
         });
-        await _reloadFxForDocumentCurrency();
+        await _reloadFxForDocumentCurrency(
+          rebuildDocumentLinePrices: rebuildCartPrices,
+        );
       } else {
         setState(() {
           _settings = null;
@@ -1056,7 +1081,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
             _selectedDocumentCurrency = doc;
           }
         });
-        await _reloadFxForDocumentCurrency();
+        await _reloadFxForDocumentCurrency(
+          rebuildDocumentLinePrices: rebuildCartPrices,
+        );
       } else {
         setState(() {
           _settings = null;
@@ -1070,24 +1097,69 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     return true;
   }
 
+  /// Hay catálogo + settings en memoria/cache para vender sin esperar red.
+  bool get _hasUsablePosLocalData =>
+      _all.isNotEmpty && _settings != null && _selectedDocumentCurrency != null;
+
+  /// Refresh de red sin spinner (tras pintar desde cache).
+  Future<void> _silentNetworkRefresh() async {
+    if (!_shellOnline || !mounted) return;
+    try {
+      // No reprecia el carrito abierto: precio congelado al agregar.
+      await _loadFromNetworkWithCacheFallback(
+        rebuildCartPrices: false,
+      ).timeout(_kPosOnlineLoadBudget);
+    } on TimeoutException {
+      debugPrint('[POS load] silent network refresh timeout (cache ya visible)');
+    } catch (e) {
+      debugPrint('[POS load] silent network refresh failed: $e');
+    }
+  }
+
   Future<void> _load() async {
     debugPrint(
-      '[POS load] start online=$_shellOnline loadingWas=$_loading',
+      '[POS load] start online=$_shellOnline loadingWas=$_loading '
+      'hasLocal=$_hasUsablePosLocalData',
     );
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+
+    // 1) Siempre intentar cache primero (online u offline).
+    await _bootstrapShellOfflineLoad();
+    if (!mounted) return;
+
+    final usable = _hasUsablePosLocalData ||
+        (_all.isNotEmpty && _settings != null);
+
+    if (usable) {
+      setState(() {
+        _loading = false;
+        _error = _all.isEmpty
+            ? 'Sin productos en caché. Sincronizá desde Inicio.'
+            : null;
+      });
+      await _restoreActiveCartDraftIfNeeded();
+      await _refreshPendingCount();
+      await _refreshHeldCount();
+      debugPrint('[POS load] painted from cache; silent refresh=$_shellOnline');
+      if (_shellOnline) {
+        unawaited(_silentNetworkRefresh());
+      }
+      return;
+    }
+
+    // 2) Sin cache usable: solo entonces spinner / red.
     if (!_shellOnline) {
-      await _bootstrapShellOfflineLoad();
-      if (!mounted) return;
       setState(() => _loading = false);
       await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
-      debugPrint('[POS load] end offline branch');
+      debugPrint('[POS load] end offline no-cache branch');
       return;
     }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     var shouldFinalizeLoading = true;
     try {
@@ -1473,9 +1545,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (!mounted) return;
 
     _pendingSaleId ??= ClientMutationId.newId();
-    if (!_shellOnline) {
-      setState(() => _checkoutBusy = true);
-    }
     final restBody = SaleCheckoutPayload.build(
       documentCurrencyCode: doc,
       functionalCurrencyCode: func,
@@ -1493,23 +1562,37 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       ),
       clientSaleId: _pendingSaleId,
     );
-    if (!_shellOnline) {
-      await _queueSaleOffline(
-        restBody,
-        doc,
-        queuedBecauseShellOffline: true,
-      );
-      return;
+
+    // Un solo camino: confirmar en dispositivo → cola. La API no autoriza el cobro.
+    await _confirmSaleLocally(restBody, doc);
+  }
+
+  /// Persiste venta + cola, baja stock estimado, vacía ticket y sync silencioso.
+  Future<void> _confirmSaleLocally(
+    Map<String, dynamic> restBody,
+    String doc,
+  ) async {
+    final totalDoc = _cartTotalDocument;
+    final clientSaleId = _pendingSaleId;
+    final heldId = _activeHeldTicketId;
+    final soldByProduct = <String, double>{};
+    for (final l in _cart) {
+      soldByProduct[l.productId] =
+          (soldByProduct[l.productId] ?? 0) + PosCartQuantity.parse(l.quantity);
     }
 
-    // Online: vaciar ticket al instante; POST /sales en segundo plano.
-    final totalDoc = _cartTotalDocument;
-    final cartSnapshot = _cart.map(_cloneCartLine).toList();
-    final heldId = _activeHeldTicketId;
-    final pendingClientId = _pendingSaleId;
-    final mixedPaymentText = _paymentFunctionalCtrl.text;
-    final mixedPaymentApplied = _appliedFunctionalPayment;
+    await _persistQueuedSaleNoCartClear(
+      restBody: restBody,
+      doc: doc,
+      clientSaleId: clientSaleId,
+      totalDocument: totalDoc,
+    );
+    await widget.localPrefs.applyLocalInventoryDecrements(
+      storeId: widget.storeId,
+      soldByProductId: soldByProduct,
+    );
 
+    if (!mounted) return;
     setState(() {
       _cart.clear();
       _pendingSaleId = null;
@@ -1517,46 +1600,25 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       _activeHeldTicketId = null;
     });
     _clearMixedPaymentInputs();
-    unawaited(_clearActiveCartDraftNow());
-
+    await _clearActiveCartDraftNow();
+    if (heldId != null) {
+      await widget.localPrefs.deleteHeldTicket(heldId);
+      await _refreshHeldCount();
+    }
+    await _refreshPendingCount();
     if (!mounted) return;
+
     _showCheckoutPanelMessage(
-      'Venta aceptada.',
+      _shellOnline
+          ? 'Venta registrada.'
+          : 'Venta registrada. Se sincronizará al reconectar.',
       error: false,
-      duration: const Duration(seconds: 2),
+      duration: Duration(seconds: _shellOnline ? 2 : 5),
     );
 
-    unawaited(
-      _finalizeOnlineSaleInBackground(
-        restBody: restBody,
-        doc: doc,
-        cartSnapshot: cartSnapshot,
-        heldId: heldId,
-        pendingClientSaleId: pendingClientId,
-        totalDocument: totalDoc,
-        mixedPaymentTextSnapshot: mixedPaymentText,
-        mixedPaymentAppliedSnapshot: mixedPaymentApplied,
-      ),
-    );
-  }
-
-  void _restoreCartAfterFailedOnlineCheckout(
-    List<PosCartLine> cartSnapshot, {
-    required String? heldId,
-    required String? pendingClientSaleId,
-    required String mixedPaymentText,
-    required double mixedPaymentApplied,
-  }) {
-    setState(() {
-      _cart
-        ..clear()
-        ..addAll(cartSnapshot.map(_cloneCartLine));
-      _pendingSaleId = pendingClientSaleId;
-      _activeHeldTicketId = heldId;
-      _paymentFunctionalCtrl.text = mixedPaymentText;
-      _appliedFunctionalPayment = mixedPaymentApplied;
-    });
-    _schedulePersistActiveCartDraft();
+    if (_shellOnline) {
+      unawaited(_runSyncCycle(silent: true, doPull: false));
+    }
   }
 
   PosCartLine _cloneCartLine(PosCartLine l) {
@@ -1577,7 +1639,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     );
   }
 
-  /// Encola venta y ticket local sin tocar el carrito (tras cobro optimista).
+  /// Encola venta y ticket local sin tocar el carrito.
   /// Reutiliza el mismo `opId` si ya hay cola para este `sale.id` (evita doble factura).
   Future<void> _persistQueuedSaleNoCartClear({
     required Map<String, dynamic> restBody,
@@ -1622,193 +1684,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       );
     }
     if (mounted) await _refreshPendingCount();
-  }
-
-  Future<void> _finalizeOnlineSaleInBackground({
-    required Map<String, dynamic> restBody,
-    required String doc,
-    required List<PosCartLine> cartSnapshot,
-    required String? heldId,
-    required String? pendingClientSaleId,
-    required String? totalDocument,
-    required String mixedPaymentTextSnapshot,
-    required double mixedPaymentAppliedSnapshot,
-  }) async {
-    debugPrint(
-      '[POS checkout] background createSale start clientSaleId=$pendingClientSaleId',
-    );
-    try {
-      final res = await widget.salesApi.createSale(widget.storeId, restBody);
-      if (!mounted) return;
-      var sid = res['id']?.toString().trim();
-      if (sid == null || sid.isEmpty) {
-        sid = pendingClientSaleId ?? '';
-      }
-      if (sid.isNotEmpty && totalDocument != null) {
-        final ticketNo = await widget.localPrefs
-            .allocateLocalTicketDisplayCode();
-        await widget.localPrefs.prependRecentSaleTicket(
-          RecentSaleTicket(
-            storeId: widget.storeId,
-            saleId: sid,
-            totalDocument: totalDocument,
-            documentCurrencyCode: doc,
-            recordedAtIso: DateTime.now().toIso8601String(),
-            status: RecentSaleTicket.statusSynced,
-            displayCode: ticketNo,
-          ),
-        );
-      }
-      if (heldId != null) {
-        await widget.localPrefs.deleteHeldTicket(heldId);
-        if (mounted) await _refreshHeldCount();
-      }
-      if (mounted) await _refreshPendingCount();
-      debugPrint('[POS checkout] createSale OK saleId=$sid');
-      unawaited(_runSyncCycle(silent: true, doPull: false));
-    } on ApiError catch (e) {
-      debugPrint(
-        '[POS checkout] ApiError ${e.statusCode} ${e.userMessageForSupport}',
-      );
-      if (!mounted) return;
-      final lower = e.userMessageForSupport.toLowerCase();
-      final shouldQueueOffline =
-          e.isRetryableSyncFailure ||
-          lower.contains('timeout') ||
-          lower.contains('socket') ||
-          lower.contains('connection') ||
-          lower.contains('network');
-      if (shouldQueueOffline) {
-        await _persistQueuedSaleNoCartClear(
-          restBody: restBody,
-          doc: doc,
-          clientSaleId: pendingClientSaleId,
-          totalDocument: totalDocument,
-        );
-        if (!mounted) return;
-        _showCheckoutPanelMessage(
-          'Sin confirmación del servidor: la venta quedó en cola para enviar.',
-          error: false,
-          duration: const Duration(seconds: 5),
-        );
-        return;
-      }
-      _restoreCartAfterFailedOnlineCheckout(
-        cartSnapshot,
-        heldId: heldId,
-        pendingClientSaleId: pendingClientSaleId,
-        mixedPaymentText: mixedPaymentTextSnapshot,
-        mixedPaymentApplied: mixedPaymentAppliedSnapshot,
-      );
-      final msg = e.posCheckoutMessageEs;
-      _logPosCheckoutApiFailure(e, msg);
-      _showCheckoutPanelMessage(
-        e.looksLikeInsufficientStock
-            ? msg
-            : 'El servidor rechazó la venta. Ticket restaurado. $msg',
-        error: true,
-        duration: const Duration(seconds: 6),
-      );
-    } catch (e) {
-      debugPrint('[POS checkout] createSale error: $e');
-      if (!mounted) return;
-      if (isLikelyNetworkFailure(e)) {
-        await _persistQueuedSaleNoCartClear(
-          restBody: restBody,
-          doc: doc,
-          clientSaleId: pendingClientSaleId,
-          totalDocument: totalDocument,
-        );
-        if (!mounted) return;
-        _showCheckoutPanelMessage(
-          'Sin red: la venta quedó en cola para enviar.',
-          error: false,
-          duration: const Duration(seconds: 5),
-        );
-        return;
-      }
-      _restoreCartAfterFailedOnlineCheckout(
-        cartSnapshot,
-        heldId: heldId,
-        pendingClientSaleId: pendingClientSaleId,
-        mixedPaymentText: mixedPaymentTextSnapshot,
-        mixedPaymentApplied: mixedPaymentAppliedSnapshot,
-      );
-      _showCheckoutPanelMessage(
-        'Error al confirmar la venta. Ticket restaurado. $e',
-        error: true,
-        duration: const Duration(seconds: 5),
-      );
-    }
-  }
-
-  Future<void> _queueSaleOffline(
-    Map<String, dynamic> restBody,
-    String doc, {
-    bool queuedBecauseShellOffline = false,
-  }) async {
-    final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
-      restBody,
-      widget.storeId,
-      fxSource: 'POS_OFFLINE',
-    );
-    final clientSid = _pendingSaleId;
-    final saleId = (clientSid ?? saleMap['id']?.toString() ?? '').trim();
-    final existingOpId = saleId.isEmpty
-        ? null
-        : await widget.localPrefs.findPendingSaleOpId(
-            storeId: widget.storeId,
-            saleId: saleId,
-          );
-    final syncOpId = existingOpId ?? ClientMutationId.newId();
-    await widget.localPrefs.appendPendingSale(
-      PendingSaleEntry(
-        opId: syncOpId,
-        storeId: widget.storeId,
-        sale: saleMap,
-        opTimestampIso: DateTime.now().toUtc().toIso8601String(),
-      ),
-    );
-    final totalDoc = _cartTotalDocument;
-    if (saleId.isNotEmpty && totalDoc != null) {
-      final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
-      await widget.localPrefs.prependRecentSaleTicket(
-        RecentSaleTicket(
-          storeId: widget.storeId,
-          saleId: saleId,
-          totalDocument: totalDoc,
-          documentCurrencyCode: doc,
-          recordedAtIso: DateTime.now().toIso8601String(),
-          status: RecentSaleTicket.statusQueued,
-          displayCode: ticketNo,
-        ),
-      );
-      if (!mounted) return;
-    }
-    if (!mounted) return;
-    final heldId = _activeHeldTicketId;
-    setState(() {
-      _cart.clear();
-      _pendingSaleId = null;
-      _checkoutBusy = false;
-      _activeHeldTicketId = null;
-    });
-    _clearMixedPaymentInputs();
-    await _clearActiveCartDraftNow();
-    if (heldId != null) {
-      await widget.localPrefs.deleteHeldTicket(heldId);
-      await _refreshHeldCount();
-    }
-    await _refreshPendingCount();
-    if (!mounted) return;
-    _showCheckoutPanelMessage(
-      queuedBecauseShellOffline
-          ? 'Modo offline: la venta quedó guardada en el dispositivo y se '
-              'sincronizará cuando vuelvas a conectar con el servidor.'
-          : 'Se perdió conexión con el servidor. La venta quedó en cola para '
-              'sincronizar automáticamente al reconectar.',
-      duration: const Duration(seconds: 6),
-    );
   }
 
   String _cartQtySummary() {

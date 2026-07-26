@@ -838,6 +838,51 @@ class LocalPrefs {
     }
   }
 
+  /// Baja stock estimado local tras confirmar una venta en el dispositivo.
+  /// Puede quedar negativo. Si no hay cache de inventario, no hace nada.
+  Future<void> applyLocalInventoryDecrements({
+    required String storeId,
+    required Map<String, double> soldByProductId,
+  }) async {
+    if (soldByProductId.isEmpty) return;
+    final lines = await loadInventoryCache(storeId);
+    if (lines.isEmpty) return;
+    var changed = false;
+    final next = <InventoryLine>[];
+    for (final line in lines) {
+      final sold = soldByProductId[line.productId];
+      if (sold == null || sold == 0) {
+        next.add(line);
+        continue;
+      }
+      changed = true;
+      final q = (line.quantityAsDouble ?? 0) - sold;
+      String qtyStr;
+      if (q == q.roundToDouble()) {
+        qtyStr = '${q.round()}';
+      } else {
+        qtyStr = q.toStringAsFixed(4);
+        while (qtyStr.contains('.') &&
+            (qtyStr.endsWith('0') || qtyStr.endsWith('.'))) {
+          qtyStr = qtyStr.substring(0, qtyStr.length - 1);
+        }
+      }
+      next.add(
+        InventoryLine(
+          id: line.id,
+          productId: line.productId,
+          quantity: qtyStr.isEmpty ? '0' : qtyStr,
+          reserved: line.reserved,
+          minStock: line.minStock,
+          averageUnitCostFunctional: line.averageUnitCostFunctional,
+          totalCostFunctional: line.totalCostFunctional,
+          product: line.product,
+        ),
+      );
+    }
+    if (changed) await saveInventoryCache(storeId, next);
+  }
+
   Future<void> saveSalesGeneralCache(
     String storeId, {
     required List<SalesListItem> rows,
