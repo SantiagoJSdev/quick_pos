@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/api/api_error.dart';
+import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
+import '../../core/api/sync_api.dart';
+import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
@@ -13,6 +16,7 @@ import '../../core/widgets/quickmarket_branding.dart';
 import '../dashboard/domain/device_dashboard_config.dart';
 import '../dashboard/presentation/screens/dashboard_home_screen.dart';
 import '../dashboard/data/dashboard_repository.dart';
+import '../sale/cash_close_screen.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'exchange_rate_today_screen.dart';
 import 'register_exchange_rate_screen.dart';
@@ -33,6 +37,9 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.onBackendTransportFailure,
     this.syncBusy = false,
     this.onRequestSync,
+    this.cashSessionsApi,
+    this.syncApi,
+    this.catalogInvalidationBus,
   });
 
   final String storeId;
@@ -51,6 +58,10 @@ class StoreDashboardScreen extends StatefulWidget {
   /// Sync manual (cola + catálogo/precios + tasa). Lo provee [MainShell].
   final bool syncBusy;
   final Future<void> Function()? onRequestSync;
+
+  final CashSessionsApi? cashSessionsApi;
+  final SyncApi? syncApi;
+  final CatalogInvalidationBus? catalogInvalidationBus;
 
   @override
   State<StoreDashboardScreen> createState() => _StoreDashboardScreenState();
@@ -730,6 +741,42 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                     height: 1.35,
                   ),
                 ),
+                if (widget.cashSessionsApi != null &&
+                    widget.syncApi != null &&
+                    widget.catalogInvalidationBus != null) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (ctx) => CashCloseScreen(
+                            storeId: widget.storeId,
+                            localPrefs: widget.localPrefs,
+                            cashSessionsApi: widget.cashSessionsApi!,
+                            syncApi: widget.syncApi!,
+                            catalogInvalidationBus:
+                                widget.catalogInvalidationBus!,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.point_of_sale_outlined),
+                    label: const Text('Cerrar caja'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      foregroundColor: PosSaleUi.text,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Fin de turno: contar efectivo, sincronizar pendientes y '
+                    'congelar el resumen. No reemplaza Sincronizar.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: PosSaleUi.textMuted,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 FilledButton.tonalIcon(
                   onPressed: widget.onConnectivityModeButtonPressed,

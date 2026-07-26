@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderStack;
 
 import '../../core/api/api_error.dart';
+import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
+import '../../core/cash/cash_session_service.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/network/product_image_url.dart';
 import '../../core/idempotency/client_mutation_id.dart';
@@ -56,6 +58,7 @@ class PosSaleScreen extends StatefulWidget {
     required this.syncApi,
     required this.catalogInvalidationBus,
     required this.localPrefs,
+    this.cashSessionsApi,
     this.onRequestExit,
   });
 
@@ -67,6 +70,7 @@ class PosSaleScreen extends StatefulWidget {
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
+  final CashSessionsApi? cashSessionsApi;
 
   /// Si no es null (p. ej. módulo Ventas), muestra atrás en la barra superior.
   final VoidCallback? onRequestExit;
@@ -1591,6 +1595,20 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       storeId: widget.storeId,
       soldByProductId: soldByProduct,
     );
+
+    // Apertura automática de turno (sin UI de fondo).
+    final cashApi = widget.cashSessionsApi;
+    if (cashApi != null) {
+      unawaited(
+        CashSessionService(
+          prefs: widget.localPrefs,
+          api: cashApi,
+        ).ensureOpenSession(
+          storeId: widget.storeId,
+          online: _shellOnline,
+        ),
+      );
+    }
 
     if (!mounted) return;
     setState(() {

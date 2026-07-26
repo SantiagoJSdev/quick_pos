@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/sale_returns_api.dart';
@@ -10,6 +11,7 @@ import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
+import 'cash_close_screen.dart';
 import 'pos_sale_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 import 'pending_sync_ops_screen.dart';
@@ -30,6 +32,7 @@ class SalesModuleScreen extends StatefulWidget {
     required this.storesApi,
     required this.exchangeRatesApi,
     required this.salesApi,
+    required this.cashSessionsApi,
     required this.saleReturnsApi,
     required this.syncApi,
     required this.uploadsApi,
@@ -43,6 +46,7 @@ class SalesModuleScreen extends StatefulWidget {
   final StoresApi storesApi;
   final ExchangeRatesApi exchangeRatesApi;
   final SalesApi salesApi;
+  final CashSessionsApi cashSessionsApi;
   final SaleReturnsApi saleReturnsApi;
   final SyncApi syncApi;
   final UploadsApi uploadsApi;
@@ -78,6 +82,7 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                       storesApi: widget.storesApi,
                       exchangeRatesApi: widget.exchangeRatesApi,
                       salesApi: widget.salesApi,
+                      cashSessionsApi: widget.cashSessionsApi,
                       syncApi: widget.syncApi,
                       catalogInvalidationBus: widget.catalogInvalidationBus,
                       localPrefs: widget.localPrefs,
@@ -147,6 +152,19 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                   ),
                 );
               },
+              onOpenCerrarCaja: () {
+                Navigator.of(navCtx).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (c) => CashCloseScreen(
+                      storeId: widget.storeId,
+                      localPrefs: widget.localPrefs,
+                      cashSessionsApi: widget.cashSessionsApi,
+                      syncApi: widget.syncApi,
+                      catalogInvalidationBus: widget.catalogInvalidationBus,
+                    ),
+                  ),
+                );
+              },
             ),
           );
         }
@@ -164,6 +182,7 @@ class _VentasMenuPage extends StatelessWidget {
     required this.onOpenDevolucion,
     required this.onOpenPendientes,
     required this.onOpenFotosPendientes,
+    required this.onOpenCerrarCaja,
   });
 
   final VoidCallback onOpenPos;
@@ -172,6 +191,7 @@ class _VentasMenuPage extends StatelessWidget {
   final VoidCallback onOpenDevolucion;
   final VoidCallback onOpenPendientes;
   final VoidCallback onOpenFotosPendientes;
+  final VoidCallback onOpenCerrarCaja;
 
   @override
   Widget build(BuildContext context) {
@@ -228,6 +248,14 @@ class _VentasMenuPage extends StatelessWidget {
               title: 'Fotos pendientes',
               subtitle: 'Ver cola de uploads de fotos y revisión manual',
               onTap: onOpenFotosPendientes,
+            ),
+            const SizedBox(height: 12),
+            _VentasTile(
+              icon: Icons.point_of_sale_outlined,
+              title: 'Cerrar caja',
+              subtitle:
+                  'Fin de turno: efectivo contado, sync y resumen (también en Inicio)',
+              onTap: onOpenCerrarCaja,
             ),
           ],
         ),

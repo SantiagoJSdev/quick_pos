@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/api/products_api.dart';
@@ -14,6 +15,7 @@ import '../../core/api/suppliers_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../features/dashboard/data/dashboard_repository.dart';
+import '../../core/cash/cash_session_service.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/catalog/catalog_offline_sync.dart';
 import '../../core/network/api_connectivity_debug.dart';
@@ -40,6 +42,7 @@ class MainShell extends StatefulWidget {
     required this.inventoryApi,
     required this.productsApi,
     required this.salesApi,
+    required this.cashSessionsApi,
     required this.purchasesApi,
     required this.saleReturnsApi,
     required this.suppliersApi,
@@ -57,6 +60,7 @@ class MainShell extends StatefulWidget {
   final InventoryApi inventoryApi;
   final ProductsApi productsApi;
   final SalesApi salesApi;
+  final CashSessionsApi cashSessionsApi;
   final PurchasesApi purchasesApi;
   final SaleReturnsApi saleReturnsApi;
   final SuppliersApi suppliersApi;
@@ -250,6 +254,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         },
       );
       await widget.localPrefs.markLastSuccessfulSyncNow();
+      final cashSvc = CashSessionService(
+        prefs: widget.localPrefs,
+        api: widget.cashSessionsApi,
+      );
+      await cashSvc.tryTransmitPendingClose(
+        storeId: widget.storeId,
+        online: true,
+      );
     } catch (e) {
       traceApiConnectivity(
         'runSyncCycle / post-sync falló (no cambia online): $e',
@@ -411,6 +423,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       if (cycle.pullError != null) {
         parts.add('pull: ${cycle.pullError}');
       }
+      try {
+        final cashSvc = CashSessionService(
+          prefs: widget.localPrefs,
+          api: widget.cashSessionsApi,
+        );
+        final transmitted = await cashSvc.tryTransmitPendingClose(
+          storeId: widget.storeId,
+          online: true,
+        );
+        if (transmitted) parts.add('cierre de caja');
+      } catch (_) {}
       final msg = parts.isEmpty
           ? 'Sincronización lista (sin cambios pendientes).'
           : 'Sincronizado: ${parts.join(' · ')}.';
@@ -472,6 +495,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 onlineStatus: _isOnline,
                 syncBusy: _manualHomeSyncBusy,
                 onRequestSync: _runManualSyncFromHome,
+                cashSessionsApi: widget.cashSessionsApi,
+                syncApi: widget.syncApi,
+                catalogInvalidationBus: widget.catalogInvalidationBus,
                 onBackendTransportFailure: () {
                   if (!mounted) return;
                   setState(() {
@@ -549,6 +575,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 storesApi: widget.storesApi,
                 exchangeRatesApi: widget.exchangeRatesApi,
                 salesApi: widget.salesApi,
+                cashSessionsApi: widget.cashSessionsApi,
                 saleReturnsApi: widget.saleReturnsApi,
                 syncApi: widget.syncApi,
                 uploadsApi: widget.uploadsApi,

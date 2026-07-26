@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'core/api/cash_sessions_api.dart';
 import 'core/api/exchange_rates_api.dart';
 import 'core/api/inventory_api.dart';
 import 'core/api/products_api.dart';
@@ -41,6 +42,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
   late final InventoryApi _inventoryApi;
   late final ProductsApi _productsApi;
   late final SalesApi _salesApi;
+  late final CashSessionsApi _cashSessionsApi;
   late final PurchasesApi _purchasesApi;
   late final SaleReturnsApi _saleReturnsApi;
   late final SuppliersApi _suppliersApi;
@@ -65,6 +67,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _inventoryApi = InventoryApi(_apiClient);
     _productsApi = ProductsApi(_apiClient);
     _salesApi = SalesApi(_apiClient);
+    _cashSessionsApi = CashSessionsApi(_apiClient);
     _purchasesApi = PurchasesApi(_apiClient);
     _saleReturnsApi = SaleReturnsApi(_apiClient);
     _suppliersApi = SuppliersApi(_apiClient);
@@ -186,6 +189,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
               inventoryApi: _inventoryApi,
               productsApi: _productsApi,
               salesApi: _salesApi,
+              cashSessionsApi: _cashSessionsApi,
               purchasesApi: _purchasesApi,
               saleReturnsApi: _saleReturnsApi,
               suppliersApi: _suppliersApi,

@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/active_pos_cart_draft.dart';
+import '../models/cash_session.dart';
 import '../models/held_ticket.dart';
 import '../models/local_supplier.dart';
 import '../models/recent_sale_ticket.dart';
@@ -35,6 +36,7 @@ const _kRecentSalesV1 = 'recent_sales_v1';
 const _kTicketDisplaySeqStateV1 = 'ticket_display_seq_state_v1';
 const _kHeldTicketsV1 = 'held_tickets_v1';
 const _kActivePosCartPrefix = 'active_pos_cart_v1_';
+const _kLocalCashSessionPrefix = 'local_cash_session_v1_';
 const _kCatalogProductsCacheV1 = 'catalog_products_cache_v1';
 const _kPendingCatalogMutationsV1 = 'pending_catalog_mutations_v1';
 const _kBusinessSettingsCachePrefix = 'business_settings_cache_v1_';
@@ -1165,6 +1167,41 @@ class LocalPrefs {
     required String deviceId,
   }) async {
     await _prefs.remove(_activePosCartKey(storeId, deviceId));
+  }
+
+  String _localCashSessionKey(String storeId, String deviceId) =>
+      '$_kLocalCashSessionPrefix${storeId}_$deviceId';
+
+  Future<LocalCashSession?> loadLocalCashSession({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    final raw = _prefs.getString(_localCashSessionKey(storeId, deviceId));
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final s = LocalCashSession.tryFromJson(Map<String, dynamic>.from(decoded));
+      if (s == null) return null;
+      if (s.storeId != storeId || s.deviceId != deviceId) return null;
+      return s;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveLocalCashSession(LocalCashSession session) async {
+    await _prefs.setString(
+      _localCashSessionKey(session.storeId, session.deviceId),
+      jsonEncode(session.toJson()),
+    );
+  }
+
+  Future<void> clearLocalCashSession({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    await _prefs.remove(_localCashSessionKey(storeId, deviceId));
   }
 
   /// Historial local de tickets: **hoy y ayer** (calendario local del dispositivo); al cargar se purgan entradas más viejas.
