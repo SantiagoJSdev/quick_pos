@@ -41,6 +41,9 @@ class SaleCheckoutPayload {
     List<Map<String, dynamic>>? payments,
     String? clientSaleId,
     String? fxSource,
+    bool? stockConflictDetected,
+    String? inventoryValidationMode,
+    String? saleOrigin,
   }) {
     final doc = documentCurrencyCode.trim();
     final func = functionalCurrencyCode.trim();
@@ -86,6 +89,13 @@ class SaleCheckoutPayload {
       'fxSnapshot': fxSnapshot,
       if (payments != null && payments.isNotEmpty)
         'payments': _coercePaymentsForJson(payments),
+      if (stockConflictDetected != null)
+        'stockConflictDetected': stockConflictDetected,
+      if (inventoryValidationMode != null &&
+          inventoryValidationMode.trim().isNotEmpty)
+        'inventoryValidationMode': inventoryValidationMode.trim(),
+      if (saleOrigin != null && saleOrigin.trim().isNotEmpty)
+        'saleOrigin': saleOrigin.trim(),
     };
   }
 

@@ -19,6 +19,7 @@ class CatalogProduct {
     this.marginComputedPercent,
     this.suggestedPrice,
     this.imageUrl,
+    this.blockSaleWithoutStock = false,
   });
 
   final String id;
@@ -54,6 +55,9 @@ class CatalogProduct {
   /// Foto asociada al producto (URL relativa o absoluta según backend).
   final String? imageUrl;
 
+  /// B1 — no vender sin stock (salvo PIN supervisor en app).
+  final bool blockSaleWithoutStock;
+
   /// `MANUAL_PRICE` fija lista a mano; el resto (incl. modo vacío / tienda) usa margen para orientar lista.
   bool get listPriceFollowsMarginPolicy {
     final m = pricingMode?.trim() ?? '';
@@ -86,7 +90,20 @@ class CatalogProduct {
       ),
       suggestedPrice: _parseOptionalString(json['suggestedPrice']),
       imageUrl: _parseOptionalString(json['imageUrl']),
+      blockSaleWithoutStock: _parseBool(
+        json['blockSaleWithoutStock'],
+        defaultValue: false,
+      ),
     );
+  }
+
+  static bool _parseBool(dynamic v, {required bool defaultValue}) {
+    if (v == null) return defaultValue;
+    if (v is bool) return v;
+    final s = v.toString().trim().toLowerCase();
+    if (s == 'true' || s == '1') return true;
+    if (s == 'false' || s == '0') return false;
+    return defaultValue;
   }
 
   static String? _parseOptionalString(dynamic v) {
@@ -138,6 +155,7 @@ class CatalogProduct {
       marginComputedPercent: marginComputedPercent,
       suggestedPrice: suggestedPrice,
       imageUrl: imageUrl,
+      blockSaleWithoutStock: blockSaleWithoutStock,
     );
   }
 

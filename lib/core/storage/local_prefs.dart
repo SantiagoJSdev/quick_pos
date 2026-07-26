@@ -641,6 +641,7 @@ class LocalPrefs {
               'marginComputedPercent': e.marginComputedPercent,
               'suggestedPrice': e.suggestedPrice,
               'imageUrl': e.imageUrl,
+              'blockSaleWithoutStock': e.blockSaleWithoutStock,
             },
           )
           .toList(),

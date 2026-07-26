@@ -1,4 +1,4 @@
-import 'currency_ref.dart';
+import '../models/currency_ref.dart';
 
 /// Respuesta de `GET /api/v1/stores/:storeId/business-settings`.
 class BusinessSettings {
@@ -10,6 +10,10 @@ class BusinessSettings {
     required this.storeName,
     this.storeType,
     this.defaultMarginPercent,
+    this.allowNegativeStockAtPos = true,
+    this.warnOnNegativeStock = true,
+    this.blockRestrictedProductsWithoutStock = true,
+    this.requireSuccessfulSyncAtClose = false,
   });
 
   final String id;
@@ -21,6 +25,18 @@ class BusinessSettings {
 
   /// % margen por defecto de la tienda (`GET/PATCH .../business-settings`, M7).
   final String? defaultMarginPercent;
+
+  /// B1 — permitir vender aunque el stock local/servidor quede negativo.
+  final bool allowNegativeStockAtPos;
+
+  /// B1 — mostrar modal de incidencia al quedar negativo.
+  final bool warnOnNegativeStock;
+
+  /// B1 — productos restringidos sin stock: bloquear o pedir PIN en app.
+  final bool blockRestrictedProductsWithoutStock;
+
+  /// B2 — soft warning al cerrar caja si queda cola (no hard-block).
+  final bool requireSuccessfulSyncAtClose;
 
   static BusinessSettings fromJson(Map<String, dynamic> json) {
     final store = json['store'] as Map<String, dynamic>?;
@@ -40,6 +56,22 @@ class BusinessSettings {
       storeName: store?['name'] as String? ?? '(sin nombre)',
       storeType: store?['type'] as String?,
       defaultMarginPercent: _optString(json['defaultMarginPercent']),
+      allowNegativeStockAtPos: _optBool(
+        json['allowNegativeStockAtPos'],
+        defaultValue: true,
+      ),
+      warnOnNegativeStock: _optBool(
+        json['warnOnNegativeStock'],
+        defaultValue: true,
+      ),
+      blockRestrictedProductsWithoutStock: _optBool(
+        json['blockRestrictedProductsWithoutStock'],
+        defaultValue: true,
+      ),
+      requireSuccessfulSyncAtClose: _optBool(
+        json['requireSuccessfulSyncAtClose'],
+        defaultValue: false,
+      ),
     );
   }
 
@@ -47,5 +79,14 @@ class BusinessSettings {
     if (v == null) return null;
     final s = v.toString().trim();
     return s.isEmpty ? null : s;
+  }
+
+  static bool _optBool(dynamic v, {required bool defaultValue}) {
+    if (v == null) return defaultValue;
+    if (v is bool) return v;
+    final s = v.toString().trim().toLowerCase();
+    if (s == 'true' || s == '1') return true;
+    if (s == 'false' || s == '0') return false;
+    return defaultValue;
   }
 }

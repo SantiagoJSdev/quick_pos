@@ -396,6 +396,8 @@ class PosSaleCartLineTile extends StatelessWidget {
     required this.onQtyTap,
     required this.onDismissed,
     this.onShowPriceDetail,
+    this.stockStatusLabel,
+    this.stockQtyLabel,
   });
 
   final PosCartLine line;
@@ -409,6 +411,8 @@ class PosSaleCartLineTile extends StatelessWidget {
   final VoidCallback onQtyTap;
   final VoidCallback onDismissed;
   final VoidCallback? onShowPriceDetail;
+  final String? stockStatusLabel;
+  final String? stockQtyLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -472,14 +476,34 @@ class PosSaleCartLineTile extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: onShowPriceDetail != null
-                  ? Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: onShowPriceDetail,
-                        borderRadius: BorderRadius.circular(6),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  onShowPriceDetail != null
+                      ? Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: onShowPriceDetail,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Text(
+                                line.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: PosSaleUi.text,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
                           child: Text(
                             line.name,
                             maxLines: 2,
@@ -492,22 +516,27 @@ class PosSaleCartLineTile extends StatelessWidget {
                             ),
                           ),
                         ),
-                      ),
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Text(
-                        line.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: PosSaleUi.text,
-                          height: 1.2,
-                        ),
+                  if (stockStatusLabel != null &&
+                      stockStatusLabel!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      stockQtyLabel != null && stockQtyLabel!.isNotEmpty
+                          ? '$stockStatusLabel · $stockQtyLabel'
+                          : stockStatusLabel!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: stockStatusLabel!.contains('negativo') ||
+                                stockStatusLabel!.contains('Restringido')
+                            ? Colors.orangeAccent
+                            : PosSaleUi.textMuted,
                       ),
                     ),
+                  ],
+                ],
+              ),
             ),
             const SizedBox(width: 6),
             _QtyPill(

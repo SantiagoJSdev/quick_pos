@@ -7,6 +7,7 @@ import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/cash/cash_session_service.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/models/business_settings.dart';
 import '../../core/models/cash_session.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
@@ -48,6 +49,7 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
   LocalClosePreview? _preview;
   CashSessionSummaryResponse? _remoteSummary;
   String? _statusHint;
+  BusinessSettings? _settings;
 
   @override
   void initState() {
@@ -129,6 +131,9 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         storeId: widget.storeId,
         session: session,
       );
+      final settings = await widget.localPrefs.loadBusinessSettingsCache(
+        widget.storeId,
+      );
 
       CashSessionSummaryResponse? remote;
       if (online &&
@@ -147,6 +152,7 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         _session = session;
         _preview = preview;
         _remoteSummary = remote;
+        _settings = settings;
         _loading = false;
       });
     } catch (e) {
@@ -204,6 +210,9 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
     }
 
     final online = ShellOnlineScope.of(context);
+    final pending = _preview?.pendingSalesCount ?? 0;
+    final requireSync = _settings?.requireSuccessfulSyncAtClose == true;
+    final syncSoftWarn = requireSync && pending > 0;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -213,9 +222,15 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
           style: TextStyle(color: PosSaleUi.text),
         ),
         content: Text(
-          online
-              ? 'Se sincronizará lo pendiente y se cerrará el turno.'
-              : 'Sin red: el cierre quedará marcado como pendiente transmitir.',
+          [
+            if (online)
+              'Se sincronizará lo pendiente y se cerrará el turno.'
+            else
+              'Sin red: el cierre quedará marcado como pendiente transmitir.',
+            if (syncSoftWarn)
+              '\n\nAviso: quedan $pending venta(s) sin sincronizar. '
+              'La tienda pide sync exitoso al cierre; podés cerrar igual.',
+          ].join(),
           style: const TextStyle(color: PosSaleUi.textMuted),
         ),
         actions: [

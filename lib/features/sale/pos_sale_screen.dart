@@ -20,10 +20,13 @@ import '../../core/models/business_settings.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/held_ticket.dart';
 import '../../core/models/recent_sale_ticket.dart';
+import '../../core/models/inventory_line.dart';
 import '../../core/models/pos_cart_line.dart';
 import '../../core/pos/money_string_math.dart';
 import '../../core/pos/pos_sale_pricing.dart';
+import '../../core/pos/pos_stock_assessment.dart';
 import '../../core/pos/pos_terminal_info.dart';
+import '../../core/config/app_config.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_sale_entry.dart';
@@ -98,6 +101,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   double _appliedFunctionalPayment = 0;
   List<CatalogProduct> _all = [];
   final List<PosCartLine> _cart = [];
+  List<InventoryLine> _inventoryCache = [];
+  bool _catalogLikelyFresh = true;
+  bool _checkoutStockConflict = false;
   bool _loading = true;
   String? _error;
 
@@ -226,6 +232,200 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       widget.storeId,
     );
     if (mounted) setState(() => _pendingSyncCount = n);
+  }
+
+  Future<void> _refreshInventoryCacheSilent() async {
+    try {
+      final inv = await widget.localPrefs.loadInventoryCache(widget.storeId);
+      final stale = await widget.localPrefs.isCatalogLikelyStale();
+      if (!mounted) return;
+      setState(() {
+        _inventoryCache = inv;
+        _catalogLikelyFresh = !stale;
+      });
+    } catch (_) {}
+  }
+
+  Future<bool> _guardStockPoliciesBeforeCheckout() async {
+    await _refreshInventoryCacheSilent();
+    if (!mounted) return false;
+    final assessment = assessPosCartStock(
+      cart: _cart,
+      catalog: _all,
+      inventory: _inventoryCache,
+      settings: _settings,
+      catalogLikelyFresh: _catalogLikelyFresh,
+    );
+    _checkoutStockConflict = false;
+
+    final allowNeg = _settings?.allowNegativeStockAtPos ?? true;
+    final warn = _settings?.warnOnNegativeStock ?? true;
+    final blockRestricted =
+        _settings?.blockRestrictedProductsWithoutStock ?? true;
+
+    if (assessment.hasRestrictedInsufficient) {
+      if (blockRestricted) {
+        final pinOk = await _askSupervisorPinForRestrictedStock(
+          assessment.lines.where((l) => l.willGoNegative && l.isRestricted),
+        );
+        if (!pinOk) return false;
+        _checkoutStockConflict = true;
+      } else if (warn) {
+        final cont = await _askContinueNegativeStock(
+          assessment.lines.where((l) => l.willGoNegative),
+          restricted: true,
+        );
+        if (!cont) return false;
+        _checkoutStockConflict = true;
+      } else {
+        _checkoutStockConflict = true;
+      }
+    }
+
+    final policyBlocked = assessment.lines
+        .where((l) => l.willGoNegative && !l.isRestricted && !allowNeg)
+        .toList();
+    if (policyBlocked.isNotEmpty) {
+      final names = policyBlocked.map((l) => l.productName).join(', ');
+      _showCheckoutPanelMessage(
+        'Stock insuficiente y la tienda no permite negativo: $names',
+        error: true,
+        duration: const Duration(seconds: 5),
+      );
+      return false;
+    }
+
+    if (assessment.hasWarnableNegative) {
+      if (warn) {
+        final cont = await _askContinueNegativeStock(
+          assessment.lines.where((l) => l.willGoNegative && !l.isRestricted),
+        );
+        if (!cont) return false;
+        _checkoutStockConflict = true;
+      } else {
+        _checkoutStockConflict = true;
+        _showCheckoutPanelMessage(
+          'Aviso: algunas líneas pueden dejar stock negativo.',
+          error: false,
+          duration: const Duration(seconds: 3),
+        );
+      }
+    }
+
+    return true;
+  }
+
+  Future<bool> _askSupervisorPinForRestrictedStock(
+    Iterable<PosStockLineAssessment> lines,
+  ) async {
+    final detail = lines
+        .map(
+          (l) =>
+              '• ${l.productName}: pide ${l.requestedQty} / hay ${l.availableLabel}',
+        )
+        .join('\n');
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PosSaleUi.surface2,
+        title: const Text(
+          'Producto restringido sin stock',
+          style: TextStyle(color: PosSaleUi.text),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                detail,
+                style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'PIN de supervisor (solo app):',
+                style: TextStyle(color: PosSaleUi.textMuted, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                obscureText: true,
+                autofocus: true,
+                style: const TextStyle(color: PosSaleUi.text),
+                decoration: const InputDecoration(
+                  filled: true,
+                  fillColor: PosSaleUi.surface3,
+                ),
+                onSubmitted: (_) {
+                  Navigator.pop(ctx, AppConfig.adminPinMatches(ctrl.text));
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(ctx, AppConfig.adminPinMatches(ctrl.text)),
+            child: const Text('Autorizar'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (ok != true) {
+      _showCheckoutPanelMessage(
+        'Se necesita PIN de supervisor para productos restringidos sin stock.',
+        error: true,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> _askContinueNegativeStock(
+    Iterable<PosStockLineAssessment> lines, {
+    bool restricted = false,
+  }) async {
+    final detail = lines
+        .map(
+          (l) =>
+              '• ${l.productName}: pide ${l.requestedQty} / hay ${l.availableLabel}',
+        )
+        .join('\n');
+    final cont = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PosSaleUi.surface2,
+        title: Text(
+          restricted
+              ? 'Stock insuficiente (restringido)'
+              : 'Stock insuficiente',
+          style: const TextStyle(color: PosSaleUi.text),
+        ),
+        content: Text(
+          '$detail\n\n¿Continuar y registrar incidencia?',
+          style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+    return cont == true;
   }
 
   /// [doPull]: actualiza watermark con `GET /sync/pull`; [doFlush]: envía cola mixta.
@@ -1143,6 +1343,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       await _restoreActiveCartDraftIfNeeded();
       await _refreshPendingCount();
       await _refreshHeldCount();
+      unawaited(_refreshInventoryCacheSilent());
       debugPrint('[POS load] painted from cache; silent refresh=$_shellOnline');
       if (_shellOnline) {
         unawaited(_silentNetworkRefresh());
@@ -1211,6 +1412,11 @@ class _PosSaleScreenState extends State<PosSaleScreen>
               'name': s.defaultSaleDocCurrency!.name,
             },
       'store': {'name': s.storeName, 'type': s.storeType},
+      'allowNegativeStockAtPos': s.allowNegativeStockAtPos,
+      'warnOnNegativeStock': s.warnOnNegativeStock,
+      'blockRestrictedProductsWithoutStock':
+          s.blockRestrictedProductsWithoutStock,
+      'requireSuccessfulSyncAtClose': s.requireSuccessfulSyncAtClose,
     };
   }
 
@@ -1545,6 +1751,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       if (!proceed) return;
     }
 
+    final stockOk = await _guardStockPoliciesBeforeCheckout();
+    if (!stockOk || !mounted) return;
+
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
     if (!mounted) return;
 
@@ -1565,6 +1774,11 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         ),
       ),
       clientSaleId: _pendingSaleId,
+      stockConflictDetected: _checkoutStockConflict ? true : null,
+      inventoryValidationMode: _checkoutStockConflict
+          ? 'LOCAL_ESTIMATED'
+          : 'LOCAL_OK',
+      saleOrigin: 'POS',
     );
 
     // Un solo camino: confirmar en dispositivo → cola. La API no autoriza el cobro.
@@ -1595,6 +1809,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       storeId: widget.storeId,
       soldByProductId: soldByProduct,
     );
+    unawaited(_refreshInventoryCacheSilent());
 
     // Apertura automática de turno (sin UI de fondo).
     final cashApi = widget.cashSessionsApi;
@@ -2721,6 +2936,45 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                                                       final dCode =
                                                           doc ??
                                                           l.documentCurrencyCode;
+                                                      InventoryLine? inv;
+                                                      for (final e
+                                                          in _inventoryCache) {
+                                                        if (e.productId ==
+                                                            l.productId) {
+                                                          inv = e;
+                                                          break;
+                                                        }
+                                                      }
+                                                      CatalogProduct? prod;
+                                                      for (final p in _all) {
+                                                        if (p.id ==
+                                                            l.productId) {
+                                                          prod = p;
+                                                          break;
+                                                        }
+                                                      }
+                                                      final lineAssessment =
+                                                          assessPosCartStock(
+                                                            cart: [l],
+                                                            catalog: prod == null
+                                                                ? const []
+                                                                : [prod],
+                                                            inventory:
+                                                                inv == null
+                                                                ? const []
+                                                                : [inv],
+                                                            settings: _settings,
+                                                            catalogLikelyFresh:
+                                                                _catalogLikelyFresh,
+                                                          );
+                                                      final st =
+                                                          lineAssessment
+                                                              .lines
+                                                              .isEmpty
+                                                          ? null
+                                                          : lineAssessment
+                                                                .lines
+                                                                .first;
                                                       return PosSaleCartLineTile(
                                                         line: l,
                                                         imageUrl:
@@ -2731,6 +2985,13 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                                                         lineTotalFunctional: lf,
                                                         functionalCode: func,
                                                         documentCode: dCode,
+                                                        stockStatusLabel:
+                                                            st?.status.labelEs,
+                                                        stockQtyLabel:
+                                                            st?.availableQty ==
+                                                                null
+                                                            ? null
+                                                            : 'qty ${st!.availableLabel}',
                                                         onMinus: () {
                                                           _ensureSearchUnfocusedForCheckout();
                                                           _bumpLine(i, -1);
