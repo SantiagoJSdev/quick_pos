@@ -60,10 +60,14 @@ Este documento sirve para:
 
 1. Buscar producto (nombre, SKU, barcode) y agregar al carrito.
 2. Manejo de moneda documento + conversion a funcional.
-3. Cobro: `POST /sales`.
+3. Cobro **local**: persiste ticket + cola `sync/push` (`opType: SALE`); no depende de `POST /sales` para autorizar.
 4. Cobro mixto: `payments[]` opcional (ej. USD + VES) con validacion de restante antes de confirmar.
 5. Si un pago viene en moneda distinta a la moneda documento, se envia `fxSnapshot` en la linea de pago.
-4. Si no hay red, venta a cola local y luego `sync/push`.
+6. Precio de linea **congelado** al agregar: pull de catalogo no reprecia el ticket abierto.
+7. Producto desactivado: no se agrega desde busqueda; si ya estaba en el ticket, se puede editar qty y cobrar.
+8. Stock estimado local (B1): chips + modal/PIN segun `business-settings` y `blockSaleWithoutStock`.
+9. Cerrar caja (B2): pantalla dedicada + `cash-sessions` API; cierre offline con pendiente transmitir.
+10. **Avance de efectivo:** producto `type=SERVICE` + `pricingMode=MANUAL_PRICE` abre sheet "Monto avance"; el ticket cobra solo la comision 10% (`qty=1`, `price=fee`).
 
 ### 4.6 Tickets en espera (held)
 
@@ -96,7 +100,10 @@ Este documento sirve para:
 
 - Operaciones definitivas van por `sync/push`.
 - `held tickets` no son `SALE` ni van a `sync/push` hasta cobrar.
-- Pull invalida catalogo y refresca pantallas.
+- Pull invalida catalogo y refresca pantallas **sin** repreciar lineas del carrito abierto.
+- Auto-sync shell ~240s (silencioso); boton **Sincronizar** en Inicio.
+- Inventario administrativo: **online-only** (gate en modulo).
+- Modulo Inventario/Stock: no operable sin red (a diferencia del stock estimado del POS).
 
 ## 6) Endpoints clave (minimo operativo)
 

@@ -23,6 +23,7 @@ import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/inventory_line.dart';
 import '../../core/models/pos_cart_line.dart';
 import '../../core/pos/money_string_math.dart';
+import '../../core/pos/pos_cash_advance.dart';
 import '../../core/pos/pos_sale_pricing.dart';
 import '../../core/pos/pos_stock_assessment.dart';
 import '../../core/pos/pos_terminal_info.dart';
@@ -795,16 +796,15 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     final func = s.functionalCurrency.code;
     final next = <PosCartLine>[];
     for (final old in _cart) {
-      final docPrice = PosSalePricing.documentUnitPrice(
-        catalogPrice: old.catalogUnitPrice,
-        catalogCurrency: old.catalogCurrency,
-        documentCurrencyCode: doc,
-        functionalCurrencyCode: func,
-        pair: _fxPair,
-      );
-      if (docPrice == null) continue;
-
       if (old.isByWeight) {
+        final docPrice = PosSalePricing.documentUnitPrice(
+          catalogPrice: old.catalogUnitPrice,
+          catalogCurrency: old.catalogCurrency,
+          documentCurrencyCode: doc,
+          functionalCurrencyCode: func,
+          pair: _fxPair,
+        );
+        if (docPrice == null) continue;
         final funcPrice = old.pricePerKgFunctional;
         final qty = old.quantity;
         final lineFunc = (funcPrice != null &&
@@ -831,6 +831,50 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         continue;
       }
 
+      if (old.isCashAdvance) {
+        var advanceBase = old.advanceBaseDocument;
+        if (advanceBase != null &&
+            PosCashAdvance.isPositiveAmount(advanceBase) &&
+            old.documentCurrencyCode.toUpperCase() != doc.toUpperCase()) {
+          advanceBase = PosSalePricing.documentUnitPrice(
+            catalogPrice: advanceBase,
+            catalogCurrency: old.documentCurrencyCode,
+            documentCurrencyCode: doc,
+            functionalCurrencyCode: func,
+            pair: _fxPair,
+          );
+        }
+        if (advanceBase == null ||
+            !PosCashAdvance.isPositiveAmount(advanceBase)) {
+          continue;
+        }
+        final fee = PosCashAdvance.feeFromAdvanceAmount(advanceBase);
+        if (!PosCashAdvance.isPositiveAmount(fee)) continue;
+        next.add(
+          PosCartLine(
+            productId: old.productId,
+            name: old.name,
+            sku: old.sku,
+            catalogUnitPrice: fee,
+            catalogCurrency: doc,
+            documentUnitPrice: fee,
+            documentCurrencyCode: doc,
+            quantity: '1',
+            isCashAdvance: true,
+            advanceBaseDocument: advanceBase,
+          ),
+        );
+        continue;
+      }
+
+      final docPrice = PosSalePricing.documentUnitPrice(
+        catalogPrice: old.catalogUnitPrice,
+        catalogCurrency: old.catalogCurrency,
+        documentCurrencyCode: doc,
+        functionalCurrencyCode: func,
+        pair: _fxPair,
+      );
+      if (docPrice == null) continue;
       next.add(
         PosCartLine(
           productId: old.productId,
@@ -841,11 +885,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
           documentUnitPrice: docPrice,
           documentCurrencyCode: doc,
           quantity: old.quantity,
-          isByWeight: false,
-          displayGrams: old.displayGrams,
-          pricePerKgFunctional: old.pricePerKgFunctional,
-          lineAmountFunctional: old.lineAmountFunctional,
-          lineAmountDocument: old.lineAmountDocument,
         ),
       );
     }
@@ -1559,6 +1598,72 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     _showCartFeedback('$name · ${res.displayGrams} g en el ticket');
   }
 
+  Future<void> _openCashAdvanceSheet({
+    CatalogProduct? product,
+    PosCartLine? existing,
+  }) async {
+    final productId = product?.id ?? existing?.productId;
+    if (productId == null) return;
+    final name = existing?.name ?? product?.name ?? 'Avance';
+    final sku = existing?.sku ?? product?.sku ?? '';
+    final doc = _selectedDocumentCurrency;
+    if (doc == null) {
+      _showCheckoutPanelMessage(
+        _contextError ?? 'No se cargó la configuración de la tienda.',
+        error: true,
+      );
+      return;
+    }
+    final outcome = await showPosCashAdvanceSheet(
+      context,
+      productName: name,
+      documentCode: doc,
+      initialAdvanceBase: existing?.advanceBaseDocument,
+      allowRemoveFromCart: existing != null,
+    );
+    if (!mounted || outcome == null) return;
+    if (outcome is PosCashAdvanceSheetRemoved) {
+      _invalidateCheckoutIdempotency();
+      setState(() {
+        _cart.removeWhere((l) => l.productId == productId);
+      });
+      _schedulePersistActiveCartDraft();
+      _search.clear();
+      _searchFocus.unfocus();
+      _showCartFeedback('$name quitado del ticket');
+      return;
+    }
+    final res = (outcome as PosCashAdvanceSheetConfirmed).result;
+    _invalidateCheckoutIdempotency();
+    final i = _cart.indexWhere((l) => l.productId == productId);
+    setState(() {
+      final line = PosCartLine(
+        productId: productId,
+        name: name,
+        sku: sku,
+        catalogUnitPrice: res.feeDocument,
+        catalogCurrency: doc,
+        documentUnitPrice: res.feeDocument,
+        documentCurrencyCode: doc,
+        quantity: '1',
+        isCashAdvance: true,
+        advanceBaseDocument: res.advanceBaseDocument,
+      );
+      if (i >= 0) {
+        _cart[i] = line;
+      } else {
+        _cart.add(line);
+      }
+    });
+    _schedulePersistActiveCartDraft();
+    _search.clear();
+    _searchFocus.unfocus();
+    _showCartFeedback(
+      '$name: avance ${res.advanceBaseDocument} $doc → '
+      'comisión ${res.feeDocument} $doc',
+    );
+  }
+
   Future<void> _addProductToCart(
     CatalogProduct p, {
     String addQty = '1',
@@ -1567,6 +1672,14 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       _showCheckoutPanelMessage(
         'Producto desactivado: no se puede agregar al ticket.',
         error: true,
+      );
+      return;
+    }
+    if (PosCashAdvance.isAdvanceProduct(p)) {
+      final existingIdx = _cart.indexWhere((l) => l.productId == p.id);
+      await _openCashAdvanceSheet(
+        product: p,
+        existing: existingIdx >= 0 ? _cart[existingIdx] : null,
       );
       return;
     }
@@ -1872,6 +1985,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       pricePerKgFunctional: l.pricePerKgFunctional,
       lineAmountFunctional: l.lineAmountFunctional,
       lineAmountDocument: l.lineAmountDocument,
+      isCashAdvance: l.isCashAdvance,
+      advanceBaseDocument: l.advanceBaseDocument,
     );
   }
 
@@ -2258,6 +2373,17 @@ class _PosSaleScreenState extends State<PosSaleScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (line.isCashAdvance &&
+                  line.advanceBaseDocument != null) ...[
+                _posCartDetailRow(
+                  'Monto avance',
+                  '${line.advanceBaseDocument} $docC',
+                ),
+                _posCartDetailRow(
+                  'Comisión ${PosCashAdvance.feePercentLabel}',
+                  '${line.documentUnitPrice} $docC',
+                ),
+              ],
               if (line.isByWeight && line.displayGrams != null)
                 _posCartDetailRow('Peso', '${line.displayGrams} g'),
               _posCartDetailRow('Stock disponible', stockLabel),
@@ -2431,7 +2557,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         final bc = p.barcode?.trim();
         return PosSaleSearchResultTile(
           product: p,
-          primaryLine: docLbl ?? '${p.price} ${p.currency}',
+          primaryLine: PosCashAdvance.isAdvanceProduct(p)
+              ? 'Avance · comisión ${PosCashAdvance.feePercentLabel} al cobrar'
+              : (docLbl ?? '${p.price} ${p.currency}'),
           secondaryLine: [
             'SKU ${p.sku}',
             if (bc != null && bc.isNotEmpty) bc,
@@ -2520,8 +2648,23 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     );
   }
 
+  bool _lineIsCashAdvance(PosCartLine line) {
+    if (line.isCashAdvance) return true;
+    final p = _catalogByProductId(line.productId);
+    return p != null && PosCashAdvance.isAdvanceProduct(p);
+  }
+
   void _bumpLine(int index, double delta) {
     final line = _cart[index];
+    if (_lineIsCashAdvance(line)) {
+      unawaited(
+        _openCashAdvanceSheet(
+          product: _catalogByProductId(line.productId),
+          existing: line.isCashAdvance ? line : null,
+        ),
+      );
+      return;
+    }
     if (line.isByWeight) {
       // Editar desde snapshot del ticket (sirve si el producto ya no está activo).
       unawaited(
@@ -2548,6 +2691,13 @@ class _PosSaleScreenState extends State<PosSaleScreen>
 
   Future<void> _onLineQtyTap(int index) async {
     final line = _cart[index];
+    if (_lineIsCashAdvance(line)) {
+      await _openCashAdvanceSheet(
+        product: _catalogByProductId(line.productId),
+        existing: line.isCashAdvance ? line : null,
+      );
+      return;
+    }
     if (line.isByWeight) {
       await _openWeightedAddSheet(
         product: _catalogByProductId(line.productId),
@@ -2981,6 +3131,16 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                                                           : lineAssessment
                                                                 .lines
                                                                 .first;
+                                                      final advanceLabel =
+                                                          l.isCashAdvance &&
+                                                              l.advanceBaseDocument !=
+                                                                  null
+                                                          ? 'Avance ${l.advanceBaseDocument} $dCode'
+                                                          : null;
+                                                      final feeLabel =
+                                                          l.isCashAdvance
+                                                          ? 'comisión ${PosCashAdvance.feePercentLabel}'
+                                                          : null;
                                                       return PosSaleCartLineTile(
                                                         line: l,
                                                         imageUrl:
@@ -2992,12 +3152,14 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                                                         functionalCode: func,
                                                         documentCode: dCode,
                                                         stockStatusLabel:
+                                                            advanceLabel ??
                                                             st?.status.labelEs,
                                                         stockQtyLabel:
-                                                            st?.availableQty ==
-                                                                null
-                                                            ? null
-                                                            : 'qty ${st!.availableLabel}',
+                                                            feeLabel ??
+                                                            (st?.availableQty ==
+                                                                    null
+                                                                ? null
+                                                                : 'qty ${st!.availableLabel}'),
                                                         onMinus: () {
                                                           _ensureSearchUnfocusedForCheckout();
                                                           _bumpLine(i, -1);

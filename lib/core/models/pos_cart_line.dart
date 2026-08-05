@@ -18,6 +18,8 @@ class PosCartLine {
     this.pricePerKgFunctional,
     this.lineAmountFunctional,
     this.lineAmountDocument,
+    this.isCashAdvance = false,
+    this.advanceBaseDocument,
   });
 
   final String productId;
@@ -33,6 +35,12 @@ class PosCartLine {
   final String? pricePerKgFunctional;
   final String? lineAmountFunctional;
   final String? lineAmountDocument;
+
+  /// Avance de efectivo: el ticket cobra la comisión, no el monto base.
+  final bool isCashAdvance;
+
+  /// Monto del avance en moneda documento (solo UI / re-edición; no suma al total).
+  final String? advanceBaseDocument;
 
   static bool _positiveDecimal(String? s) {
     if (s == null) return false;

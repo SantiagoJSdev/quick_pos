@@ -64,6 +64,13 @@ class CatalogProduct {
     return m != 'MANUAL_PRICE';
   }
 
+  /// Servicio con precio manual en cobro (p. ej. avance de efectivo → comisión %).
+  bool get isPosCashAdvanceService {
+    final t = type?.trim().toUpperCase() ?? '';
+    final pm = pricingMode?.trim().toUpperCase() ?? '';
+    return t == 'SERVICE' && pm == 'MANUAL_PRICE';
+  }
+
   static CatalogProduct fromJson(Map<String, dynamic> json) {
     return CatalogProduct(
       id: json['id']?.toString() ?? '',

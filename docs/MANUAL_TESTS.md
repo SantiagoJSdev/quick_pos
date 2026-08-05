@@ -379,6 +379,48 @@ Documento unico para registrar todas las pruebas manuales del frontend (actuales
   - En `sync/push` se confirma sin duplicados.
   - Historial local/remoto queda consistente tras sincronizacion.
 
+### MT-POS-013 - Precio congelado ante pull de catalogo
+- Estado: `[ ]`
+- Precondicion: ticket abierto con al menos 1 linea; precio de lista conocido.
+- Pasos:
+  1. Anotar precio unitario de la linea en el ticket.
+  2. En otra sesion/admin, cambiar el precio del producto en backend.
+  3. En el POS, forzar sync/pull (boton Sincronizar o esperar auto-sync).
+  4. Observar la linea del carrito abierto (sin quitarla).
+  5. Opcional: cambiar moneda documento del ticket y volver.
+- Resultado esperado:
+  - El precio de la linea **no** cambia al precio nuevo del catalogo.
+  - Solo se reconvierte FX si cambia moneda documento / tasa, usando el precio congelado al agregar.
+  - Catalogo/busqueda muestra el precio nuevo para **nuevas** altas al ticket.
+
+### MT-POS-014 - Producto desactivado ya en ticket
+- Estado: `[ ]`
+- Pasos:
+  1. Agregar producto activo al ticket.
+  2. Desactivar el producto (Inventario/Catalogo) y sincronizar.
+  3. Verificar que ya no aparece en busqueda/scan del POS.
+  4. Editar qty de la linea que sigue en el ticket (unidad o peso).
+  5. Cobrar.
+- Resultado esperado:
+  - No se puede agregar de nuevo desde busqueda/scan.
+  - La linea existente permanece, se puede editar qty y cobrar OK (cola local).
+  - No se elimina sola al refrescar catalogo.
+
+### MT-POS-015 - Avance de efectivo (comision 10%)
+- Estado: `[ ]`
+- Precondicion: producto catalogo `type=SERVICE`, `pricingMode=MANUAL_PRICE`, precio/costo 0 (o irrelevante).
+- Pasos:
+  1. En POS, buscar y tocar el producto de avance.
+  2. En el sheet, ingresar monto avance (ej. `2000`).
+  3. Confirmar: debe mostrar comision `200` (10%).
+  4. Verificar linea del ticket: qty `1`, total = comision (no 2000).
+  5. Cobrar (online u offline) y revisar payload/cola: `quantity=1`, `price` = fee.
+- Resultado esperado:
+  - No se agrega con precio 0 del catalogo.
+  - El monto del avance no suma al total del ticket.
+  - Reabrir la linea (+/− o tap qty) permite cambiar el monto avance.
+  - Sync acepta la venta con fee como precio unitario.
+
 ---
 
 ## 6) Dashboard operativo y kiosk

@@ -42,6 +42,8 @@ class ActivePosCartDraft {
     'pricePerKgFunctional': l.pricePerKgFunctional,
     'lineAmountFunctional': l.lineAmountFunctional,
     'lineAmountDocument': l.lineAmountDocument,
+    'isCashAdvance': l.isCashAdvance,
+    'advanceBaseDocument': l.advanceBaseDocument,
   };
 
   static PosCartLine? _lineFromJson(Map<String, dynamic> json) {
@@ -70,6 +72,8 @@ class ActivePosCartDraft {
       pricePerKgFunctional: json['pricePerKgFunctional']?.toString(),
       lineAmountFunctional: json['lineAmountFunctional']?.toString(),
       lineAmountDocument: json['lineAmountDocument']?.toString(),
+      isCashAdvance: json['isCashAdvance'] == true,
+      advanceBaseDocument: json['advanceBaseDocument']?.toString(),
     );
   }
 

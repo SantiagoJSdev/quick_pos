@@ -17,6 +17,8 @@ class HeldTicketLine {
     this.pricePerKgFunctional,
     this.lineAmountFunctional,
     this.lineAmountDocument,
+    this.isCashAdvance = false,
+    this.advanceBaseDocument,
   });
 
   final String productId;
@@ -34,6 +36,8 @@ class HeldTicketLine {
   final String? pricePerKgFunctional;
   final String? lineAmountFunctional;
   final String? lineAmountDocument;
+  final bool isCashAdvance;
+  final String? advanceBaseDocument;
 
   Map<String, dynamic> toJson() => {
     'productId': productId,
@@ -49,6 +53,8 @@ class HeldTicketLine {
     'pricePerKgFunctional': pricePerKgFunctional,
     'lineAmountFunctional': lineAmountFunctional,
     'lineAmountDocument': lineAmountDocument,
+    'isCashAdvance': isCashAdvance,
+    'advanceBaseDocument': advanceBaseDocument,
   };
 
   static HeldTicketLine? tryFromJson(Map<String, dynamic> json) {
@@ -76,6 +82,8 @@ class HeldTicketLine {
       pricePerKgFunctional: json['pricePerKgFunctional']?.toString(),
       lineAmountFunctional: json['lineAmountFunctional']?.toString(),
       lineAmountDocument: json['lineAmountDocument']?.toString(),
+      isCashAdvance: json['isCashAdvance'] == true,
+      advanceBaseDocument: json['advanceBaseDocument']?.toString(),
     );
   }
 
@@ -94,6 +102,8 @@ class HeldTicketLine {
       pricePerKgFunctional: pricePerKgFunctional,
       lineAmountFunctional: lineAmountFunctional,
       lineAmountDocument: lineAmountDocument,
+      isCashAdvance: isCashAdvance,
+      advanceBaseDocument: advanceBaseDocument,
     );
   }
 }
@@ -232,6 +242,8 @@ class HeldTicket {
             pricePerKgFunctional: l.pricePerKgFunctional,
             lineAmountFunctional: l.lineAmountFunctional,
             lineAmountDocument: l.lineAmountDocument,
+            isCashAdvance: l.isCashAdvance,
+            advanceBaseDocument: l.advanceBaseDocument,
           ),
         )
         .toList();

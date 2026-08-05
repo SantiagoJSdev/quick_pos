@@ -731,7 +731,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       active: widget.existing?.active ?? true,
       unit: _unit.text.trim().isEmpty ? null : _unit.text.trim(),
       supplierId: _supplierId,
-      pricingMode: _pricingMode == 'USE_STORE_DEFAULT' ? null : _pricingMode,
+      pricingMode: _type == 'SERVICE'
+          ? 'MANUAL_PRICE'
+          : (_pricingMode == 'USE_STORE_DEFAULT' ? null : _pricingMode),
       marginPercentOverride: _pricingMode == 'USE_PRODUCT_OVERRIDE'
           ? _marginPercentOverride.text.trim()
           : null,
@@ -1245,11 +1247,40 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 onChanged: _loading
                     ? null
                     : (v) {
-                        if (v != null) setState(() => _type = v);
+                        if (v == null) return;
+                        setState(() {
+                          _type = v;
+                          // Avance / servicios cobrados en POS: precio manual.
+                          if (v == 'SERVICE') {
+                            _pricingMode = 'MANUAL_PRICE';
+                            if (_price.text.trim().isEmpty ||
+                                (double.tryParse(
+                                          _price.text
+                                              .trim()
+                                              .replaceAll(',', '.'),
+                                        ) ??
+                                        0) <=
+                                    0) {
+                              _price.text = '0';
+                            }
+                          }
+                        });
                       },
               ),
             ),
           ),
+          if (_type == 'SERVICE') ...[
+            const SizedBox(height: 8),
+            Text(
+              'Servicio (p. ej. avance de efectivo): en el POS se pedirá el '
+              'monto del avance y se cobrará la comisión 10% '
+              '(qty 1 × fee). Usá precio de lista 0 y modo MANUAL_PRICE.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           SwitchListTile(
             value: _isByWeightUnit,

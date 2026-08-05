@@ -543,7 +543,7 @@ class PosSaleCartLineTile extends StatelessWidget {
               quantity: line.quantity,
               quantityDisplay: line.isByWeight && line.displayGrams != null
                   ? '${line.displayGrams} g'
-                  : null,
+                  : (line.isCashAdvance ? '1' : null),
               onMinus: onMinus,
               onPlus: onPlus,
               onQtyTap: onQtyTap,
