@@ -849,15 +849,20 @@ class _PosSaleScreenState extends State<PosSaleScreen>
           continue;
         }
         final fee = PosCashAdvance.feeFromAdvanceAmount(advanceBase);
-        if (!PosCashAdvance.isPositiveAmount(fee)) continue;
+        final total =
+            PosCashAdvance.totalChargeFromAdvanceAmount(advanceBase);
+        if (!PosCashAdvance.isPositiveAmount(fee) ||
+            !PosCashAdvance.isPositiveAmount(total)) {
+          continue;
+        }
         next.add(
           PosCartLine(
             productId: old.productId,
             name: old.name,
             sku: old.sku,
-            catalogUnitPrice: fee,
+            catalogUnitPrice: total,
             catalogCurrency: doc,
-            documentUnitPrice: fee,
+            documentUnitPrice: total,
             documentCurrencyCode: doc,
             quantity: '1',
             isCashAdvance: true,
@@ -1641,9 +1646,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         productId: productId,
         name: name,
         sku: sku,
-        catalogUnitPrice: res.feeDocument,
+        catalogUnitPrice: res.totalChargeDocument,
         catalogCurrency: doc,
-        documentUnitPrice: res.feeDocument,
+        documentUnitPrice: res.totalChargeDocument,
         documentCurrencyCode: doc,
         quantity: '1',
         isCashAdvance: true,
@@ -1659,8 +1664,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     _search.clear();
     _searchFocus.unfocus();
     _showCartFeedback(
-      '$name: avance ${res.advanceBaseDocument} $doc → '
-      'comisión ${res.feeDocument} $doc',
+      '$name: ${res.advanceBaseDocument} + comisión ${res.feeDocument} = '
+      '${res.totalChargeDocument} $doc',
     );
   }
 
@@ -2381,6 +2386,10 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                 ),
                 _posCartDetailRow(
                   'Comisión ${PosCashAdvance.feePercentLabel}',
+                  '${PosCashAdvance.feeFromAdvanceAmount(line.advanceBaseDocument!)} $docC',
+                ),
+                _posCartDetailRow(
+                  'Total a cobrar',
                   '${line.documentUnitPrice} $docC',
                 ),
               ],
@@ -2558,7 +2567,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         return PosSaleSearchResultTile(
           product: p,
           primaryLine: PosCashAdvance.isAdvanceProduct(p)
-              ? 'Avance · comisión ${PosCashAdvance.feePercentLabel} al cobrar'
+              ? 'Avance + comisión ${PosCashAdvance.feePercentLabel}'
               : (docLbl ?? '${p.price} ${p.currency}'),
           secondaryLine: [
             'SKU ${p.sku}',
@@ -3138,8 +3147,10 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                                                           ? 'Avance ${l.advanceBaseDocument} $dCode'
                                                           : null;
                                                       final feeLabel =
-                                                          l.isCashAdvance
-                                                          ? 'comisión ${PosCashAdvance.feePercentLabel}'
+                                                          l.isCashAdvance &&
+                                                              l.advanceBaseDocument !=
+                                                                  null
+                                                          ? 'comisión ${PosCashAdvance.feeFromAdvanceAmount(l.advanceBaseDocument!)}'
                                                           : null;
                                                       return PosSaleCartLineTile(
                                                         line: l,

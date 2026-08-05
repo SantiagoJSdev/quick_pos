@@ -727,10 +727,14 @@ class PosCashAdvanceSheetResult {
   const PosCashAdvanceSheetResult({
     required this.advanceBaseDocument,
     required this.feeDocument,
+    required this.totalChargeDocument,
   });
 
   final String advanceBaseDocument;
   final String feeDocument;
+
+  /// Avance + comisión (precio unitario qty=1 en el ticket).
+  final String totalChargeDocument;
 }
 
 sealed class PosCashAdvanceSheetOutcome {}
@@ -795,6 +799,11 @@ class _CashAdvanceSheetState extends State<_CashAdvanceSheet> {
     return PosCashAdvance.feeFromAdvanceAmount(_buffer);
   }
 
+  String get _total {
+    if (!PosCashAdvance.isPositiveAmount(_buffer)) return '0.00';
+    return PosCashAdvance.totalChargeFromAdvanceAmount(_buffer);
+  }
+
   void _tap(String key) {
     setState(() {
       if (key == 'del') {
@@ -822,13 +831,18 @@ class _CashAdvanceSheetState extends State<_CashAdvanceSheet> {
     if (!PosCashAdvance.isPositiveAmount(_buffer)) return;
     final base = _buffer.replaceAll(',', '.');
     final fee = PosCashAdvance.feeFromAdvanceAmount(base);
-    if (!PosCashAdvance.isPositiveAmount(fee)) return;
+    final total = PosCashAdvance.totalChargeFromAdvanceAmount(base);
+    if (!PosCashAdvance.isPositiveAmount(fee) ||
+        !PosCashAdvance.isPositiveAmount(total)) {
+      return;
+    }
     Navigator.pop(
       context,
       PosCashAdvanceSheetConfirmed(
         PosCashAdvanceSheetResult(
           advanceBaseDocument: base,
           feeDocument: fee,
+          totalChargeDocument: total,
         ),
       ),
     );
@@ -836,168 +850,210 @@ class _CashAdvanceSheetState extends State<_CashAdvanceSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.paddingOf(context).bottom;
+    final mq = MediaQuery.of(context);
+    final bottom = mq.padding.bottom;
     final doc = widget.documentCode.trim().toUpperCase();
     final fee = _fee;
+    final total = _total;
     final valid = PosCashAdvance.isPositiveAmount(_buffer) &&
-        PosCashAdvance.isPositiveAmount(fee);
+        PosCashAdvance.isPositiveAmount(fee) &&
+        PosCashAdvance.isPositiveAmount(total);
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: PosSaleUi.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.fromBorderSide(BorderSide(color: PosSaleUi.border)),
-      ),
-      padding: EdgeInsets.fromLTRB(24, 12, 24, 24 + bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: PosSaleUi.border,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.92),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: PosSaleUi.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.fromBorderSide(BorderSide(color: PosSaleUi.border)),
           ),
-          const SizedBox(height: 16),
-          const Text(
-            'Avance de efectivo',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: PosSaleUi.text,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            widget.productName,
-            style: const TextStyle(fontSize: 12, color: PosSaleUi.textMuted),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Monto del avance ($doc)',
-            style: const TextStyle(fontSize: 12, color: PosSaleUi.textMuted),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            decoration: BoxDecoration(
-              color: PosSaleUi.surface3,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: PosSaleUi.border),
-            ),
-            child: Text(
-              _buffer.isEmpty ? '0' : _buffer,
-              style: const TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.w700,
-                color: PosSaleUi.text,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: PosSaleUi.surface2,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: PosSaleUi.border),
-            ),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(24, 12, 24, 16 + bottom),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: PosSaleUi.border,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Avance de efectivo',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: PosSaleUi.text,
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Text(
-                  'Comisión ${PosCashAdvance.feePercentLabel} (se cobra en el ticket)',
+                  widget.productName,
                   style: const TextStyle(
-                    fontSize: 11,
+                    fontSize: 12,
+                    color: PosSaleUi.textMuted,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Monto del avance ($doc)',
+                  style: const TextStyle(
+                    fontSize: 12,
                     color: PosSaleUi.textMuted,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '$fee $doc',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: PosSaleUi.primary,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                const SizedBox(height: 6),
+                Container(
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: PosSaleUi.surface3,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: PosSaleUi.border),
+                  ),
+                  child: Text(
+                    _buffer.isEmpty ? '0' : _buffer,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: PosSaleUi.text,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Línea: cantidad 1 × precio = comisión. El monto del avance no suma al ticket.',
-                  style: TextStyle(fontSize: 11, color: PosSaleUi.textMuted),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: PosSaleUi.surface2,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: PosSaleUi.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Comisión ${PosCashAdvance.feePercentLabel}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: PosSaleUi.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$fee $doc',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: PosSaleUi.primary,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Total a cobrar (avance + comisión)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: PosSaleUi.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$total $doc',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: PosSaleUi.text,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 6,
+                  childAspectRatio: 2.0,
+                  children: [
+                    for (final k in [
+                      '7',
+                      '8',
+                      '9',
+                      '4',
+                      '5',
+                      '6',
+                      '1',
+                      '2',
+                      '3',
+                    ])
+                      _NumKey(label: k, onTap: () => _tap(k)),
+                    _NumKey(label: '.', muted: true, onTap: () => _tap('.')),
+                    _NumKey(label: '0', onTap: () => _tap('0')),
+                    _NumKey(label: '⌫', muted: true, onTap: () => _tap('del')),
+                  ],
+                ),
+                if (widget.allowRemoveFromCart) ...[
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pop(context, PosCashAdvanceSheetRemoved()),
+                    child: const Text(
+                      'Quitar del ticket',
+                      style: TextStyle(color: Colors.orangeAccent),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: PosSaleUi.textMuted,
+                          side: const BorderSide(color: PosSaleUi.border),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton(
+                        onPressed: valid ? _confirm : null,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: PosSaleUi.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: Text(
+                          widget.allowRemoveFromCart
+                              ? 'Actualizar'
+                              : 'Agregar',
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          GridView.count(
-            crossAxisCount: 3,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 1.7,
-            children: [
-              for (final k in ['7', '8', '9', '4', '5', '6', '1', '2', '3'])
-                _NumKey(label: k, onTap: () => _tap(k)),
-              _NumKey(label: '.', muted: true, onTap: () => _tap('.')),
-              _NumKey(label: '0', onTap: () => _tap('0')),
-              _NumKey(label: '⌫', muted: true, onTap: () => _tap('del')),
-            ],
-          ),
-          if (widget.allowRemoveFromCart) ...[
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, PosCashAdvanceSheetRemoved()),
-              child: const Text(
-                'Quitar del ticket',
-                style: TextStyle(color: Colors.orangeAccent),
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: PosSaleUi.textMuted,
-                    side: const BorderSide(color: PosSaleUi.border),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('Cancelar'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: FilledButton(
-                  onPressed: valid ? _confirm : null,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: PosSaleUi.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: Text(
-                    widget.allowRemoveFromCart ? 'Actualizar' : 'Agregar',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -3,8 +3,8 @@ import 'money_string_math.dart';
 
 /// Avance de efectivo: servicio con precio manual en el cobro.
 ///
-/// Backend: `type=SERVICE`, `pricingMode=MANUAL_PRICE`, costo/precio lista 0.
-/// En la venta: `qty=1` y `price` = comisión (no el monto del avance).
+/// Producto `type=SERVICE` (+ `MANUAL_PRICE` / precio 0).
+/// En la venta: `qty=1` y `price` = monto avance + comisión 10%.
 class PosCashAdvance {
   PosCashAdvance._();
 
@@ -34,13 +34,20 @@ class PosCashAdvance {
     return v <= 0;
   }
 
-  /// Comisión cobrada = [advanceAmount] × [feeRate] (2 decimales).
+  /// Comisión = [advanceAmount] × [feeRate] (2 decimales).
   static String feeFromAdvanceAmount(String advanceAmount) {
     return MoneyStringMath.multiply(
       advanceAmount.trim().replaceAll(',', '.'),
       feeRate,
       fractionDigits: 2,
     );
+  }
+
+  /// Total a cobrar en ticket = avance + comisión.
+  static String totalChargeFromAdvanceAmount(String advanceAmount) {
+    final base = advanceAmount.trim().replaceAll(',', '.');
+    final fee = feeFromAdvanceAmount(base);
+    return MoneyStringMath.sum([base, fee]);
   }
 
   static bool isPositiveAmount(String raw) {

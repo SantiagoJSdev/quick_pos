@@ -1273,8 +1273,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             const SizedBox(height: 8),
             Text(
               'Servicio (p. ej. avance de efectivo): en el POS se pedirá el '
-              'monto del avance y se cobrará la comisión 10% '
-              '(qty 1 × fee). Usá precio de lista 0 y modo MANUAL_PRICE.',
+              'monto del avance y se cobrará avance + comisión 10%. '
+              'Usá precio de lista 0 y modo MANUAL_PRICE.',
               style: TextStyle(
                 fontSize: 12,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,

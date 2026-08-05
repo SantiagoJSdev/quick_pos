@@ -412,14 +412,14 @@ Documento unico para registrar todas las pruebas manuales del frontend (actuales
 - Pasos:
   1. En POS, buscar y tocar el producto de avance.
   2. En el sheet, ingresar monto avance (ej. `2000`).
-  3. Confirmar: debe mostrar comision `200` (10%).
-  4. Verificar linea del ticket: qty `1`, total = comision (no 2000).
-  5. Cobrar (online u offline) y revisar payload/cola: `quantity=1`, `price` = fee.
+  3. Confirmar: debe mostrar comision `200` y total a cobrar `2200` (avance + 10%).
+  4. Verificar linea del ticket: qty `1`, total = `2200` (no solo la comision).
+  5. Cobrar (online u offline) y revisar payload/cola: `quantity=1`, `price` = total (avance + fee).
 - Resultado esperado:
   - No se agrega con precio 0 del catalogo.
-  - El monto del avance no suma al total del ticket.
+  - El ticket cobra avance + comision.
   - Reabrir la linea (+/− o tap qty) permite cambiar el monto avance.
-  - Sync acepta la venta con fee como precio unitario.
+  - Sync acepta la venta con el total como precio unitario.
 
 ---
 

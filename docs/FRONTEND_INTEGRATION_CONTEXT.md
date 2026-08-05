@@ -67,7 +67,7 @@ Este documento sirve para:
 7. Producto desactivado: no se agrega desde busqueda; si ya estaba en el ticket, se puede editar qty y cobrar.
 8. Stock estimado local (B1): chips + modal/PIN segun `business-settings` y `blockSaleWithoutStock`.
 9. Cerrar caja (B2): pantalla dedicada + `cash-sessions` API; cierre offline con pendiente transmitir.
-10. **Avance de efectivo:** producto `type=SERVICE` + `pricingMode=MANUAL_PRICE` abre sheet "Monto avance"; el ticket cobra solo la comision 10% (`qty=1`, `price=fee`).
+10. **Avance de efectivo:** producto `type=SERVICE` + `pricingMode=MANUAL_PRICE` abre sheet "Monto avance"; el ticket cobra **avance + comisión 10%** (`qty=1`, `price=total`).
 
 ### 4.6 Tickets en espera (held)
 
