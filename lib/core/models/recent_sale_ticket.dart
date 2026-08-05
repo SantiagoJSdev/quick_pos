@@ -8,6 +8,8 @@ class RecentSaleTicket {
     required this.recordedAtIso,
     required this.status,
     this.displayCode,
+    this.totalFunctional,
+    this.functionalCurrencyCode,
   });
 
   static const statusSynced = 'synced';
@@ -25,6 +27,12 @@ class RecentSaleTicket {
   /// Número corto del día (ej. `00042`) para copiar / devoluciones; opcional en datos viejos.
   final String? displayCode;
 
+  /// Total en moneda funcional (p. ej. USD). Opcional en tickets viejos.
+  final String? totalFunctional;
+
+  /// Código de moneda funcional (p. ej. `USD`).
+  final String? functionalCurrencyCode;
+
   Map<String, dynamic> toJson() => {
     'storeId': storeId,
     'saleId': saleId,
@@ -34,6 +42,11 @@ class RecentSaleTicket {
     'status': status,
     if (displayCode != null && displayCode!.isNotEmpty)
       'displayCode': displayCode,
+    if (totalFunctional != null && totalFunctional!.isNotEmpty)
+      'totalFunctional': totalFunctional,
+    if (functionalCurrencyCode != null &&
+        functionalCurrencyCode!.isNotEmpty)
+      'functionalCurrencyCode': functionalCurrencyCode,
   };
 
   static RecentSaleTicket? tryFromJson(Map<String, dynamic> json) {
@@ -44,6 +57,8 @@ class RecentSaleTicket {
     final at = json['recordedAtIso'] as String?;
     final st = json['status'] as String?;
     final dc = json['displayCode'] as String?;
+    final tf = json['totalFunctional'] as String?;
+    final fc = json['functionalCurrencyCode'] as String?;
     if (storeId == null ||
         storeId.isEmpty ||
         saleId == null ||
@@ -62,6 +77,8 @@ class RecentSaleTicket {
       recordedAtIso: at,
       status: st,
       displayCode: (dc != null && dc.isNotEmpty) ? dc : null,
+      totalFunctional: (tf != null && tf.isNotEmpty) ? tf : null,
+      functionalCurrencyCode: (fc != null && fc.isNotEmpty) ? fc : null,
     );
   }
 
@@ -69,6 +86,8 @@ class RecentSaleTicket {
     String? status,
     String? saleId,
     String? displayCode,
+    String? totalFunctional,
+    String? functionalCurrencyCode,
   }) {
     return RecentSaleTicket(
       storeId: storeId,
@@ -78,7 +97,21 @@ class RecentSaleTicket {
       recordedAtIso: recordedAtIso,
       status: status ?? this.status,
       displayCode: displayCode ?? this.displayCode,
+      totalFunctional: totalFunctional ?? this.totalFunctional,
+      functionalCurrencyCode:
+          functionalCurrencyCode ?? this.functionalCurrencyCode,
     );
+  }
+
+  /// Texto principal para lista/detalle: prioriza funcional (USD).
+  String get primaryTotalLabel {
+    final tf = totalFunctional?.trim();
+    if (tf != null && tf.isNotEmpty) {
+      final c = (functionalCurrencyCode ?? 'USD').trim();
+      return c.isEmpty ? tf : '$tf $c';
+    }
+    final c = documentCurrencyCode.trim();
+    return c.isEmpty ? totalDocument : '$totalDocument $c';
   }
 
   /// Compara códigos con o sin ceros a la izquierda (ej. `42` == `00042`).

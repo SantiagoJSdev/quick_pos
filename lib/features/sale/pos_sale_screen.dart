@@ -28,6 +28,7 @@ import '../../core/pos/pos_sale_pricing.dart';
 import '../../core/pos/pos_stock_assessment.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/config/app_config.dart';
+import '../../core/pos/recent_sale_functional_enricher.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_sale_entry.dart';
@@ -1925,6 +1926,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       doc: doc,
       clientSaleId: clientSaleId,
       totalDocument: totalDoc,
+      totalFunctional: _cartTotalFunctional,
+      functionalCurrencyCode: _functionalCode,
     );
     await widget.localPrefs.applyLocalInventoryDecrements(
       storeId: widget.storeId,
@@ -2002,6 +2005,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     required String doc,
     required String? clientSaleId,
     required String? totalDocument,
+    String? totalFunctional,
+    String? functionalCurrencyCode,
   }) async {
     final saleMap = SaleCheckoutPayload.syncSaleFromRestBody(
       restBody,
@@ -2027,6 +2032,19 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     );
     if (saleId.isNotEmpty && totalDocument != null) {
       final ticketNo = await widget.localPrefs.allocateLocalTicketDisplayCode();
+      var tf = totalFunctional?.trim();
+      var fc = functionalCurrencyCode?.trim();
+      if (tf == null || tf.isEmpty) {
+        final fromPayload =
+            RecentSaleFunctionalEnricher.functionalFromSalePayload(
+              sale: saleMap,
+              totalDocument: totalDocument,
+            );
+        if (fromPayload != null) {
+          tf = fromPayload.$1;
+          fc = fromPayload.$2;
+        }
+      }
       await widget.localPrefs.prependRecentSaleTicket(
         RecentSaleTicket(
           storeId: widget.storeId,
@@ -2036,6 +2054,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
           recordedAtIso: DateTime.now().toIso8601String(),
           status: RecentSaleTicket.statusQueued,
           displayCode: ticketNo,
+          totalFunctional: tf,
+          functionalCurrencyCode: fc,
         ),
       );
     }

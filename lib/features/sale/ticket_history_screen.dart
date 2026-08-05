@@ -9,6 +9,7 @@ import '../../core/api/api_error.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/sales_list_page.dart';
+import '../../core/pos/recent_sale_functional_enricher.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import '../shell/shell_online_scope.dart';
@@ -71,6 +72,9 @@ List<Widget> _saleTicketVisualWidgets(
   final total =
       _jsonStringField(sale, 'totalDocument') ??
       _jsonStringField(sale, 'documentTotal');
+  final totalFunc = _jsonStringField(sale, 'totalFunctional');
+  final funcCur =
+      _jsonStringField(sale, 'functionalCurrencyCode') ?? 'USD';
   final stat = _jsonStringField(sale, 'status');
   final created = _jsonStringField(sale, 'createdAt');
   final paid = _jsonStringField(sale, 'paidDocumentTotal');
@@ -140,13 +144,22 @@ List<Widget> _saleTicketVisualWidgets(
     const Text('Total del ticket', style: label),
     const SizedBox(height: 4),
     Text(
-      total != null && doc != null ? '$total $doc' : (total ?? '—'),
+      total != null && doc != null
+          ? '$total $doc'
+          : (totalFunc != null ? '\$$totalFunc' : (total ?? '—')),
       style: const TextStyle(
         color: PosSaleUi.text,
         fontWeight: FontWeight.w700,
         fontSize: 18,
       ),
     ),
+    if (totalFunc != null && total != null) ...[
+      const SizedBox(height: 4),
+      Text(
+        funcCur.toUpperCase() == 'USD' ? '\$$totalFunc' : '$totalFunc $funcCur',
+        style: muted,
+      ),
+    ],
     if (paid != null || change != null) ...[
       const SizedBox(height: 10),
       if (paid != null)
@@ -271,8 +284,19 @@ String _saleRowTitle(SalesListItem it) {
     return cur.isNotEmpty ? '$doc $cur' : doc;
   }
   final tf = it.totalFunctional;
-  if (tf != null && tf.isNotEmpty) return '$tf (func.)';
+  if (tf != null && tf.isNotEmpty) return '\$$tf';
   return '—';
+}
+
+String? _saleRowFunctionalLine(
+  SalesListItem it, {
+  String functionalCurrencyCode = 'USD',
+}) {
+  final tf = it.totalFunctional?.trim();
+  if (tf == null || tf.isEmpty) return null;
+  final c = functionalCurrencyCode.trim().toUpperCase();
+  if (c == 'USD' || c == '\$') return '\$$tf';
+  return '$tf $c';
 }
 
 /// Pestaña **Este dispositivo**: ventas locales del día actual. **General**: `GET /sales` (backend).
@@ -331,6 +355,7 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
               'Se enviará sola al reconectar (sync en segundo plano al abrir la app '
               'o cada ~240 s). También podés usar Sincronizar en Inicio.\n\n'
               'Total: ${t.totalDocument} ${t.documentCurrencyCode}\n'
+              '${t.totalFunctional != null && t.totalFunctional!.isNotEmpty ? '\$${t.totalFunctional}\n' : ''}'
               '${noLabel.isNotEmpty ? 'Nº ticket: ${noLabel.replaceFirst('#', '')}\n' : ''}'
               '\nProductos (copia local):\n$lines\n\n'
               'ID interno (soporte):\n${t.saleId}',
@@ -382,8 +407,11 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
       widget.storeId,
       t.saleId,
       titleSuffix: titleBit,
-      fallbackTotal: t.totalDocument,
-      fallbackCurrency: t.documentCurrencyCode,
+      fallbackTotal: t.totalFunctional ?? t.totalDocument,
+      fallbackCurrency: t.totalFunctional != null &&
+              t.totalFunctional!.isNotEmpty
+          ? (t.functionalCurrencyCode ?? 'USD')
+          : t.documentCurrencyCode,
     );
   }
 
@@ -632,10 +660,15 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
     final forStore = all
         .where((e) => e.storeId.trim() == sid)
         .toList(growable: false);
+    final enriched = await RecentSaleFunctionalEnricher.enrichForStore(
+      prefs: widget.localPrefs,
+      storeId: widget.storeId,
+      tickets: forStore,
+    );
     final stale = await widget.localPrefs.isCatalogLikelyStale();
     if (!mounted) return;
     setState(() {
-      _items = forStore;
+      _items = enriched;
       _loading = false;
       _likelyStale = stale;
     });
@@ -717,23 +750,37 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
                                 '${queued ? "Pendiente envío (sync auto.)" : "Registrada"}'
                           : t.status;
                       final no = _ticketShortNumberLabel(t.displayCode);
+                      final docLine = no.isEmpty
+                          ? '${t.totalDocument} ${t.documentCurrencyCode}'
+                          : '$no · ${t.totalDocument} ${t.documentCurrencyCode}';
+                      final funcLine = () {
+                        final tf = t.totalFunctional?.trim();
+                        if (tf == null || tf.isEmpty) return null;
+                        final c = (t.functionalCurrencyCode ?? 'USD')
+                            .trim()
+                            .toUpperCase();
+                        if (c == 'USD' || c == '\$') return '\$$tf';
+                        return '$tf $c';
+                      }();
                       return ListTile(
                         title: Text(
-                          no.isEmpty
-                              ? '${t.totalDocument} ${t.documentCurrencyCode}'
-                              : '$no · ${t.totalDocument} ${t.documentCurrencyCode}',
+                          docLine,
                           style: const TextStyle(
                             color: PosSaleUi.text,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         subtitle: Text(
-                          sub,
+                          [
+                            ?funcLine,
+                            sub,
+                          ].join('\n'),
                           style: const TextStyle(
                             color: PosSaleUi.textMuted,
                             fontSize: 12,
                           ),
                         ),
+                        isThreeLine: funcLine != null,
                         trailing: Icon(
                           queued ? Icons.cloud_queue : Icons.chevron_right,
                           color: PosSaleUi.textMuted,
@@ -780,6 +827,7 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
   bool _hasFetched = false;
   String? _deviceId;
   bool _usingCachedData = false;
+  String _functionalCurrencyCode = 'USD';
 
   @override
   void initState() {
@@ -800,10 +848,19 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
   }
 
   Future<void> _bootstrap() async {
+    final settings = await widget.localPrefs.loadBusinessSettingsCache(
+      widget.storeId,
+    );
     final cached = await widget.localPrefs.loadSalesGeneralCache(
       widget.storeId,
     );
     if (!mounted) return;
+    if (settings != null) {
+      final code = settings.functionalCurrency.code.trim();
+      if (code.isNotEmpty) {
+        setState(() => _functionalCurrencyCode = code);
+      }
+    }
     if (cached != null && cached.rows.isNotEmpty) {
       setState(() {
         _rows = cached.rows;
@@ -971,10 +1028,20 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
 
   String _subtitle(SalesListItem it) {
     final buf = StringBuffer();
+    final func = _saleRowFunctionalLine(
+      it,
+      functionalCurrencyCode: _functionalCurrencyCode,
+    );
+    if (func != null) buf.write(func);
     final ca = it.createdAt;
-    if (ca != null && ca.isNotEmpty) buf.write(ca);
+    if (ca != null && ca.isNotEmpty) {
+      if (buf.isNotEmpty) buf.write('\n');
+      buf.write(ca);
+    }
     if (it.status != null && it.status!.isNotEmpty) {
-      if (buf.isNotEmpty) buf.write(' · ');
+      if (buf.isNotEmpty) {
+        buf.write(ca != null && ca.isNotEmpty ? ' · ' : '\n');
+      }
       buf.write(it.status);
     }
     return buf.toString();
@@ -1106,17 +1173,24 @@ class _GeneralHistoryTabState extends State<_GeneralHistoryTab> {
             subtitle: Text(
               _subtitle(it),
               style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 12),
-              maxLines: 2,
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
+            isThreeLine: _saleRowFunctionalLine(
+                  it,
+                  functionalCurrencyCode: _functionalCurrencyCode,
+                ) !=
+                null,
             trailing: const Icon(
               Icons.chevron_right,
               color: PosSaleUi.textMuted,
             ),
             onTap: () => widget.onOpenRemote(
               it.id,
-              it.totalDocument,
-              it.documentCurrencyCode,
+              it.totalFunctional ?? it.totalDocument,
+              it.totalFunctional != null && it.totalFunctional!.isNotEmpty
+                  ? _functionalCurrencyCode
+                  : it.documentCurrencyCode,
             ),
           );
         }),
