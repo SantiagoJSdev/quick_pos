@@ -141,17 +141,30 @@ class _ProductInitialStockBottomSheetState
         idempotencyKey: _idempotencyKey,
       );
       if (!mounted) return;
+
+      // Cache local antes de cerrar (si falla, igual cerramos el sheet).
+      try {
+        final cached = await widget.localPrefs.loadCatalogProductsCache();
+        cached.removeWhere((x) => x.id == res.product.id);
+        cached.add(res.product);
+        await widget.localPrefs.saveCatalogProductsCache(cached);
+      } catch (_) {}
+
       widget.catalogInvalidationBus?.invalidateFromLocalMutation(
         productIds: {res.product.id},
       );
-      ScaffoldMessenger.of(context).showSnackBar(
+
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      // Cerrar primero: evita modal “colgado” si el snackbar/rebuild falla.
+      Navigator.of(context).pop(res.product);
+      messenger?.showSnackBar(
         SnackBar(
           content: Text(
             'Producto creado · SKU ${res.product.sku} · stock cargado',
           ),
         ),
       );
-      Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
       final catalogMsg = e.catalogConflictMessageEs;
@@ -179,6 +192,15 @@ class _ProductInitialStockBottomSheetState
         return;
       }
       setState(() => _error = e.userMessageForSupport);
+    } on FormatException catch (e) {
+      if (!mounted) return;
+      // El servidor pudo haber creado el producto; no dejes el sheet trabado.
+      setState(() {
+        _error =
+            'El producto pudo crearse, pero la respuesta del servidor no se '
+            'entendió (${e.message}). Cerrá y revisá el catálogo; si ya está, '
+            'no lo vuelvas a crear.';
+      });
     } catch (e) {
       if (!mounted) return;
       setState(
@@ -264,9 +286,8 @@ class _ProductInitialStockBottomSheetState
           Row(
             children: [
               TextButton(
-                onPressed: _loading
-                    ? null
-                    : () => Navigator.of(context).pop(false),
+                // Permitir cancelar aunque esté cargando (evita modal “colgado”).
+                onPressed: () => Navigator.of(context).pop(false),
                 child: const Text('Cancelar'),
               ),
               const Spacer(),

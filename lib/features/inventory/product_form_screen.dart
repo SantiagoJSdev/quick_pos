@@ -903,7 +903,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       return;
     }
 
-    final ok = await showModalBottomSheet<bool>(
+    final result = await showModalBottomSheet<Object?>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -917,7 +917,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         shellOnline: widget.shellOnline,
       ),
     );
-    if (ok == true && _photoLocalPath != null && mounted) {
+    if (!mounted) return;
+    if (result == null || result == false) return;
+
+    if (_photoLocalPath != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -926,7 +929,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         ),
       );
     }
-    if (mounted && ok == true) Navigator.of(context).pop(true);
+    // Sheet devolvió el producto creado (o true) → salir del formulario.
+    Navigator.of(context).pop(result is CatalogProduct ? result : true);
   }
 
   @override
