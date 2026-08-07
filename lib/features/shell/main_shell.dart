@@ -80,7 +80,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   static const _syncDebounce = Duration(seconds: 8);
   static const _syncPeriodic = Duration(seconds: 240);
-  static const _healthProbePeriodic = Duration(seconds: 15);
+  static const _healthProbeBase = Duration(seconds: 15);
+  static const _healthProbeMax = Duration(seconds: 120);
+  static const _probeFailsToGoOffline = 2;
 
   Timer? _periodicSync;
   Timer? _healthProbeTimer;
@@ -92,12 +94,51 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   bool _isOnline = true;
   bool _backendReachable = true;
   bool _manualForceOffline = false;
+  int _consecutiveProbeFailures = 0;
+  Duration _healthProbeInterval = _healthProbeBase;
+  bool _healthProbeInFlight = false;
 
   void _recomputeOnlineFlag() {
     final hasNetwork = connectivityAppearsOnline(
       _lastConn ?? const [ConnectivityResult.none],
     );
     _isOnline = !_manualForceOffline && hasNetwork && _backendReachable;
+  }
+
+  void _rescheduleHealthProbe() {
+    _healthProbeTimer?.cancel();
+    _healthProbeTimer = Timer(_healthProbeInterval, () {
+      unawaited(_probeBackendHealth());
+    });
+  }
+
+  void _onProbeSuccess({required bool wasReachable}) {
+    _consecutiveProbeFailures = 0;
+    _healthProbeInterval = _healthProbeBase;
+    final becameReachable = !_backendReachable;
+    if (becameReachable) {
+      _backendReachable = true;
+      if (mounted) setState(_recomputeOnlineFlag);
+    }
+    if ((!wasReachable || becameReachable) &&
+        _backendReachable &&
+        !_manualForceOffline &&
+        mounted) {
+      unawaited(_runAutoSync(reason: 'backend-recovered'));
+    }
+  }
+
+  void _onProbeFailure() {
+    _consecutiveProbeFailures++;
+    // Backoff mientras el backend no responde.
+    final nextMs = (_healthProbeInterval.inMilliseconds * 2)
+        .clamp(_healthProbeBase.inMilliseconds, _healthProbeMax.inMilliseconds);
+    _healthProbeInterval = Duration(milliseconds: nextMs);
+    if (_consecutiveProbeFailures >= _probeFailsToGoOffline &&
+        _backendReachable) {
+      _backendReachable = false;
+      if (mounted) setState(_recomputeOnlineFlag);
+    }
   }
 
   @override
@@ -139,45 +180,59 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _periodicSync = Timer.periodic(_syncPeriodic, (_) {
       unawaited(_runAutoSync(reason: 'periodic'));
     });
-    _healthProbeTimer = Timer.periodic(_healthProbePeriodic, (_) {
-      unawaited(_probeBackendHealth());
-    });
     unawaited(_probeBackendHealth());
   }
 
   Future<void> _probeBackendHealth() async {
     if (!mounted) return;
-    final hasNetwork = connectivityAppearsOnline(
-      _lastConn ?? const [ConnectivityResult.none],
-    );
-    if (!hasNetwork) {
-      if (_backendReachable) {
-        _backendReachable = false;
-        if (mounted) setState(_recomputeOnlineFlag);
-      }
+    if (_healthProbeInFlight) {
+      _rescheduleHealthProbe();
       return;
     }
-    final wasReachable = _backendReachable;
+    _healthProbeInFlight = true;
     try {
-      await widget.storesApi.getBusinessSettings(widget.storeId);
-      if (!_backendReachable) {
-        _backendReachable = true;
-        if (mounted) setState(_recomputeOnlineFlag);
-      }
-      if (!wasReachable &&
-          _backendReachable &&
-          !_manualForceOffline &&
-          mounted) {
-        unawaited(_runAutoSync(reason: 'backend-recovered'));
-      }
-    } catch (e) {
-      traceApiConnectivity(
-        'Health probe GET business-settings falló (storeId=${widget.storeId}): $e',
+      final hasNetwork = connectivityAppearsOnline(
+        _lastConn ?? const [ConnectivityResult.none],
       );
-      if (_backendReachable) {
-        _backendReachable = false;
-        if (mounted) setState(_recomputeOnlineFlag);
+      if (!hasNetwork) {
+        _consecutiveProbeFailures = _probeFailsToGoOffline;
+        if (_backendReachable) {
+          _backendReachable = false;
+          if (mounted) setState(_recomputeOnlineFlag);
+        }
+        return;
       }
+      final wasReachable = _backendReachable;
+      try {
+        await widget.storesApi.getBusinessSettings(widget.storeId);
+        _onProbeSuccess(wasReachable: wasReachable);
+      } catch (e) {
+        traceApiConnectivity(
+          'Health probe GET business-settings falló '
+          '(storeId=${widget.storeId}, fallos=$_consecutiveProbeFailures): $e',
+        );
+        _onProbeFailure();
+      }
+    } finally {
+      _healthProbeInFlight = false;
+      if (mounted) _rescheduleHealthProbe();
+    }
+  }
+
+  /// Reintento explícito (Inventario / Inicio): probe inmediato + sync si hay red.
+  Future<void> _requestReconnect({String reason = 'manual-retry'}) async {
+    if (!mounted) return;
+    if (_manualForceOffline) {
+      setState(() {
+        _manualForceOffline = false;
+        _recomputeOnlineFlag();
+      });
+      unawaited(widget.localPrefs.setManualForceOffline(false));
+    }
+    _healthProbeInterval = _healthProbeBase;
+    await _probeBackendHealth();
+    if (_backendReachable && !_manualForceOffline) {
+      unawaited(_runAutoSync(reason: reason));
     }
   }
 
@@ -499,11 +554,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 syncApi: widget.syncApi,
                 catalogInvalidationBus: widget.catalogInvalidationBus,
                 onBackendTransportFailure: () {
+                  // No bajar a offline al primer fallo de transporte: cuenta
+                  // como un fallo de probe (hace falta 2 seguidos).
                   if (!mounted) return;
-                  setState(() {
-                    _backendReachable = false;
-                    _recomputeOnlineFlag();
-                  });
+                  _onProbeFailure();
+                  if (mounted) setState(_recomputeOnlineFlag);
                 },
                 onConnectivityModeButtonPressed: () {
                   traceApiConnectivity(
@@ -529,26 +584,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     );
                     return;
                   }
-                  setState(() {
-                    if (_manualForceOffline) {
+                  // Reconectar: no forzar offline ni borrar "alcanzable".
+                  // Probe en silencio; UI sigue con cache hasta confirmar.
+                  if (_manualForceOffline) {
+                    setState(() {
                       _manualForceOffline = false;
-                    }
-                    _backendReachable = false;
-                    _recomputeOnlineFlag();
-                  });
-                  unawaited(widget.localPrefs.setManualForceOffline(false));
+                      _recomputeOnlineFlag();
+                    });
+                    unawaited(widget.localPrefs.setManualForceOffline(false));
+                  }
                   messenger?.showSnackBar(
                     const SnackBar(
-                      content: Text('Reintentando conexión con el servidor…'),
+                      content: Text('Reconectando con el servidor…'),
                       duration: Duration(seconds: 2),
                     ),
                   );
-                  traceApiConnectivity(
-                    'Tras intentar online: online=$_isOnline '
-                    'forzadoOffline=$_manualForceOffline',
-                  );
-                  unawaited(_runAutoSync(reason: 'manual-online'));
-                  unawaited(_probeBackendHealth());
+                  unawaited(_requestReconnect(reason: 'manual-online'));
                 },
               ),
             ),
@@ -565,6 +616,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 catalogInvalidationBus: widget.catalogInvalidationBus,
                 shellOnline: _isOnline,
                 shellInventoryTabActive: _index == 1,
+                onRetryOnline: () =>
+                    _requestReconnect(reason: 'inventory-retry'),
               ),
             ),
             KeyedSubtree(

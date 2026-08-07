@@ -332,6 +332,18 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   }
 
   Future<void> _openEditForLine(InventoryLine line) async {
+    if (!widget.shellOnline) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sin conexión: no se puede editar productos. '
+            'Solo lectura desde cache.',
+          ),
+        ),
+      );
+      return;
+    }
     final pid = line.productId.trim().isNotEmpty
         ? line.productId.trim()
         : line.product?.id.trim() ?? '';
@@ -380,6 +392,15 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
   }
 
   Future<void> _confirmDeactivateLine(InventoryLine line) async {
+    if (!widget.shellOnline) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sin conexión: no se puede desactivar productos.'),
+        ),
+      );
+      return;
+    }
     final name = line.displayName;
     final pid = line.productId.trim().isNotEmpty
         ? line.productId.trim()
@@ -712,15 +733,23 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
               ),
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
-                tooltip: 'Editar producto',
+                tooltip: widget.shellOnline
+                    ? 'Editar producto'
+                    : 'Online para editar',
                 visualDensity: VisualDensity.compact,
-                onPressed: () => unawaited(_openEditForLine(line)),
+                onPressed: widget.shellOnline
+                    ? () => unawaited(_openEditForLine(line))
+                    : null,
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline),
-                tooltip: 'Eliminar del catálogo',
+                tooltip: widget.shellOnline
+                    ? 'Eliminar del catálogo'
+                    : 'Online para eliminar',
                 visualDensity: VisualDensity.compact,
-                onPressed: () => unawaited(_confirmDeactivateLine(line)),
+                onPressed: widget.shellOnline
+                    ? () => unawaited(_confirmDeactivateLine(line))
+                    : null,
               ),
             ],
           ),

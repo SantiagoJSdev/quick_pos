@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api/inventory_api.dart';
@@ -14,8 +16,7 @@ import 'product_catalog_tab.dart';
 
 /// Pestaña **Inventario**: **Stock** (B1) y **Catálogo** (B4–B6) con [SegmentedButton].
 ///
-/// Operación **solo online** (cantidades oficiales y ajustes). Sin red se muestra
-/// un bloqueo amable; el stock estimado del POS sigue en cache local aparte.
+/// Lectura offline desde cache; altas/ajustes/edición requieren [shellOnline].
 class InventoryModuleScreen extends StatefulWidget {
   const InventoryModuleScreen({
     super.key,
@@ -29,6 +30,7 @@ class InventoryModuleScreen extends StatefulWidget {
     required this.catalogInvalidationBus,
     this.shellOnline = true,
     this.shellInventoryTabActive = true,
+    this.onRetryOnline,
   });
 
   final String storeId;
@@ -40,11 +42,14 @@ class InventoryModuleScreen extends StatefulWidget {
   final LocalPrefs localPrefs;
   final CatalogInvalidationBus catalogInvalidationBus;
 
-  /// Desde [MainShell]: Inventario requiere online (no opera en offline).
+  /// Desde [MainShell]: mutaciones de inventario solo si online.
   final bool shellOnline;
 
-  /// `true` cuando la pestaña principal del shell es Inventario (refresca lista al volver).
+  /// `true` cuando la pestaña principal del shell es Inventario.
   final bool shellInventoryTabActive;
+
+  /// Probe + sync desde el shell (botón Reintentar del banner).
+  final Future<void> Function()? onRetryOnline;
 
   @override
   State<InventoryModuleScreen> createState() => _InventoryModuleScreenState();
@@ -54,6 +59,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
   int _tab = 0;
   int? _stockLineCount;
   int? _catalogProductCount;
+  bool _retryBusy = false;
 
   String _countSuffix() {
     if (_tab == 0) {
@@ -66,49 +72,49 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
     return ' · $n ${n == 1 ? 'producto' : 'productos'}';
   }
 
-  Widget _offlineGate(BuildContext context) {
-    return Center(
+  Future<void> _onRetryPressed() async {
+    final fn = widget.onRetryOnline;
+    if (fn == null || _retryBusy) return;
+    setState(() => _retryBusy = true);
+    try {
+      await fn();
+    } finally {
+      if (mounted) setState(() => _retryBusy = false);
+    }
+  }
+
+  Widget _offlineReadOnlyBanner(BuildContext context) {
+    return Material(
+      color: const Color(0xFF3A2F1A),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Row(
           children: [
             const Icon(
               Icons.cloud_off_outlined,
-              size: 56,
-              color: PosSaleUi.textFaint,
+              size: 20,
+              color: Colors.orangeAccent,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Inventario solo con conexión',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: PosSaleUi.text,
-                fontWeight: FontWeight.w700,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Sin conexión: solo lectura (cache). '
+                'Para agregar o ajustar stock necesitás estar online.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: PosSaleUi.text,
+                  height: 1.3,
+                ),
               ),
             ),
-            const SizedBox(height: 10),
-            Text(
-              'Stock, ajustes y catálogo administrativo necesitan red. '
-              'En offline podés seguir vendiendo en el POS con precios y '
-              'stock estimado locales.\n\n'
-              'Andá a Inicio → Poner Online (o Sincronizar) y volvé acá.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: PosSaleUi.textMuted,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 20),
-            FilledButton.tonalIcon(
-              onPressed: () => setState(() {}),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Reintentar'),
-              style: FilledButton.styleFrom(
-                foregroundColor: PosSaleUi.text,
-                backgroundColor: PosSaleUi.surface3,
-                minimumSize: const Size(180, 44),
-              ),
+            TextButton(
+              onPressed: _retryBusy ? null : () => unawaited(_onRetryPressed()),
+              child: _retryBusy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Reintentar'),
             ),
           ],
         ),
@@ -118,6 +124,7 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final online = widget.shellOnline;
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -138,85 +145,90 @@ class _InventoryModuleScreenState extends State<InventoryModuleScreen> {
           ],
         ),
       ),
-      body: !widget.shellOnline
-          ? _offlineGate(context)
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!online) _offlineReadOnlyBanner(context),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment<int>(
+                  value: 0,
+                  label: Text('Stock'),
+                  icon: Icon(Icons.inventory_2_outlined),
+                ),
+                ButtonSegment<int>(
+                  value: 1,
+                  label: Text('Catálogo'),
+                  icon: Icon(Icons.category_outlined),
+                ),
+              ],
+              selected: {_tab},
+              onSelectionChanged: (Set<int> next) {
+                setState(() => _tab = next.first);
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              (_tab == 0
+                      ? (online
+                            ? 'Cantidades oficiales en tienda. '
+                                  'Tocá un producto para ver movimientos y ajustar stock.'
+                            : 'Mostrando stock en cache (solo lectura). '
+                                  'Conectate para ajustar o sincronizar cantidades oficiales.')
+                      : (online
+                            ? 'Ficha de producto (nombre, SKU, precio, código de barras). '
+                                  'Crear/editar requiere conexión.'
+                            : 'Catálogo en cache (solo lectura). '
+                                  'Crear o editar productos requiere conexión.')) +
+                  _countSuffix(),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: PosSaleUi.textMuted,
+              ),
+            ),
+          ),
+          Expanded(
+            child: IndexedStack(
+              index: _tab,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment<int>(
-                        value: 0,
-                        label: Text('Stock'),
-                        icon: Icon(Icons.inventory_2_outlined),
-                      ),
-                      ButtonSegment<int>(
-                        value: 1,
-                        label: Text('Catálogo'),
-                        icon: Icon(Icons.category_outlined),
-                      ),
-                    ],
-                    selected: {_tab},
-                    onSelectionChanged: (Set<int> next) {
-                      setState(() => _tab = next.first);
-                    },
-                  ),
+                InventoryStockTab(
+                  storeId: widget.storeId,
+                  inventoryApi: widget.inventoryApi,
+                  productsApi: widget.productsApi,
+                  suppliersApi: widget.suppliersApi,
+                  storesApi: widget.storesApi,
+                  uploadsApi: widget.uploadsApi,
+                  localPrefs: widget.localPrefs,
+                  catalogInvalidationBus: widget.catalogInvalidationBus,
+                  shellOnline: widget.shellOnline,
+                  shellInventoryTabActive: widget.shellInventoryTabActive,
+                  onLoadedCount: (n) {
+                    if (mounted) setState(() => _stockLineCount = n);
+                  },
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Text(
-                    (_tab == 0
-                            ? 'Cantidades oficiales en tienda (requiere conexión). '
-                                'Tocá un producto para ver movimientos y ajustar stock.'
-                            : 'Ficha de producto (nombre, SKU, precio, código de barras). '
-                                'Crear/editar requiere conexión.') +
-                        _countSuffix(),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: PosSaleUi.textMuted,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: IndexedStack(
-                    index: _tab,
-                    children: [
-                      InventoryStockTab(
-                        storeId: widget.storeId,
-                        inventoryApi: widget.inventoryApi,
-                        productsApi: widget.productsApi,
-                        suppliersApi: widget.suppliersApi,
-                        storesApi: widget.storesApi,
-                        uploadsApi: widget.uploadsApi,
-                        localPrefs: widget.localPrefs,
-                        catalogInvalidationBus: widget.catalogInvalidationBus,
-                        shellOnline: widget.shellOnline,
-                        shellInventoryTabActive: widget.shellInventoryTabActive,
-                        onLoadedCount: (n) {
-                          if (mounted) setState(() => _stockLineCount = n);
-                        },
-                      ),
-                      ProductCatalogTab(
-                        storeId: widget.storeId,
-                        productsApi: widget.productsApi,
-                        suppliersApi: widget.suppliersApi,
-                        storesApi: widget.storesApi,
-                        catalogInvalidationBus: widget.catalogInvalidationBus,
-                        localPrefs: widget.localPrefs,
-                        uploadsApi: widget.uploadsApi,
-                        shellOnline: widget.shellOnline,
-                        onLoadedCount: (n) {
-                          if (mounted) {
-                            setState(() => _catalogProductCount = n);
-                          }
-                        },
-                      ),
-                    ],
-                  ),
+                ProductCatalogTab(
+                  storeId: widget.storeId,
+                  productsApi: widget.productsApi,
+                  suppliersApi: widget.suppliersApi,
+                  storesApi: widget.storesApi,
+                  catalogInvalidationBus: widget.catalogInvalidationBus,
+                  localPrefs: widget.localPrefs,
+                  uploadsApi: widget.uploadsApi,
+                  shellOnline: widget.shellOnline,
+                  onLoadedCount: (n) {
+                    if (mounted) {
+                      setState(() => _catalogProductCount = n);
+                    }
+                  },
                 ),
               ],
             ),
+          ),
+        ],
+      ),
     );
   }
 }

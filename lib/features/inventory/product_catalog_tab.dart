@@ -149,6 +149,18 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
   }
 
   Future<void> _openForm({CatalogProduct? existing}) async {
+    if (!widget.shellOnline) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sin conexión: no se pueden crear ni editar productos. '
+            'Solo lectura desde cache.',
+          ),
+        ),
+      );
+      return;
+    }
     await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
         builder: (ctx) => ProductFormScreen(
@@ -184,6 +196,15 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
   }
 
   Future<void> _confirmDeactivate(CatalogProduct p) async {
+    if (!widget.shellOnline) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sin conexión: no se puede desactivar productos.'),
+        ),
+      );
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -308,9 +329,13 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           bottom: 16,
           child: FloatingActionButton.extended(
             heroTag: 'fab_inventory_product_catalog',
-            onPressed: _loading ? null : () => _openForm(),
+            onPressed: (!widget.shellOnline || _loading)
+                ? null
+                : () => _openForm(),
             icon: const Icon(Icons.add),
-            label: const Text('Nuevo producto'),
+            label: Text(
+              widget.shellOnline ? 'Nuevo producto' : 'Online para crear',
+            ),
           ),
         ),
       ],
@@ -358,7 +383,9 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
           Center(
             child: Text(
               _all.isEmpty
-                  ? 'No hay productos activos. Usá el botón + para crear uno.'
+                  ? (widget.shellOnline
+                        ? 'No hay productos activos. Usá el botón + para crear uno.'
+                        : 'No hay productos en cache. Conectate para sincronizar el catálogo.')
                   : 'Sin resultados.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
@@ -435,21 +462,37 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
             children: subChildren,
           ),
           isThreeLine: subChildren.length >= 2,
-          onTap: () => unawaited(_openForm(existing: p)),
+          onTap: widget.shellOnline
+              ? () => unawaited(_openForm(existing: p))
+              : () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Sin conexión: catálogo en solo lectura.',
+                      ),
+                    ),
+                  );
+                },
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
-                tooltip: 'Editar',
+                tooltip: widget.shellOnline ? 'Editar' : 'Online para editar',
                 visualDensity: VisualDensity.compact,
-                onPressed: () => unawaited(_openForm(existing: p)),
+                onPressed: widget.shellOnline
+                    ? () => unawaited(_openForm(existing: p))
+                    : null,
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline),
-                tooltip: 'Eliminar del catálogo',
+                tooltip: widget.shellOnline
+                    ? 'Eliminar del catálogo'
+                    : 'Online para eliminar',
                 visualDensity: VisualDensity.compact,
-                onPressed: () => unawaited(_confirmDeactivate(p)),
+                onPressed: widget.shellOnline
+                    ? () => unawaited(_confirmDeactivate(p))
+                    : null,
               ),
             ],
           ),
