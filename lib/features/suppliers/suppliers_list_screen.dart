@@ -35,6 +35,7 @@ class SuppliersListScreen extends StatefulWidget {
     required this.syncApi,
     required this.catalogInvalidationBus,
     this.shellOnline = true,
+    this.embeddedInModule = false,
   });
 
   final String storeId;
@@ -49,6 +50,9 @@ class SuppliersListScreen extends StatefulWidget {
 
   /// Desde [MainShell]: lista desde caché local sin esperar red.
   final bool shellOnline;
+
+  /// Si true, no dibuja AppBar (lo provee [SuppliersModuleScreen]).
+  final bool embeddedInModule;
 
   @override
   State<SuppliersListScreen> createState() => _SuppliersListScreenState();
@@ -343,37 +347,39 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        titleSpacing: 0,
-        title: Row(
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(left: 12, right: 10),
-              child: QuickMarketLogoMark(size: 32, borderRadius: 10),
-            ),
-            Text(
-              'Proveedores',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: PosSaleUi.text,
-                fontWeight: FontWeight.w700,
+      appBar: widget.embeddedInModule
+          ? null
+          : AppBar(
+              automaticallyImplyLeading: false,
+              titleSpacing: 0,
+              title: Row(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(left: 12, right: 10),
+                    child: QuickMarketLogoMark(size: 32, borderRadius: 10),
+                  ),
+                  Text(
+                    'Proveedores',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: PosSaleUi.text,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: _loading ? null : _openPurchaseReceive,
+                  tooltip: 'Recepción / compra',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loading ? null : () => _load(reset: true),
+                  tooltip: 'Recargar',
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.receipt_long_outlined),
-            onPressed: _loading ? null : _openPurchaseReceive,
-            tooltip: 'Recepción / compra',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : () => _load(reset: true),
-            tooltip: 'Recargar',
-          ),
-        ],
-      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -503,12 +509,14 @@ class _SuppliersListScreenState extends State<SuppliersListScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'fab_suppliers_list',
-        onPressed: () => _openForm(),
-        icon: const Icon(Icons.add),
-        label: const Text('Proveedor'),
-      ),
+      floatingActionButton: widget.embeddedInModule
+          ? null
+          : FloatingActionButton.extended(
+              heroTag: 'fab_suppliers_list',
+              onPressed: () => _openForm(),
+              icon: const Icon(Icons.add),
+              label: const Text('Proveedor'),
+            ),
     );
   }
 }

@@ -89,10 +89,15 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   final _productFocus = FocusNode();
   final _invoiceRef = TextEditingController();
   final _purchaseNotes = TextEditingController();
+  final _initialPaid = TextEditingController();
   final List<_PurchaseLineDraft> _lines = [];
   bool _loading = true;
   bool _submitting = false;
   String? _formError;
+
+  /// PAID | CREDIT | PARTIAL
+  String _paymentStatus = 'PAID';
+  DateTime? _dueDate;
 
   String? _purchaseClientId;
   PosTerminalInfo? _terminal;
@@ -125,6 +130,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     _productFocus.dispose();
     _invoiceRef.dispose();
     _purchaseNotes.dispose();
+    _initialPaid.dispose();
     super.dispose();
   }
 
@@ -573,6 +579,35 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return;
     }
 
+    String? dueDateStr;
+    String? initialPaidStr;
+    if (_paymentStatus == 'CREDIT' || _paymentStatus == 'PARTIAL') {
+      if (_dueDate != null) {
+        final d = _dueDate!;
+        dueDateStr =
+            '${d.year.toString().padLeft(4, '0')}-'
+            '${d.month.toString().padLeft(2, '0')}-'
+            '${d.day.toString().padLeft(2, '0')}';
+      }
+    }
+    if (_paymentStatus == 'PARTIAL') {
+      final raw = _initialPaid.text.trim();
+      if (!_decimalPositive.hasMatch(raw) || double.tryParse(raw) == null) {
+        setState(
+          () => _formError =
+              'En Parcial, indicá el abono inicial en moneda funcional '
+              '(número > 0).',
+        );
+        return;
+      }
+      final v = double.parse(raw);
+      if (v <= 0) {
+        setState(() => _formError = 'El abono inicial debe ser mayor que 0.');
+        return;
+      }
+      initialPaidStr = raw;
+    }
+
     _purchaseClientId ??= ClientMutationId.newId();
     _terminal ??= await PosTerminalInfo.load(widget.localPrefs);
     if (!mounted) return;
@@ -599,9 +634,13 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       clientPurchaseId: _purchaseClientId,
       supplierInvoiceReference:
           supplierInvoiceRef.isEmpty ? null : supplierInvoiceRef,
+      paymentStatus: _paymentStatus,
+      dueDate: dueDateStr,
+      initialAmountPaidFunctional: initialPaidStr,
     );
     debugPrint(
       '[Purchase] POST /purchases lines=${lines.length} '
+      'paymentStatus=$_paymentStatus '
       'supplierInvoiceRefLen=${supplierInvoiceRef.length} '
       'bodyKeys=${restBody.keys.join(",")} '
       'hasSupplierInvoiceReference=${restBody.containsKey("supplierInvoiceReference")}',
@@ -675,6 +714,9 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           fxSource: 'POS_OFFLINE',
           supplierInvoiceReference:
               supplierInvoiceRef.isEmpty ? null : supplierInvoiceRef,
+          paymentStatus: _paymentStatus,
+          dueDate: dueDateStr,
+          initialAmountPaidFunctional: initialPaidStr,
         );
         await widget.localPrefs.appendPendingPurchaseReceive(
           PendingPurchaseReceiveEntry(
@@ -719,7 +761,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Recepción / compra')),
+      appBar: AppBar(title: const Text('Nueva factura')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _contextError != null
@@ -828,6 +870,92 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     ),
                     maxLines: 2,
                   ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Forma de pago',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment<String>(
+                        value: 'PAID',
+                        label: Text('Contado'),
+                        icon: Icon(Icons.payments_outlined),
+                      ),
+                      ButtonSegment<String>(
+                        value: 'CREDIT',
+                        label: Text('Crédito'),
+                        icon: Icon(Icons.schedule_outlined),
+                      ),
+                      ButtonSegment<String>(
+                        value: 'PARTIAL',
+                        label: Text('Parcial'),
+                        icon: Icon(Icons.pie_chart_outline),
+                      ),
+                    ],
+                    selected: {_paymentStatus},
+                    onSelectionChanged: _submitting
+                        ? null
+                        : (Set<String> next) {
+                            setState(() {
+                              _paymentStatus = next.first;
+                              if (_paymentStatus == 'PAID') {
+                                _dueDate = null;
+                                _initialPaid.clear();
+                              }
+                            });
+                          },
+                  ),
+                  if (_paymentStatus == 'CREDIT' ||
+                      _paymentStatus == 'PARTIAL') ...[
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Vencimiento (opcional)'),
+                      subtitle: Text(
+                        _dueDate == null
+                            ? 'Sin fecha'
+                            : '${_dueDate!.year.toString().padLeft(4, '0')}-'
+                                '${_dueDate!.month.toString().padLeft(2, '0')}-'
+                                '${_dueDate!.day.toString().padLeft(2, '0')}',
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.calendar_today_outlined),
+                        onPressed: _submitting
+                            ? null
+                            : () async {
+                                final now = DateTime.now();
+                                final picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: _dueDate ?? now,
+                                  firstDate: DateTime(now.year - 1),
+                                  lastDate: DateTime(now.year + 5),
+                                );
+                                if (picked != null && mounted) {
+                                  setState(() => _dueDate = picked);
+                                }
+                              },
+                      ),
+                    ),
+                  ],
+                  if (_paymentStatus == 'PARTIAL') ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _initialPaid,
+                      enabled: !_submitting,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Abono inicial (moneda funcional)',
+                        hintText: _functionalCode.isEmpty
+                            ? 'Ej. 50.00'
+                            : 'En $_functionalCode',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 16),
                 if (_documentCurrencyOptions.length > 1) ...[

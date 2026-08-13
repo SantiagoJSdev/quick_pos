@@ -29,7 +29,7 @@ import '../settings/module_not_enabled_screen.dart';
 import '../settings/store_dashboard_screen.dart';
 import '../sale/sales_module_screen.dart';
 import 'shell_online_scope.dart';
-import '../suppliers/suppliers_list_screen.dart';
+import '../suppliers/suppliers_module_screen.dart';
 
 /// Navegación principal: **Inicio**, **Inventario**, **Venta** (menú → POS / historial / precios), **Proveedores** (C1/C2).
 ///
@@ -669,7 +669,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             KeyedSubtree(
               key: const ValueKey<String>('shell_tab_proveedores'),
               child: _suppliersModuleEnabled
-                  ? SuppliersListScreen(
+                  ? SuppliersModuleScreen(
                       storeId: widget.storeId,
                       localPrefs: widget.localPrefs,
                       storesApi: widget.storesApi,

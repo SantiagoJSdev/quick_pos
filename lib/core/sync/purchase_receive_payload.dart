@@ -78,8 +78,14 @@ class PurchaseReceivePayload {
     required Map<String, dynamic> fxSnapshot,
     String? clientPurchaseId,
     String? supplierInvoiceReference,
+    String? paymentStatus,
+    String? dueDate,
+    String? initialAmountPaidFunctional,
   }) {
     final ref = supplierInvoiceReference?.trim() ?? '';
+    final status = paymentStatus?.trim().toUpperCase() ?? '';
+    final due = dueDate?.trim() ?? '';
+    final initialPaid = initialAmountPaidFunctional?.trim() ?? '';
     return <String, dynamic>{
       if (clientPurchaseId != null && clientPurchaseId.isNotEmpty)
         'id': clientPurchaseId,
@@ -88,6 +94,9 @@ class PurchaseReceivePayload {
       'lines': lines,
       'fxSnapshot': fxSnapshot,
       if (ref.isNotEmpty) 'supplierInvoiceReference': ref,
+      if (status.isNotEmpty) 'paymentStatus': status,
+      if (due.isNotEmpty) 'dueDate': due.length >= 10 ? due.substring(0, 10) : due,
+      if (initialPaid.isNotEmpty) 'initialAmountPaidFunctional': initialPaid,
     };
   }
 
@@ -101,12 +110,18 @@ class PurchaseReceivePayload {
     String? clientPurchaseId,
     String? fxSource,
     String? supplierInvoiceReference,
+    String? paymentStatus,
+    String? dueDate,
+    String? initialAmountPaidFunctional,
   }) {
     final fx = Map<String, dynamic>.from(fxSnapshot);
     if (fxSource != null && fxSource.isNotEmpty) {
       fx['fxSource'] = fxSource;
     }
     final ref = supplierInvoiceReference?.trim() ?? '';
+    final status = paymentStatus?.trim().toUpperCase() ?? '';
+    final due = dueDate?.trim() ?? '';
+    final initialPaid = initialAmountPaidFunctional?.trim() ?? '';
     return <String, dynamic>{
       if (clientPurchaseId != null && clientPurchaseId.isNotEmpty)
         'id': clientPurchaseId,
@@ -116,6 +131,9 @@ class PurchaseReceivePayload {
       'lines': lines,
       'fxSnapshot': fx,
       if (ref.isNotEmpty) 'supplierInvoiceReference': ref,
+      if (status.isNotEmpty) 'paymentStatus': status,
+      if (due.isNotEmpty) 'dueDate': due.length >= 10 ? due.substring(0, 10) : due,
+      if (initialPaid.isNotEmpty) 'initialAmountPaidFunctional': initialPaid,
     };
   }
 

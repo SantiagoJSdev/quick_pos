@@ -82,4 +82,53 @@ void main() {
     final fx = o['fxSnapshot'] as Map<String, dynamic>;
     expect(fx['fxSource'], 'POS_OFFLINE');
   });
+
+  test('toRestBody incluye paymentStatus CREDIT y dueDate', () {
+    final body = PurchaseReceivePayload.toRestBody(
+      supplierId: '11111111-1111-4111-8111-111111111111',
+      documentCurrencyCode: 'VES',
+      lines: [
+        PurchaseReceivePayload.line(
+          productId: '22222222-2222-4222-8222-222222222222',
+          quantity: '1',
+          unitCost: '10',
+        ),
+      ],
+      fxSnapshot: const {
+        'baseCurrencyCode': 'USD',
+        'quoteCurrencyCode': 'VES',
+        'rateQuotePerBase': '36.50',
+        'effectiveDate': '2026-04-13',
+      },
+      paymentStatus: 'CREDIT',
+      dueDate: '2026-08-20',
+    );
+    expect(body['paymentStatus'], 'CREDIT');
+    expect(body['dueDate'], '2026-08-20');
+    expect(body.containsKey('initialAmountPaidFunctional'), isFalse);
+  });
+
+  test('toRestBody PARTIAL incluye abono inicial', () {
+    final body = PurchaseReceivePayload.toRestBody(
+      supplierId: '11111111-1111-4111-8111-111111111111',
+      documentCurrencyCode: 'USD',
+      lines: [
+        PurchaseReceivePayload.line(
+          productId: '22222222-2222-4222-8222-222222222222',
+          quantity: '2',
+          unitCost: '5',
+        ),
+      ],
+      fxSnapshot: const {
+        'baseCurrencyCode': 'USD',
+        'quoteCurrencyCode': 'USD',
+        'rateQuotePerBase': '1',
+        'effectiveDate': '2026-04-13',
+      },
+      paymentStatus: 'PARTIAL',
+      initialAmountPaidFunctional: '50.00',
+    );
+    expect(body['paymentStatus'], 'PARTIAL');
+    expect(body['initialAmountPaidFunctional'], '50.00');
+  });
 }
