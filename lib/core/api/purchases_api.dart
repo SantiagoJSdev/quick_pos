@@ -1,4 +1,5 @@
 import '../models/purchase.dart';
+import '../models/purchase_void.dart';
 import 'api_client.dart';
 import 'api_error.dart';
 
@@ -6,6 +7,10 @@ class PurchasesApi {
   PurchasesApi(this._client);
 
   final ApiClient _client;
+
+  /// Cuando el backend entregue void-preview / void, poner en `true`.
+  /// Mientras sea `false`, **no** se hace HTTP de anulación.
+  static const bool purchaseVoidRemoteEnabled = false;
 
   /// `POST /api/v1/purchases` — recepción + pago (PAID/CREDIT/PARTIAL).
   Future<Map<String, dynamic>> createPurchase(
@@ -43,7 +48,9 @@ class PurchasesApi {
     try {
       final json = await _client.getJson('/purchases', storeId, query: query);
       final page = PurchaseListPage.fromJson(json);
-      if (page.items.isNotEmpty || json.containsKey('items') || json.containsKey('nextCursor')) {
+      if (page.items.isNotEmpty ||
+          json.containsKey('items') ||
+          json.containsKey('nextCursor')) {
         return page;
       }
     } on ApiError {
@@ -91,5 +98,52 @@ class PurchasesApi {
     Map<String, dynamic> body,
   ) {
     return _client.postJson('/purchases/$purchaseId/payments', storeId, body);
+  }
+
+  /// `POST /purchases/:id/void-preview` — cableado listo; **no HTTP** si
+  /// [purchaseVoidRemoteEnabled] es false.
+  Future<PurchaseVoidPreview> previewVoidPurchase(
+    String storeId,
+    String purchaseId,
+  ) async {
+    if (!purchaseVoidRemoteEnabled) {
+      throw StateError(
+        'purchaseVoidRemoteEnabled=false: no llamar void-preview al backend.',
+      );
+    }
+    final json = await _client.postJson(
+      '/purchases/$purchaseId/void-preview',
+      storeId,
+      <String, dynamic>{},
+    );
+    final preview = PurchaseVoidPreview.tryFromJson(json);
+    if (preview == null) {
+      throw StateError('Respuesta void-preview inválida');
+    }
+    return preview;
+  }
+
+  /// `POST /purchases/:id/void` — cableado listo; **no HTTP** si
+  /// [purchaseVoidRemoteEnabled] es false.
+  Future<PurchaseVoidPreview> voidPurchase(
+    String storeId,
+    String purchaseId,
+    PurchaseVoidRequest request,
+  ) async {
+    if (!purchaseVoidRemoteEnabled) {
+      throw StateError(
+        'purchaseVoidRemoteEnabled=false: no llamar void al backend.',
+      );
+    }
+    final json = await _client.postJson(
+      '/purchases/$purchaseId/void',
+      storeId,
+      request.toJson(),
+    );
+    final result = PurchaseVoidPreview.tryFromJson(json);
+    if (result == null) {
+      throw StateError('Respuesta void inválida');
+    }
+    return result;
   }
 }

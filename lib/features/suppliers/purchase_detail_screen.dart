@@ -6,6 +6,8 @@ import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/purchase.dart';
 import '../../core/network/network_errors.dart';
 import '../sale/pos_sale_ui_tokens.dart';
+import '../settings/store_advanced_config_screen.dart';
+import 'purchase_void_sheet.dart';
 
 /// Detalle de factura + abonos (`GET /purchases/:id`, `POST .../payments`).
 class PurchaseDetailScreen extends StatefulWidget {
@@ -74,6 +76,20 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
         _error = e.toString();
       });
     }
+  }
+
+  Future<void> _openVoidFlow() async {
+    final d = _detail;
+    if (d == null) return;
+    if (d.summary.isVoided) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Esta factura ya está anulada.')),
+      );
+      return;
+    }
+    final ok = await showStoreConfigPinDialog(context);
+    if (!mounted || ok != true) return;
+    await showPurchaseVoidSheet(context: context, detail: d);
   }
 
   Future<void> _showPaymentSheet({bool payInFull = false}) async {
@@ -158,7 +174,10 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       );
       return;
     }
-    await _submitPayment(amount: amount, method: method.isEmpty ? 'CASH' : method);
+    await _submitPayment(
+      amount: amount,
+      method: method.isEmpty ? 'CASH' : method,
+    );
   }
 
   Future<void> _submitPayment({
@@ -202,6 +221,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   Widget build(BuildContext context) {
     final d = _detail;
     final open = d?.summary.isOpen ?? false;
+    final voided = d?.summary.isVoided ?? false;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Detalle factura'),
@@ -210,6 +230,12 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
           onPressed: () => Navigator.of(context).pop(_didChange),
         ),
         actions: [
+          if (d != null && !voided)
+            IconButton(
+              tooltip: 'Anular factura',
+              icon: const Icon(Icons.cancel_outlined),
+              onPressed: _paying ? null : _openVoidFlow,
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading || _paying ? null : _load,
@@ -241,7 +267,9 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
                       children: [
                         Text(
-                          d.summary.supplierInvoiceReference?.trim().isNotEmpty ==
+                          d.summary.supplierInvoiceReference
+                                      ?.trim()
+                                      .isNotEmpty ==
                                   true
                               ? d.summary.supplierInvoiceReference!
                               : 'Factura',
@@ -252,6 +280,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                         const SizedBox(height: 6),
                         Text(
                           [
+                            if (voided) 'ANULADA',
                             if ((d.summary.supplierName ?? '').isNotEmpty)
                               d.summary.supplierName!,
                             if ((d.summary.paymentStatus ?? '').isNotEmpty)
@@ -260,15 +289,32 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                               d.summary.createdAt!,
                           ].join(' · '),
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: PosSaleUi.textMuted,
+                                color: voided
+                                    ? Colors.redAccent
+                                    : PosSaleUi.textMuted,
                               ),
                         ),
+                        if (voided &&
+                            (d.summary.voidReason ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Motivo: ${d.summary.voidReason}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         _kv('Total funcional', d.summary.totalFunctional ?? '—'),
                         _kv('Pagado', d.summary.amountPaidFunctional ?? '—'),
                         _kv('Saldo', d.summary.amountDueFunctional ?? '—'),
                         if ((d.summary.dueDate ?? '').isNotEmpty)
                           _kv('Vence', d.summary.dueDate!),
+                        const SizedBox(height: 12),
+                        if (!voided)
+                          OutlinedButton.icon(
+                            onPressed: _paying ? null : _openVoidFlow,
+                            icon: const Icon(Icons.cancel_outlined),
+                            label: const Text('Anular factura'),
+                          ),
                         const SizedBox(height: 20),
                         Text(
                           'Líneas',
@@ -306,14 +352,15 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                               subtitle: Text(
                                 [
                                   if ((p.method ?? '').isNotEmpty) p.method!,
-                                  if ((p.createdAt ?? '').isNotEmpty) p.createdAt!,
+                                  if ((p.createdAt ?? '').isNotEmpty)
+                                    p.createdAt!,
                                 ].join(' · '),
                               ),
                             ),
                           ),
                       ],
                     ),
-      bottomNavigationBar: open && d != null
+      bottomNavigationBar: open && d != null && !voided
           ? SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),

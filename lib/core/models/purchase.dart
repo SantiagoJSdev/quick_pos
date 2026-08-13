@@ -14,6 +14,9 @@ class PurchaseSummary {
     this.dueDate,
     this.paidAt,
     this.createdAt,
+    this.status,
+    this.voidedAt,
+    this.voidReason,
   });
 
   final String id;
@@ -30,7 +33,19 @@ class PurchaseSummary {
   final String? paidAt;
   final String? createdAt;
 
+  /// `OPEN` | `VOID` (cuando el backend lo envíe).
+  final String? status;
+  final String? voidedAt;
+  final String? voidReason;
+
+  bool get isVoided {
+    final s = (status ?? '').toUpperCase();
+    if (s == 'VOID' || s == 'CANCELLED' || s == 'CANCELED') return true;
+    return (voidedAt ?? '').trim().isNotEmpty;
+  }
+
   bool get isOpen {
+    if (isVoided) return false;
     final s = (paymentStatus ?? '').toUpperCase();
     if (s == 'CREDIT' || s == 'PARTIAL') return true;
     final due = double.tryParse(amountDueFunctional ?? '') ?? 0;
@@ -57,6 +72,9 @@ class PurchaseSummary {
       dueDate: json['dueDate']?.toString(),
       paidAt: json['paidAt']?.toString(),
       createdAt: json['createdAt']?.toString(),
+      status: json['status']?.toString(),
+      voidedAt: json['voidedAt']?.toString(),
+      voidReason: json['voidReason']?.toString(),
     );
   }
 
