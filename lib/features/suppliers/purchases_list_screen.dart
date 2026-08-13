@@ -11,6 +11,7 @@ import '../../core/api/suppliers_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/purchase.dart';
+import '../../core/models/supplier.dart';
 import '../../core/storage/local_prefs.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import 'purchase_detail_screen.dart';
@@ -47,7 +48,7 @@ class PurchasesListScreen extends StatefulWidget {
   final CatalogInvalidationBus catalogInvalidationBus;
   final bool shellOnline;
 
-  /// `OPEN` | `PAID` | `CREDIT` | `PARTIAL` | null = todas.
+  /// `OPEN` | `PAID` | `CREDIT` | `PARTIAL` | `VOID` | null = todas.
   final String? initialPaymentFilter;
   final String? initialSupplierId;
 
@@ -63,16 +64,24 @@ class PurchasesListScreen extends StatefulWidget {
 
 class _PurchasesListScreenState extends State<PurchasesListScreen> {
   late String? _filter;
+  final _search = TextEditingController();
+  Timer? _debounce;
   List<PurchaseSummary> _items = [];
+  List<Supplier> _suppliers = [];
+  String? _supplierIdFilter;
   String? _nextCursor;
   bool _loading = true;
   bool _loadingMore = false;
+  bool _loadingSuppliers = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _filter = widget.initialPaymentFilter;
+    _supplierIdFilter = widget.initialSupplierId;
+    _search.addListener(_onSearchChanged);
+    unawaited(_loadSuppliers());
     unawaited(_load(reset: true));
   }
 
@@ -80,7 +89,43 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
   void didUpdateWidget(covariant PurchasesListScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.shellOnline && widget.shellOnline) {
+      unawaited(_loadSuppliers());
       unawaited(_load(reset: true));
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.removeListener(_onSearchChanged);
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 280), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _loadSuppliers() async {
+    if (!widget.shellOnline) return;
+    setState(() => _loadingSuppliers = true);
+    try {
+      final page = await widget.suppliersApi.listSuppliers(
+        widget.storeId,
+        limit: 100,
+        active: 'all',
+      );
+      if (!mounted) return;
+      setState(() {
+        _suppliers = page.items;
+        _loadingSuppliers = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingSuppliers = false);
     }
   }
 
@@ -109,11 +154,12 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
       final isVoidFilter = _filter == 'VOID';
       final page = await widget.purchasesApi.listPurchases(
         widget.storeId,
-        supplierId: widget.initialSupplierId,
+        supplierId: _supplierIdFilter,
         paymentStatus: isVoidFilter ? null : _filter,
         status: isVoidFilter ? 'VOID' : null,
         includeVoided: isVoidFilter ? true : null,
         cursor: reset ? null : _nextCursor,
+        limit: 50,
       );
       if (!mounted) return;
       setState(() {
@@ -140,6 +186,18 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
         if (reset) _items = [];
       });
     }
+  }
+
+  /// Filtro local por Nº factura y/o nombre de proveedor (el API no tiene `q`).
+  List<PurchaseSummary> get _visibleItems {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return _items;
+    return _items.where((p) {
+      final ref = (p.supplierInvoiceReference ?? '').toLowerCase();
+      final name = (p.supplierName ?? '').toLowerCase();
+      final id = p.id.toLowerCase();
+      return ref.contains(q) || name.contains(q) || id.contains(q);
+    }).toList();
   }
 
   Future<void> _openNewInvoice() async {
@@ -175,30 +233,51 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
     if (changed == true && mounted) await _load(reset: true);
   }
 
-  String _titleFor(PurchaseSummary p) {
+  String _invoiceNumberLabel(PurchaseSummary p) {
     final ref = p.supplierInvoiceReference?.trim();
     if (ref != null && ref.isNotEmpty) return ref;
-    return '#${p.id.length > 8 ? p.id.substring(0, 8) : p.id}';
+    return 'Sin Nº de factura';
   }
 
   String _subtitleFor(PurchaseSummary p) {
     final parts = <String>[];
     final name = p.supplierName?.trim();
-    if (name != null && name.isNotEmpty) parts.add(name);
-    final status = p.paymentStatus?.toUpperCase();
-    if (status != null && status.isNotEmpty) parts.add(status);
-    final due = p.amountDueFunctional;
-    if (due != null && due.isNotEmpty) parts.add('Saldo $due');
+    if (name != null && name.isNotEmpty) {
+      parts.add(name);
+    } else if (p.supplierId.isNotEmpty) {
+      parts.add('Proveedor');
+    }
+    if (p.isVoided) {
+      parts.add('ANULADA');
+    } else {
+      final status = p.paymentStatus?.toUpperCase();
+      if (status != null && status.isNotEmpty) parts.add(status);
+    }
     final total = p.totalFunctional ?? p.totalDocument;
     if (total != null && total.isNotEmpty) {
-      final cur = p.documentCurrencyCode ?? '';
-      parts.add('Total $total${cur.isEmpty ? '' : ' $cur'}');
+      parts.add('Total $total');
+    }
+    final due = p.amountDueFunctional;
+    if (!p.isVoided && due != null && due.isNotEmpty) {
+      final dueN = double.tryParse(due) ?? 0;
+      if (dueN > 0) parts.add('Saldo $due');
+    }
+    final created = p.createdAt?.trim();
+    if (created != null && created.isNotEmpty) {
+      parts.add(
+        created.length >= 10 ? created.substring(0, 10) : created,
+      );
     }
     return parts.isEmpty ? '—' : parts.join(' · ');
   }
 
+  bool get _supplierFilterLocked =>
+      widget.initialSupplierId != null &&
+      widget.initialSupplierId!.trim().isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
+    final visible = _visibleItems;
     return Scaffold(
       appBar: widget.embeddedInModule
           ? null
@@ -233,6 +312,70 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                 ),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: TextField(
+              controller: _search,
+              decoration: InputDecoration(
+                hintText: 'Buscar por Nº factura o proveedor',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Limpiar',
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _search.clear();
+                          setState(() {});
+                        },
+                      ),
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              textInputAction: TextInputAction.search,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Proveedor',
+                border: OutlineInputBorder(),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String?>(
+                  isExpanded: true,
+                  value: _supplierIdFilter,
+                  hint: Text(
+                    _loadingSuppliers ? 'Cargando…' : 'Todos los proveedores',
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Todos los proveedores'),
+                    ),
+                    ..._suppliers.map(
+                      (s) => DropdownMenuItem<String?>(
+                        value: s.id,
+                        child: Text(
+                          s.active ? s.name : '${s.name} (inactivo)',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: _supplierFilterLocked || _loading
+                      ? null
+                      : (id) {
+                          setState(() => _supplierIdFilter = id);
+                          unawaited(_load(reset: true));
+                        },
+                ),
+              ),
+            ),
+          ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
@@ -265,6 +408,18 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
               ],
             ),
           ),
+          if (!_loading && _items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                _search.text.trim().isEmpty
+                    ? '${_items.length} factura${_items.length == 1 ? '' : 's'}'
+                    : '${visible.length} de ${_items.length} (filtro local)',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: PosSaleUi.textMuted,
+                    ),
+              ),
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -278,7 +433,7 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                               Text(
                                 _error!,
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: PosSaleUi.textMuted),
+                                style: const TextStyle(color: PosSaleUi.textMuted),
                               ),
                               const SizedBox(height: 16),
                               FilledButton(
@@ -291,24 +446,42 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                       )
                     : RefreshIndicator(
                         onRefresh: () => _load(reset: true),
-                        child: _items.isEmpty
+                        child: visible.isEmpty
                             ? ListView(
                                 physics: const AlwaysScrollableScrollPhysics(),
-                                children: const [
-                                  SizedBox(height: 80),
+                                children: [
+                                  const SizedBox(height: 80),
                                   Center(
-                                    child: Text(
-                                      'No hay facturas con este filtro.',
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Text(
+                                        _items.isEmpty
+                                            ? 'No hay facturas con este filtro.\n'
+                                                'Creá una con «Nueva factura».'
+                                            : 'Ninguna factura coincide con la búsqueda.',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: PosSaleUi.textMuted,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
                               )
-                            : ListView.builder(
+                            : ListView.separated(
                                 physics: const AlwaysScrollableScrollPhysics(),
-                                itemCount:
-                                    _items.length + (_nextCursor != null ? 1 : 0),
+                                padding: const EdgeInsets.only(bottom: 88),
+                                itemCount: visible.length +
+                                    (_nextCursor != null &&
+                                            _search.text.trim().isEmpty
+                                        ? 1
+                                        : 0),
+                                separatorBuilder: (_, _) => const Divider(
+                                  height: 1,
+                                  color: PosSaleUi.divider,
+                                ),
                                 itemBuilder: (context, i) {
-                                  if (i >= _items.length) {
+                                  if (i >= visible.length) {
                                     if (!_loadingMore) {
                                       WidgetsBinding.instance
                                           .addPostFrameCallback((_) {
@@ -322,7 +495,10 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                                       ),
                                     );
                                   }
-                                  final p = _items[i];
+                                  final p = visible[i];
+                                  final hasRef = (p.supplierInvoiceReference ?? '')
+                                      .trim()
+                                      .isNotEmpty;
                                   return ListTile(
                                     leading: Icon(
                                       p.isVoided
@@ -337,11 +513,19 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                                               : Colors.green,
                                     ),
                                     title: Text(
-                                      p.isVoided
-                                          ? '${_titleFor(p)} · ANULADA'
-                                          : _titleFor(p),
+                                      hasRef
+                                          ? 'Nº ${_invoiceNumberLabel(p)}'
+                                          : _invoiceNumberLabel(p),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: hasRef
+                                            ? PosSaleUi.text
+                                            : PosSaleUi.textMuted,
+                                      ),
                                     ),
                                     subtitle: Text(_subtitleFor(p)),
+                                    isThreeLine: true,
+                                    trailing: const Icon(Icons.chevron_right),
                                     onTap: () => _openDetail(p),
                                   );
                                 },

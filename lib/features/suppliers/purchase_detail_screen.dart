@@ -292,8 +292,8 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                                       ?.trim()
                                       .isNotEmpty ==
                                   true
-                              ? d.summary.supplierInvoiceReference!
-                              : 'Factura',
+                              ? 'Nº ${d.summary.supplierInvoiceReference!.trim()}'
+                              : 'Sin Nº de factura',
                           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
