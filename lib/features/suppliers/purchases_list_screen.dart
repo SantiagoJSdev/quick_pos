@@ -106,10 +106,13 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
       setState(() => _loadingMore = true);
     }
     try {
+      final isVoidFilter = _filter == 'VOID';
       final page = await widget.purchasesApi.listPurchases(
         widget.storeId,
         supplierId: widget.initialSupplierId,
-        paymentStatus: _filter,
+        paymentStatus: isVoidFilter ? null : _filter,
+        status: isVoidFilter ? 'VOID' : null,
+        includeVoided: isVoidFilter ? true : null,
         cursor: reset ? null : _nextCursor,
       );
       if (!mounted) return;
@@ -241,6 +244,7 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                   ('PAID', 'Pagadas'),
                   ('CREDIT', 'Crédito'),
                   ('PARTIAL', 'Parcial'),
+                  ('VOID', 'Anuladas'),
                 ])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -321,14 +325,22 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
                                   final p = _items[i];
                                   return ListTile(
                                     leading: Icon(
-                                      p.isOpen
-                                          ? Icons.receipt_long_outlined
-                                          : Icons.check_circle_outline,
-                                      color: p.isOpen
-                                          ? Colors.orange
-                                          : Colors.green,
+                                      p.isVoided
+                                          ? Icons.block
+                                          : p.isOpen
+                                              ? Icons.receipt_long_outlined
+                                              : Icons.check_circle_outline,
+                                      color: p.isVoided
+                                          ? Colors.redAccent
+                                          : p.isOpen
+                                              ? Colors.orange
+                                              : Colors.green,
                                     ),
-                                    title: Text(_titleFor(p)),
+                                    title: Text(
+                                      p.isVoided
+                                          ? '${_titleFor(p)} · ANULADA'
+                                          : _titleFor(p),
+                                    ),
                                     subtitle: Text(_subtitleFor(p)),
                                     onTap: () => _openDetail(p),
                                   );

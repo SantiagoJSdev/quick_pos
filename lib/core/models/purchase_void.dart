@@ -1,7 +1,6 @@
 import 'purchase.dart';
 
-/// Preview / resultado de anulación (`POST .../void-preview` y `.../void`).
-/// Contrato: `docs/ANULACION_FACTURA_PROVEEDOR_PLAN.md` §5.
+/// Contrato: `docs/PURCHASES.md` (void-preview / void).
 class PurchaseVoidLinePreview {
   const PurchaseVoidLinePreview({
     required this.productId,
@@ -95,6 +94,7 @@ class PurchaseVoidPreview {
     this.warnings = const [],
     this.isMock = false,
     this.voidedAt,
+    this.voidMode,
   });
 
   final String purchaseId;
@@ -105,15 +105,37 @@ class PurchaseVoidPreview {
   final PurchaseVoidDebtPreview debt;
   final List<String> warnings;
 
-  /// true = generado en app; aún no vino del backend.
+  /// true = generado en app (fallback); false = respuesta API.
   final bool isMock;
   final String? voidedAt;
 
+  /// `FULL_STOCK` | `PARTIAL_STOCK` | `FINANCIAL_ONLY`
+  final String? voidMode;
+
   bool get hasPartialStockSkip => lines.any((l) => l.hasSkipped);
 
-  static PurchaseVoidPreview? tryFromJson(Map<String, dynamic> json) {
-    final purchaseId = json['purchaseId']?.toString().trim() ?? '';
+  static PurchaseVoidPreview? tryFromJson(
+    Map<String, dynamic> json, {
+    String? fallbackPurchaseId,
+  }) {
+    // Algunas respuestas envuelven en `voidResult`.
+    final nested = json['voidResult'];
+    if (nested is Map &&
+        !json.containsKey('lines') &&
+        !json.containsKey('canVoid')) {
+      return tryFromJson(
+        Map<String, dynamic>.from(nested),
+        fallbackPurchaseId:
+            fallbackPurchaseId ?? json['purchaseId']?.toString() ?? json['id']?.toString(),
+      );
+    }
+
+    final purchaseId = json['purchaseId']?.toString().trim() ??
+        json['id']?.toString().trim() ??
+        fallbackPurchaseId?.trim() ??
+        '';
     if (purchaseId.isEmpty) return null;
+
     final linesRaw = json['lines'];
     final lines = <PurchaseVoidLinePreview>[];
     if (linesRaw is List) {
@@ -126,16 +148,23 @@ class PurchaseVoidPreview {
         }
       }
     }
-    final blockersRaw = json['blockers'];
     final blockers = <String>[];
+    final blockersRaw = json['blockers'];
     if (blockersRaw is List) {
       for (final e in blockersRaw) {
-        final s = e?.toString().trim();
-        if (s != null && s.isNotEmpty) blockers.add(s);
+        if (e is Map) {
+          final code = e['code']?.toString() ?? e['reason']?.toString();
+          if (code != null && code.trim().isNotEmpty) {
+            blockers.add(code.trim());
+          }
+        } else {
+          final s = e?.toString().trim();
+          if (s != null && s.isNotEmpty) blockers.add(s);
+        }
       }
     }
-    final warningsRaw = json['warnings'];
     final warnings = <String>[];
+    final warningsRaw = json['warnings'];
     if (warningsRaw is List) {
       for (final e in warningsRaw) {
         final s = e?.toString().trim();
@@ -146,7 +175,7 @@ class PurchaseVoidPreview {
     final debtJson = json['debt'];
     return PurchaseVoidPreview(
       purchaseId: purchaseId,
-      canVoid: json['canVoid'] != false,
+      canVoid: json['canVoid'] != false && blockers.isEmpty,
       blockers: blockers,
       lines: lines,
       payments: PurchaseVoidPaymentsPreview.fromJson(
@@ -158,6 +187,7 @@ class PurchaseVoidPreview {
       warnings: warnings,
       isMock: json['isMock'] == true,
       voidedAt: json['voidedAt']?.toString(),
+      voidMode: json['voidMode']?.toString(),
     );
   }
 }
@@ -167,19 +197,16 @@ class PurchaseVoidRequest {
     required this.opId,
     required this.reason,
     this.confirmPartialStock = false,
-    this.mode = 'AUTO',
   });
 
   final String opId;
   final String reason;
   final bool confirmPartialStock;
-  final String mode;
 
   Map<String, dynamic> toJson() => {
         'opId': opId,
         'reason': reason.trim(),
         'confirmPartialStock': confirmPartialStock,
-        'mode': mode,
       };
 }
 

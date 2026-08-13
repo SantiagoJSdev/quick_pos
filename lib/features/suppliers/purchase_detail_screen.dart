@@ -87,9 +87,30 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       );
       return;
     }
+    if (!widget.shellOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La anulación requiere conexión a internet.'),
+        ),
+      );
+      return;
+    }
     final ok = await showStoreConfigPinDialog(context);
     if (!mounted || ok != true) return;
-    await showPurchaseVoidSheet(context: context, detail: d);
+    final voided = await showPurchaseVoidSheet(
+      context: context,
+      storeId: widget.storeId,
+      purchasesApi: widget.purchasesApi,
+      detail: d,
+    );
+    if (!mounted) return;
+    if (voided == true) {
+      _didChange = true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Factura anulada.')),
+      );
+      await _load();
+    }
   }
 
   Future<void> _showPaymentSheet({bool payInFull = false}) async {

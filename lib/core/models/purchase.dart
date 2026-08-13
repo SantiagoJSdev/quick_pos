@@ -33,7 +33,7 @@ class PurchaseSummary {
   final String? paidAt;
   final String? createdAt;
 
-  /// `OPEN` | `VOID` (cuando el backend lo envíe).
+  /// `OPEN` | `VOID` | `RECEIVED` (docs/PURCHASES.md).
   final String? status;
   final String? voidedAt;
   final String? voidReason;
@@ -287,7 +287,10 @@ class PayableRow {
         json['due']?.toString() ??
         '0';
     int? count;
-    final c = json['openPurchasesCount'] ?? json['purchaseCount'] ?? json['count'];
+    final c = json['openPurchasesCount'] ??
+        json['openInvoices'] ??
+        json['purchaseCount'] ??
+        json['count'];
     if (c is int) {
       count = c;
     } else if (c is String) {
