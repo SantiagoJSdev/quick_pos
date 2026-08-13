@@ -51,6 +51,9 @@ const _kDashboardAccessTokenPrefix = 'dashboard_access_token_v1_';
 const _kDashboardKioskCachePrefix = 'dashboard_kiosk_cache_v1_';
 const _kCachedDeviceModeV1 = 'cached_device_mode_v1';
 const _kCachedDashboardEnabledPrefix = 'cached_dashboard_enabled_v1_';
+/// Inventario / Proveedores habilitados en este dispositivo (por tienda + deviceId).
+const _kDeviceModuleInventoryPrefix = 'device_module_inventory_v1_';
+const _kDeviceModuleSuppliersPrefix = 'device_module_suppliers_v1_';
 
 class LocalPrefs {
   LocalPrefs(this._prefs);
@@ -1395,5 +1398,58 @@ class LocalPrefs {
     final key = '$_kCachedDashboardEnabledPrefix${deviceId.trim()}';
     if (!_prefs.containsKey(key)) return null;
     return _prefs.getBool(key);
+  }
+
+  String _deviceModuleKey(String prefix, String storeId, String deviceId) =>
+      '$prefix${storeId.trim()}_${deviceId.trim()}';
+
+  /// Si nunca se configuró → `true` (no bloquea equipos ya en uso).
+  Future<bool> isInventoryModuleEnabled({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    final key = _deviceModuleKey(
+      _kDeviceModuleInventoryPrefix,
+      storeId,
+      deviceId,
+    );
+    if (!_prefs.containsKey(key)) return true;
+    return _prefs.getBool(key) ?? true;
+  }
+
+  Future<void> setInventoryModuleEnabled({
+    required String storeId,
+    required String deviceId,
+    required bool enabled,
+  }) async {
+    await _prefs.setBool(
+      _deviceModuleKey(_kDeviceModuleInventoryPrefix, storeId, deviceId),
+      enabled,
+    );
+  }
+
+  /// Si nunca se configuró → `true` (no bloquea equipos ya en uso).
+  Future<bool> isSuppliersModuleEnabled({
+    required String storeId,
+    required String deviceId,
+  }) async {
+    final key = _deviceModuleKey(
+      _kDeviceModuleSuppliersPrefix,
+      storeId,
+      deviceId,
+    );
+    if (!_prefs.containsKey(key)) return true;
+    return _prefs.getBool(key) ?? true;
+  }
+
+  Future<void> setSuppliersModuleEnabled({
+    required String storeId,
+    required String deviceId,
+    required bool enabled,
+  }) async {
+    await _prefs.setBool(
+      _deviceModuleKey(_kDeviceModuleSuppliersPrefix, storeId, deviceId),
+      enabled,
+    );
   }
 }

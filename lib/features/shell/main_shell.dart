@@ -25,6 +25,7 @@ import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/sync_cycle.dart';
 import '../inventory/inventory_module_screen.dart';
+import '../settings/module_not_enabled_screen.dart';
 import '../settings/store_dashboard_screen.dart';
 import '../sale/sales_module_screen.dart';
 import 'shell_online_scope.dart';
@@ -97,6 +98,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _consecutiveProbeFailures = 0;
   Duration _healthProbeInterval = _healthProbeBase;
   bool _healthProbeInFlight = false;
+  bool _inventoryModuleEnabled = true;
+  bool _suppliersModuleEnabled = true;
 
   void _recomputeOnlineFlag() {
     final hasNetwork = connectivityAppearsOnline(
@@ -146,6 +149,24 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_restoreManualOfflineThenStart());
+    unawaited(_loadDeviceModules());
+  }
+
+  Future<void> _loadDeviceModules() async {
+    final deviceId = await widget.localPrefs.getOrCreateDeviceId();
+    final inventory = await widget.localPrefs.isInventoryModuleEnabled(
+      storeId: widget.storeId,
+      deviceId: deviceId,
+    );
+    final suppliers = await widget.localPrefs.isSuppliersModuleEnabled(
+      storeId: widget.storeId,
+      deviceId: deviceId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _inventoryModuleEnabled = inventory;
+      _suppliersModuleEnabled = suppliers;
+    });
   }
 
   Future<void> _restoreManualOfflineThenStart() async {
@@ -553,6 +574,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 cashSessionsApi: widget.cashSessionsApi,
                 syncApi: widget.syncApi,
                 catalogInvalidationBus: widget.catalogInvalidationBus,
+                onDeviceModulesChanged: () {
+                  unawaited(_loadDeviceModules());
+                },
                 onBackendTransportFailure: () {
                   // No bajar a offline al primer fallo de transporte: cuenta
                   // como un fallo de probe (hace falta 2 seguidos).
@@ -605,20 +629,25 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             ),
             KeyedSubtree(
               key: const ValueKey<String>('shell_tab_inventario'),
-              child: InventoryModuleScreen(
-                storeId: widget.storeId,
-                inventoryApi: widget.inventoryApi,
-                productsApi: widget.productsApi,
-                suppliersApi: widget.suppliersApi,
-                storesApi: widget.storesApi,
-                uploadsApi: widget.uploadsApi,
-                localPrefs: widget.localPrefs,
-                catalogInvalidationBus: widget.catalogInvalidationBus,
-                shellOnline: _isOnline,
-                shellInventoryTabActive: _index == 1,
-                onRetryOnline: () =>
-                    _requestReconnect(reason: 'inventory-retry'),
-              ),
+              child: _inventoryModuleEnabled
+                  ? InventoryModuleScreen(
+                      storeId: widget.storeId,
+                      inventoryApi: widget.inventoryApi,
+                      productsApi: widget.productsApi,
+                      suppliersApi: widget.suppliersApi,
+                      storesApi: widget.storesApi,
+                      uploadsApi: widget.uploadsApi,
+                      localPrefs: widget.localPrefs,
+                      catalogInvalidationBus: widget.catalogInvalidationBus,
+                      shellOnline: _isOnline,
+                      shellInventoryTabActive: _index == 1,
+                      onRetryOnline: () =>
+                          _requestReconnect(reason: 'inventory-retry'),
+                    )
+                  : ModuleNotEnabledScreen(
+                      moduleTitle: 'Inventario',
+                      onGoHome: () => setState(() => _index = 0),
+                    ),
             ),
             KeyedSubtree(
               key: const ValueKey<String>('shell_tab_venta'),
@@ -639,18 +668,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             ),
             KeyedSubtree(
               key: const ValueKey<String>('shell_tab_proveedores'),
-              child: SuppliersListScreen(
-                storeId: widget.storeId,
-                localPrefs: widget.localPrefs,
-                storesApi: widget.storesApi,
-                exchangeRatesApi: widget.exchangeRatesApi,
-                productsApi: widget.productsApi,
-                purchasesApi: widget.purchasesApi,
-                suppliersApi: widget.suppliersApi,
-                syncApi: widget.syncApi,
-                catalogInvalidationBus: widget.catalogInvalidationBus,
-                shellOnline: _isOnline,
-              ),
+              child: _suppliersModuleEnabled
+                  ? SuppliersListScreen(
+                      storeId: widget.storeId,
+                      localPrefs: widget.localPrefs,
+                      storesApi: widget.storesApi,
+                      exchangeRatesApi: widget.exchangeRatesApi,
+                      productsApi: widget.productsApi,
+                      purchasesApi: widget.purchasesApi,
+                      suppliersApi: widget.suppliersApi,
+                      syncApi: widget.syncApi,
+                      catalogInvalidationBus: widget.catalogInvalidationBus,
+                      shellOnline: _isOnline,
+                    )
+                  : ModuleNotEnabledScreen(
+                      moduleTitle: 'Proveedores',
+                      onGoHome: () => setState(() => _index = 0),
+                    ),
             ),
           ],
         ),

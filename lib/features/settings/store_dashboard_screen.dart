@@ -40,6 +40,7 @@ class StoreDashboardScreen extends StatefulWidget {
     this.cashSessionsApi,
     this.syncApi,
     this.catalogInvalidationBus,
+    this.onDeviceModulesChanged,
   });
 
   final String storeId;
@@ -63,6 +64,9 @@ class StoreDashboardScreen extends StatefulWidget {
   final SyncApi? syncApi;
   final CatalogInvalidationBus? catalogInvalidationBus;
 
+  /// Tras habilitar/deshabilitar Inventario o Proveedores en este dispositivo.
+  final VoidCallback? onDeviceModulesChanged;
+
   @override
   State<StoreDashboardScreen> createState() => _StoreDashboardScreenState();
 }
@@ -73,6 +77,9 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
   bool _terminalLoading = true;
   bool _deviceAccessLoading = true;
   bool _operationalDashboardVisible = false;
+  bool _modulesLoading = true;
+  bool _inventoryModuleEnabled = true;
+  bool _suppliersModuleEnabled = true;
   String? _deviceId;
   String? _appVersion;
   DeviceDashboardConfig? _deviceDashboardConfig;
@@ -83,6 +90,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     _future = _loadSettingsWithCache();
     unawaited(_loadTerminal());
     unawaited(_loadDeviceDashboardAccess());
+    unawaited(_loadDeviceModules());
   }
 
   @override
@@ -95,6 +103,161 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       });
       unawaited(_loadDeviceDashboardAccess());
     }
+  }
+
+  Future<void> _loadDeviceModules() async {
+    final deviceId = _deviceId ?? await widget.localPrefs.getOrCreateDeviceId();
+    if (!mounted) return;
+    setState(() => _modulesLoading = true);
+    final inventory = await widget.localPrefs.isInventoryModuleEnabled(
+      storeId: widget.storeId,
+      deviceId: deviceId,
+    );
+    final suppliers = await widget.localPrefs.isSuppliersModuleEnabled(
+      storeId: widget.storeId,
+      deviceId: deviceId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _inventoryModuleEnabled = inventory;
+      _suppliersModuleEnabled = suppliers;
+      _modulesLoading = false;
+    });
+  }
+
+  Future<void> _toggleDeviceModule({
+    required bool isInventory,
+    required bool currentlyEnabled,
+  }) async {
+    final deviceId = _deviceId ?? await widget.localPrefs.getOrCreateDeviceId();
+    if (!mounted) return;
+    if (deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('deviceId no disponible.')),
+      );
+      return;
+    }
+
+    final enable = !currentlyEnabled;
+    final moduleLabel = isInventory ? 'Inventario' : 'Proveedores';
+    final ok = await showStoreConfigPinDialog(context);
+    if (!mounted || ok != true) return;
+
+    if (isInventory) {
+      await widget.localPrefs.setInventoryModuleEnabled(
+        storeId: widget.storeId,
+        deviceId: deviceId,
+        enabled: enable,
+      );
+    } else {
+      await widget.localPrefs.setSuppliersModuleEnabled(
+        storeId: widget.storeId,
+        deviceId: deviceId,
+        enabled: enable,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      if (isInventory) {
+        _inventoryModuleEnabled = enable;
+      } else {
+        _suppliersModuleEnabled = enable;
+      }
+    });
+    widget.onDeviceModulesChanged?.call();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          enable
+              ? '$moduleLabel habilitado en este dispositivo.'
+              : '$moduleLabel deshabilitado en este dispositivo.',
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeviceModulesSection(BuildContext context) {
+    if (_modulesLoading) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 8),
+        child: LinearProgressIndicator(),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Módulos de este dispositivo',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: PosSaleUi.text,
+              ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Con la clave de administración podés habilitar o bloquear '
+          'Inventario y Proveedores en este equipo. Si está bloqueado, '
+          'el tab solo muestra «No habilitado».',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: PosSaleUi.textMuted,
+                height: 1.35,
+              ),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.tonalIcon(
+          onPressed: () => _toggleDeviceModule(
+            isInventory: true,
+            currentlyEnabled: _inventoryModuleEnabled,
+          ),
+          icon: Icon(
+            _inventoryModuleEnabled
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+          ),
+          label: Text(
+            _inventoryModuleEnabled
+                ? 'Deshabilitar Inventario'
+                : 'Habilitar Inventario',
+          ),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            backgroundColor: PosSaleUi.surface3,
+            foregroundColor: PosSaleUi.text,
+          ),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.tonalIcon(
+          onPressed: () => _toggleDeviceModule(
+            isInventory: false,
+            currentlyEnabled: _suppliersModuleEnabled,
+          ),
+          icon: Icon(
+            _suppliersModuleEnabled
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+          ),
+          label: Text(
+            _suppliersModuleEnabled
+                ? 'Deshabilitar Proveedores'
+                : 'Habilitar Proveedores',
+          ),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            backgroundColor: PosSaleUi.surface3,
+            foregroundColor: PosSaleUi.text,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Estado: Inventario ${_inventoryModuleEnabled ? 'ON' : 'OFF'} · '
+          'Proveedores ${_suppliersModuleEnabled ? 'ON' : 'OFF'}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: PosSaleUi.textFaint,
+              ),
+        ),
+      ],
+    );
   }
 
   Future<void> _loadDeviceDashboardAccess() async {
@@ -199,7 +362,11 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     setState(() {
       _future = _loadSettingsWithCache();
     });
-    await Future.wait([_future, _loadDeviceDashboardAccess()]);
+    await Future.wait([
+      _future,
+      _loadDeviceDashboardAccess(),
+      _loadDeviceModules(),
+    ]);
   }
 
   Future<void> _toggleOperationalDashboard({required bool enable}) async {
@@ -617,6 +784,8 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 ],
                 const SizedBox(height: 16),
                 _terminalInfoCard(context),
+                const SizedBox(height: 16),
+                _buildDeviceModulesSection(context),
                 const SizedBox(height: 16),
                 if (_settingsFromCache) ...[
                   Container(
