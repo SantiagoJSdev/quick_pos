@@ -78,8 +78,8 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
   bool _deviceAccessLoading = true;
   bool _operationalDashboardVisible = false;
   bool _modulesLoading = true;
-  bool _inventoryModuleEnabled = true;
-  bool _suppliersModuleEnabled = true;
+  bool _inventoryModuleEnabled = false;
+  bool _suppliersModuleEnabled = false;
   String? _deviceId;
   String? _appVersion;
   DeviceDashboardConfig? _deviceDashboardConfig;

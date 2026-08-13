@@ -98,8 +98,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _consecutiveProbeFailures = 0;
   Duration _healthProbeInterval = _healthProbeBase;
   bool _healthProbeInFlight = false;
-  bool _inventoryModuleEnabled = true;
-  bool _suppliersModuleEnabled = true;
+  bool _inventoryModuleEnabled = false;
+  bool _suppliersModuleEnabled = false;
 
   void _recomputeOnlineFlag() {
     final hasNetwork = connectivityAppearsOnline(

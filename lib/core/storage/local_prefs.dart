@@ -1403,7 +1403,7 @@ class LocalPrefs {
   String _deviceModuleKey(String prefix, String storeId, String deviceId) =>
       '$prefix${storeId.trim()}_${deviceId.trim()}';
 
-  /// Si nunca se configuró → `true` (no bloquea equipos ya en uso).
+  /// Si nunca se configuró → `false` (bloqueado hasta habilitar con PIN).
   Future<bool> isInventoryModuleEnabled({
     required String storeId,
     required String deviceId,
@@ -1413,8 +1413,8 @@ class LocalPrefs {
       storeId,
       deviceId,
     );
-    if (!_prefs.containsKey(key)) return true;
-    return _prefs.getBool(key) ?? true;
+    if (!_prefs.containsKey(key)) return false;
+    return _prefs.getBool(key) ?? false;
   }
 
   Future<void> setInventoryModuleEnabled({
@@ -1428,7 +1428,7 @@ class LocalPrefs {
     );
   }
 
-  /// Si nunca se configuró → `true` (no bloquea equipos ya en uso).
+  /// Si nunca se configuró → `false` (bloqueado hasta habilitar con PIN).
   Future<bool> isSuppliersModuleEnabled({
     required String storeId,
     required String deviceId,
@@ -1438,8 +1438,8 @@ class LocalPrefs {
       storeId,
       deviceId,
     );
-    if (!_prefs.containsKey(key)) return true;
-    return _prefs.getBool(key) ?? true;
+    if (!_prefs.containsKey(key)) return false;
+    return _prefs.getBool(key) ?? false;
   }
 
   Future<void> setSuppliersModuleEnabled({
