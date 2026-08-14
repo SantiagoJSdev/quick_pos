@@ -12,6 +12,8 @@ import '../domain/device_dashboard_config.dart';
 import '../domain/device_dashboard_payload.dart';
 import '../domain/payment_breakdown_item.dart';
 import 'dashboard_api.dart';
+import 'kpis_api.dart';
+import '../domain/kpi_snapshot.dart';
 
 /// Estado agregado del tablero operador (3 endpoints en paralelo).
 class DashboardHomeData {
@@ -44,15 +46,37 @@ class DashboardHomeData {
 class DashboardRepository {
   DashboardRepository({
     required DashboardApi api,
+    KpisApi? kpisApi,
     SalesApi? salesApi,
     LocalPrefs? localPrefs,
   }) : _api = api,
+       _kpisApi = kpisApi,
        _salesApi = salesApi,
        _localPrefs = localPrefs;
 
   final DashboardApi _api;
+  final KpisApi? _kpisApi;
   final SalesApi? _salesApi;
   final LocalPrefs? _localPrefs;
+
+  /// `GET /kpis/snapshot` — requiere [KpisApi] en el constructor.
+  Future<KpiSnapshot> loadKpiSnapshot(
+    String storeId, {
+    String preset = 'today',
+    String? dateFrom,
+    String? dateTo,
+  }) {
+    final api = _kpisApi;
+    if (api == null) {
+      throw StateError('KpisApi no configurado en DashboardRepository');
+    }
+    return api.getSnapshot(
+      storeId,
+      preset: preset,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+  }
 
   Future<DashboardHomeData> loadHome(
     String storeId,

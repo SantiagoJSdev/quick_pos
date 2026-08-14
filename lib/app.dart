@@ -14,6 +14,7 @@ import 'core/api/uploads_api.dart';
 import 'core/api/api_client.dart';
 import 'features/dashboard/data/dashboard_api.dart';
 import 'features/dashboard/data/dashboard_repository.dart';
+import 'features/dashboard/data/kpis_api.dart';
 import 'features/dashboard/domain/dashboard_device_access.dart';
 import 'features/dashboard/domain/device_dashboard_config.dart';
 import 'features/dashboard/presentation/screens/device_dashboard_screen.dart';
@@ -49,6 +50,7 @@ class _QuickPosAppState extends State<QuickPosApp> {
   late final SyncApi _syncApi;
   late final UploadsApi _uploadsApi;
   late final DashboardApi _dashboardApi;
+  late final KpisApi _kpisApi;
   late final DashboardRepository _dashboardRepository;
   late final CatalogInvalidationBus _catalogInvalidationBus;
   String? _storeId;
@@ -74,8 +76,10 @@ class _QuickPosAppState extends State<QuickPosApp> {
     _syncApi = SyncApi(_apiClient);
     _uploadsApi = UploadsApi(_apiClient);
     _dashboardApi = DashboardApi(_apiClient);
+    _kpisApi = KpisApi(_apiClient);
     _dashboardRepository = DashboardRepository(
       api: _dashboardApi,
+      kpisApi: _kpisApi,
       salesApi: _salesApi,
       localPrefs: widget.localPrefs,
     );
