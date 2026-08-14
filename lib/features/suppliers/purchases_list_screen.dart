@@ -226,6 +226,7 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
           storeId: widget.storeId,
           purchaseId: p.id,
           purchasesApi: widget.purchasesApi,
+          localPrefs: widget.localPrefs,
           shellOnline: widget.shellOnline,
         ),
       ),

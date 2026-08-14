@@ -5,6 +5,7 @@ import '../../core/api/purchases_api.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/purchase.dart';
 import '../../core/network/network_errors.dart';
+import '../../core/storage/local_prefs.dart';
 import '../sale/pos_sale_ui_tokens.dart';
 import '../settings/store_advanced_config_screen.dart';
 import 'purchase_void_sheet.dart';
@@ -16,12 +17,14 @@ class PurchaseDetailScreen extends StatefulWidget {
     required this.storeId,
     required this.purchaseId,
     required this.purchasesApi,
+    this.localPrefs,
     this.shellOnline = true,
   });
 
   final String storeId;
   final String purchaseId;
   final PurchasesApi purchasesApi;
+  final LocalPrefs? localPrefs;
   final bool shellOnline;
 
   @override
@@ -34,11 +37,27 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   String? _error;
   bool _paying = false;
   bool _didChange = false;
+  String _functionalCode = 'USD';
 
   @override
   void initState() {
     super.initState();
+    _resolveFunctionalCurrency();
     _load();
+  }
+
+  Future<void> _resolveFunctionalCurrency() async {
+    final prefs = widget.localPrefs;
+    if (prefs == null) return;
+    try {
+      final settings = await prefs.loadBusinessSettingsCache(widget.storeId);
+      final code = settings?.functionalCurrency.code.trim().toUpperCase() ?? '';
+      if (code.isNotEmpty && mounted) {
+        setState(() => _functionalCode = code);
+      }
+    } catch (_) {
+      // fallback USD
+    }
   }
 
   Future<void> _load() async {
@@ -125,80 +144,31 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       return;
     }
     final due = d.summary.amountDueFunctional?.trim() ?? '';
-    final amountCtrl = TextEditingController(text: payInFull ? due : '');
-    final methodCtrl = TextEditingController(text: 'CASH');
-    final ok = await showModalBottomSheet<bool>(
+    final result = await showModalBottomSheet<_PaymentSheetResult>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                payInFull ? 'Marcar como pagada' : 'Registrar abono',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Monto en moneda funcional. Saldo actual: ${due.isEmpty ? '—' : due}',
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                      color: PosSaleUi.textMuted,
-                    ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(
-                  labelText: 'Monto (funcional)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: methodCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Método (ej. CASH, TRANSFER)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text(payInFull ? 'Pagar saldo' : 'Registrar abono'),
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (ctx) => _PurchasePaymentSheet(
+        payInFull: payInFull,
+        amountDue: due,
+        functionalCurrencyCode: _functionalCode,
+      ),
     );
-    final amount = amountCtrl.text.trim();
-    final method = methodCtrl.text.trim();
-    amountCtrl.dispose();
-    methodCtrl.dispose();
-    if (ok != true || !mounted) return;
-    if (amount.isEmpty || double.tryParse(amount) == null) {
+    if (result == null || !mounted) return;
+    if (result.amount.isEmpty || !_isValidAmount(result.amount)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Indicá un monto válido.')),
       );
       return;
     }
     await _submitPayment(
-      amount: amount,
-      method: method.isEmpty ? 'CASH' : method,
+      amount: result.amount.replaceAll(',', '.'),
+      method: result.method.isEmpty ? 'CASH' : result.method,
     );
+  }
+
+  static bool _isValidAmount(String raw) {
+    final n = double.tryParse(raw.trim().replaceAll(',', '.'));
+    return n != null && n > 0;
   }
 
   Future<void> _submitPayment({
@@ -236,6 +206,14 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
     } finally {
       if (mounted) setState(() => _paying = false);
     }
+  }
+
+  String _moneyLabel(String label) => '$label ($_functionalCode)';
+
+  String _fmtMoney(String? amount) {
+    final a = amount?.trim();
+    if (a == null || a.isEmpty) return '—';
+    return '$a $_functionalCode';
   }
 
   @override
@@ -324,9 +302,18 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                           ),
                         ],
                         const SizedBox(height: 16),
-                        _kv('Total funcional', d.summary.totalFunctional ?? '—'),
-                        _kv('Pagado', d.summary.amountPaidFunctional ?? '—'),
-                        _kv('Saldo', d.summary.amountDueFunctional ?? '—'),
+                        _kv(
+                          _moneyLabel('Total'),
+                          _fmtMoney(d.summary.totalFunctional),
+                        ),
+                        _kv(
+                          _moneyLabel('Pagado'),
+                          _fmtMoney(d.summary.amountPaidFunctional),
+                        ),
+                        _kv(
+                          _moneyLabel('Saldo'),
+                          _fmtMoney(d.summary.amountDueFunctional),
+                        ),
                         if ((d.summary.dueDate ?? '').isNotEmpty)
                           _kv('Vence', d.summary.dueDate!),
                         const SizedBox(height: 12),
@@ -369,7 +356,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
                             (p) => ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Icons.payments_outlined),
-                              title: Text(p.amountFunctional),
+                              title: Text(_fmtMoney(p.amountFunctional)),
                               subtitle: Text(
                                 [
                                   if ((p.method ?? '').isNotEmpty) p.method!,
@@ -421,6 +408,122 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
             child: Text(k, style: const TextStyle(color: PosSaleUi.textMuted)),
           ),
           Text(v, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentSheetResult {
+  const _PaymentSheetResult({required this.amount, required this.method});
+
+  final String amount;
+  final String method;
+}
+
+/// Sheet con controllers propios (evita dispose prematuro al cerrar).
+class _PurchasePaymentSheet extends StatefulWidget {
+  const _PurchasePaymentSheet({
+    required this.payInFull,
+    required this.amountDue,
+    required this.functionalCurrencyCode,
+  });
+
+  final bool payInFull;
+  final String amountDue;
+  final String functionalCurrencyCode;
+
+  @override
+  State<_PurchasePaymentSheet> createState() => _PurchasePaymentSheetState();
+}
+
+class _PurchasePaymentSheetState extends State<_PurchasePaymentSheet> {
+  late final TextEditingController _amountCtrl;
+  late final TextEditingController _methodCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _amountCtrl = TextEditingController(
+      text: widget.payInFull ? widget.amountDue : '',
+    );
+    _methodCtrl = TextEditingController(text: 'CASH');
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _methodCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final code = widget.functionalCurrencyCode;
+    final due = widget.amountDue;
+    final dueLabel = due.isEmpty ? '—' : '$due $code';
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            widget.payInFull ? 'Marcar como pagada' : 'Registrar abono',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Ingresá el monto en $code (moneda principal / funcional de la tienda). '
+            'Saldo actual: $dueLabel',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: PosSaleUi.textMuted,
+                ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amountCtrl,
+            autofocus: !widget.payInFull,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+            ),
+            decoration: InputDecoration(
+              labelText: 'Monto ($code)',
+              hintText: 'Ej. 25.00',
+              suffixText: code,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _methodCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Método (ej. CASH, TRANSFER)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(
+                context,
+                _PaymentSheetResult(
+                  amount: _amountCtrl.text.trim(),
+                  method: _methodCtrl.text.trim(),
+                ),
+              );
+            },
+            child: Text(
+              widget.payInFull ? 'Pagar saldo' : 'Registrar abono',
+            ),
+          ),
         ],
       ),
     );
