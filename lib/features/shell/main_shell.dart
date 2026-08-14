@@ -347,31 +347,88 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
-  /// Sync manual desde Inicio: cola + pull + catálogo + tasa (con feedback).
+  /// Sync manual desde Inicio: **solo online**. Loading hasta terminar.
+  /// Obliga a refrescar catálogo + tasa desde el servidor (no usa caché vieja).
   Future<void> _runManualSyncFromHome() async {
     if (!mounted || _manualHomeSyncBusy) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
-    if (_manualForceOffline || !_isOnline) {
+
+    if (_manualForceOffline) {
       messenger?.showSnackBar(
         const SnackBar(
           content: Text(
-            'Sin conexión: poné Online para sincronizar precios, tasa y cola.',
+            'Estás en modo Offline. Tocá «Poner Online» y esperá '
+            'conexión antes de sincronizar.',
           ),
-          duration: Duration(seconds: 3),
+          duration: Duration(seconds: 4),
         ),
       );
       return;
     }
 
     setState(() => _manualHomeSyncBusy = true);
-    messenger?.showSnackBar(
-      const SnackBar(
-        content: Text('Sincronizando…'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-
     try {
+      // Comprobar red + backend antes de marcar “sincronizando”.
+      try {
+        final c = await Connectivity().checkConnectivity();
+        if (!connectivityAppearsOnline(c)) {
+          if (mounted) {
+            setState(() {
+              _backendReachable = false;
+              _recomputeOnlineFlag();
+            });
+          }
+          messenger?.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Sin red. Conectate a internet para sincronizar.',
+              ),
+              duration: Duration(seconds: 4),
+            ),
+          );
+          return;
+        }
+      } catch (_) {}
+
+      try {
+        await widget.storesApi.getBusinessSettings(widget.storeId);
+        if (mounted) {
+          setState(() {
+            _backendReachable = true;
+            _consecutiveProbeFailures = 0;
+            _recomputeOnlineFlag();
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _backendReachable = false;
+            _recomputeOnlineFlag();
+          });
+        }
+        messenger?.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Servidor no alcanzable. No se sincronizó.\n$e',
+            ),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
+
+      if (!_isOnline) {
+        messenger?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sin conexión online. El botón Sincronizar solo funciona online.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
+
       // Evitar que el auto-sync concurrente pise este ciclo.
       while (_autoSyncBusy) {
         await Future<void>.delayed(const Duration(milliseconds: 120));
@@ -401,101 +458,63 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         catalogInvalidation: widget.catalogInvalidationBus,
       );
 
-      // Forzar catálogo fresco (precios) aunque el pull no traiga ops.
-      var catalogOk = false;
-      try {
-        final list = await widget.productsApi.listProducts(
-          widget.storeId,
-          includeInactive: false,
-        );
-        await widget.localPrefs.saveCatalogProductsCache(list);
-        widget.catalogInvalidationBus.invalidateFromLocalMutation();
-        catalogOk = true;
-      } catch (e) {
-        traceApiConnectivity('manual sync catalog refresh failed: $e');
-      }
+      // Catálogo fresco (obligatorio en sync manual).
+      final list = await widget.productsApi.listProducts(
+        widget.storeId,
+        includeInactive: false,
+      );
+      await widget.localPrefs.saveCatalogProductsCache(list);
+      widget.catalogInvalidationBus.invalidateFromLocalMutation();
 
-      // Settings + tasa del par de la tienda.
-      var fxOk = false;
-      try {
-        final settings = await widget.storesApi.getBusinessSettings(
-          widget.storeId,
-        );
-        await widget.localPrefs.saveBusinessSettingsCache(
-          widget.storeId,
-          {
-            'id': settings.id,
-            'storeId': settings.storeId,
-            'defaultMarginPercent': settings.defaultMarginPercent,
-            'functionalCurrency': {
-              'code': settings.functionalCurrency.code,
-              'name': settings.functionalCurrency.name,
-            },
-            'defaultSaleDocCurrency': settings.defaultSaleDocCurrency == null
-                ? null
-                : {
-                    'code': settings.defaultSaleDocCurrency!.code,
-                    'name': settings.defaultSaleDocCurrency!.name,
-                  },
-            'store': {
-              'name': settings.storeName,
-              'type': settings.storeType,
-            },
+      // Settings + tasa (obligatorio si hay par distinto).
+      final settings = await widget.storesApi.getBusinessSettings(
+        widget.storeId,
+      );
+      await widget.localPrefs.saveBusinessSettingsCache(
+        widget.storeId,
+        {
+          'id': settings.id,
+          'storeId': settings.storeId,
+          'defaultMarginPercent': settings.defaultMarginPercent,
+          'functionalCurrency': {
+            'code': settings.functionalCurrency.code,
+            'name': settings.functionalCurrency.name,
           },
+          'defaultSaleDocCurrency': settings.defaultSaleDocCurrency == null
+              ? null
+              : {
+                  'code': settings.defaultSaleDocCurrency!.code,
+                  'name': settings.defaultSaleDocCurrency!.name,
+                },
+          'store': {
+            'name': settings.storeName,
+            'type': settings.storeType,
+          },
+        },
+      );
+
+      final func = settings.functionalCurrency.code.trim();
+      final doc = (settings.defaultSaleDocCurrency?.code ?? func).trim();
+      var fxLabel = 'misma moneda';
+      if (func.toUpperCase() != doc.toUpperCase()) {
+        await _refreshExchangeRateCachesOnline(
+          storeId: widget.storeId,
+          functionalCode: func,
+          documentCode: doc,
         );
-        final func = settings.functionalCurrency.code;
-        final doc =
-            settings.defaultSaleDocCurrency?.code ?? func;
-        if (func.toUpperCase() != doc.toUpperCase()) {
-          try {
-            final rate = await widget.exchangeRatesApi.getLatest(
-              widget.storeId,
-              baseCurrencyCode: func,
-              quoteCurrencyCode: doc,
-            );
-            await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
-              storeId: widget.storeId,
-              fetchedBase: func,
-              fetchedQuote: doc,
-              rate: rate,
-            );
-            fxOk = true;
-          } catch (_) {
-            try {
-              final rate = await widget.exchangeRatesApi.getLatest(
-                widget.storeId,
-                baseCurrencyCode: doc,
-                quoteCurrencyCode: func,
-              );
-              await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
-                storeId: widget.storeId,
-                fetchedBase: doc,
-                fetchedQuote: func,
-                rate: rate,
-              );
-              fxOk = true;
-            } catch (e) {
-              traceApiConnectivity('manual sync FX refresh failed: $e');
-            }
-          }
-        } else {
-          fxOk = true;
-        }
-      } catch (e) {
-        traceApiConnectivity('manual sync settings/FX failed: $e');
+        fxLabel = 'tasa $func→$doc';
       }
 
       if (!mounted) return;
       await widget.localPrefs.markLastSuccessfulSyncNow();
-      final parts = <String>[];
+
+      final parts = <String>['catálogo/precios', fxLabel];
       if (cycle.flush.removedCount > 0) {
         parts.add('${cycle.flush.removedCount} op. enviadas');
       }
       if (cycle.pullOpsReceived > 0) {
         parts.add('${cycle.pullOpsReceived} cambios recibidos');
       }
-      if (catalogOk) parts.add('catálogo/precios');
-      if (fxOk) parts.add('tasa');
       if (cycle.pullError != null) {
         parts.add('pull: ${cycle.pullError}');
       }
@@ -510,26 +529,74 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         );
         if (transmitted) parts.add('cierre de caja');
       } catch (_) {}
-      final msg = parts.isEmpty
-          ? 'Sincronización lista (sin cambios pendientes).'
-          : 'Sincronizado: ${parts.join(' · ')}.';
+
       messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(
-        SnackBar(content: Text(msg), duration: const Duration(seconds: 4)),
+        SnackBar(
+          content: Text('Sincronizado online: ${parts.join(' · ')}.'),
+          duration: const Duration(seconds: 5),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(
         SnackBar(
-          content: Text('No se pudo sincronizar: $e'),
-          duration: const Duration(seconds: 4),
+          content: Text(
+            'Sincronización incompleta (online requerido). '
+            'Revisá red/servidor y reintentá.\n$e',
+          ),
+          duration: const Duration(seconds: 6),
         ),
       );
     } finally {
       _autoSyncBusy = false;
       if (mounted) setState(() => _manualHomeSyncBusy = false);
     }
+  }
+
+  /// Baja la tasa vigente del servidor y actualiza cachés POS + «Tasa del día».
+  Future<void> _refreshExchangeRateCachesOnline({
+    required String storeId,
+    required String functionalCode,
+    required String documentCode,
+  }) async {
+    final func = functionalCode.trim();
+    final doc = documentCode.trim();
+
+    Object? lastError;
+    for (final pair in [
+      (func, doc),
+      (doc, func),
+    ]) {
+      try {
+        final rate = await widget.exchangeRatesApi.getLatest(
+          storeId,
+          baseCurrencyCode: pair.$1,
+          quoteCurrencyCode: pair.$2,
+        );
+        await widget.localPrefs.saveLatestRateCache(
+          storeId: storeId,
+          baseCurrencyCode: pair.$1,
+          quoteCurrencyCode: pair.$2,
+          effectiveOn: null,
+          rate: rate,
+        );
+        await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
+          storeId: storeId,
+          fetchedBase: pair.$1,
+          fetchedQuote: pair.$2,
+          rate: rate,
+        );
+        return;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw StateError(
+      'No se pudo actualizar la tasa desde el servidor '
+      '($func / $doc): $lastError',
+    );
   }
 
   @override

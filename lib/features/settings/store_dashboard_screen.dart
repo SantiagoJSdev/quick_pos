@@ -876,7 +876,10 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 ),
                 const SizedBox(height: 10),
                 FilledButton.icon(
-                  onPressed: widget.syncBusy || widget.onRequestSync == null
+                  onPressed: widget.syncBusy ||
+                          widget.onRequestSync == null ||
+                          !widget.onlineStatus ||
+                          widget.forcedOffline
                       ? null
                       : () async {
                           await widget.onRequestSync!();
@@ -889,7 +892,10 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Icon(Icons.sync),
                   label: Text(
@@ -903,8 +909,11 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Actualiza precios, tasa de cambio y envía ventas pendientes. '
-                  'No hace falta entrar al POS.',
+                  widget.onlineStatus && !widget.forcedOffline
+                      ? 'Solo online: baja precios y tasa del servidor, y envía '
+                          'la cola. El botón queda cargando hasta terminar.'
+                      : 'Sincronizar requiere Online. Poné Online y esperá '
+                          'conexión con el servidor.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: PosSaleUi.textMuted,
                     height: 1.35,
