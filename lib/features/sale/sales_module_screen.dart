@@ -10,6 +10,7 @@ import '../../core/api/sync_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/sync/device_hydrate_sync.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import 'cash_close_screen.dart';
 import 'pos_sale_screen.dart';
@@ -39,6 +40,7 @@ class SalesModuleScreen extends StatefulWidget {
     required this.catalogInvalidationBus,
     required this.localPrefs,
     this.shellOnline = true,
+    this.onHydrateDevice,
   });
 
   final String storeId;
@@ -55,6 +57,7 @@ class SalesModuleScreen extends StatefulWidget {
 
   /// Alineado con [MainShell] (`_isOnline`): POS evita colgarse esperando red si es `false`.
   final bool shellOnline;
+  final DeviceHydrateCallback? onHydrateDevice;
 
   @override
   State<SalesModuleScreen> createState() => _SalesModuleScreenState();
@@ -86,6 +89,7 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                       syncApi: widget.syncApi,
                       catalogInvalidationBus: widget.catalogInvalidationBus,
                       localPrefs: widget.localPrefs,
+                      onHydrateDevice: widget.onHydrateDevice,
                       onRequestExit: () => Navigator.of(c).pop(),
                     ),
                   ),
@@ -161,6 +165,7 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                       cashSessionsApi: widget.cashSessionsApi,
                       syncApi: widget.syncApi,
                       catalogInvalidationBus: widget.catalogInvalidationBus,
+                      onHydrateDevice: widget.onHydrateDevice,
                     ),
                   ),
                 );

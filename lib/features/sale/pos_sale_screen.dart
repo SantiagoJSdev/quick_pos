@@ -31,6 +31,7 @@ import '../../core/config/app_config.dart';
 import '../../core/pos/recent_sale_functional_enricher.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/sync/device_hydrate_sync.dart';
 import '../../core/sync/pending_sale_entry.dart';
 import '../../core/sync/sync_cycle.dart';
 import '../shell/shell_online_scope.dart';
@@ -65,6 +66,7 @@ class PosSaleScreen extends StatefulWidget {
     required this.localPrefs,
     this.cashSessionsApi,
     this.onRequestExit,
+    this.onHydrateDevice,
   });
 
   final String storeId;
@@ -79,6 +81,7 @@ class PosSaleScreen extends StatefulWidget {
 
   /// Si no es null (p. ej. módulo Ventas), muestra atrás en la barra superior.
   final VoidCallback? onRequestExit;
+  final DeviceHydrateCallback? onHydrateDevice;
 
   @override
   State<PosSaleScreen> createState() => _PosSaleScreenState();
@@ -200,6 +203,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (!mounted) return;
     // Nunca reabrir spinner de POS por un pull: refresco silencioso.
     unawaited(_refreshCatalogSilent());
+    unawaited(_refreshInventoryCacheSilent());
   }
 
   /// Catálogo desde cache (+ red en background si online). No toca [_loading].
@@ -449,6 +453,29 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     }
     if (_flushBusy) {
       debugPrint('[POS sync] abort: ya hay un sync en curso');
+      return;
+    }
+
+    final hydrate = widget.onHydrateDevice;
+    if (!silent && hydrate != null && doPull) {
+      setState(() => _flushBusy = true);
+      try {
+        final result = await hydrate(requireEmptyQueue: false);
+        if (!mounted) return;
+        await _refreshPendingCount();
+        await _refreshInventoryCacheSilent();
+        _showCheckoutPanelMessage(
+          result.userMessage,
+          error: !result.ok,
+          duration: Duration(seconds: result.ok ? 3 : 6),
+        );
+      } catch (e) {
+        if (mounted) {
+          _showCheckoutPanelMessage('$e', error: true);
+        }
+      } finally {
+        if (mounted) setState(() => _flushBusy = false);
+      }
       return;
     }
     final pendingN = await widget.localPrefs.countPendingSyncOpsForStore(

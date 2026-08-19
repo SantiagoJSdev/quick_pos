@@ -8,6 +8,7 @@ import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
+import '../../core/sync/device_hydrate_sync.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/models/business_settings.dart';
 import '../../core/pos/pos_terminal_info.dart';
@@ -37,6 +38,7 @@ class StoreDashboardScreen extends StatefulWidget {
     required this.onBackendTransportFailure,
     this.syncBusy = false,
     this.onRequestSync,
+    this.onHydrateDevice,
     this.cashSessionsApi,
     this.syncApi,
     this.catalogInvalidationBus,
@@ -56,9 +58,10 @@ class StoreDashboardScreen extends StatefulWidget {
   /// Timeout / sin red al cargar settings: el shell marca backend inalcanzable para pasar a offline efectivo.
   final VoidCallback onBackendTransportFailure;
 
-  /// Sync manual (cola + catálogo/precios + tasa). Lo provee [MainShell].
+  /// Sync manual (cola + catálogo/precios/stock + tasa). Lo provee [MainShell].
   final bool syncBusy;
   final Future<void> Function()? onRequestSync;
+  final DeviceHydrateCallback? onHydrateDevice;
 
   final CashSessionsApi? cashSessionsApi;
   final SyncApi? syncApi;
@@ -910,8 +913,8 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                 const SizedBox(height: 6),
                 Text(
                   widget.onlineStatus && !widget.forcedOffline
-                      ? 'Solo online: baja precios y tasa del servidor, y envía '
-                          'la cola. El botón queda cargando hasta terminar.'
+                      ? 'Solo online: envía la cola y baja productos, stock y tasa. '
+                          'Bloquea la app hasta terminar. Si algo falla, lo dice.'
                       : 'Sincronizar requiere Online. Poné Online y esperá '
                           'conexión con el servidor.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -934,6 +937,7 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                             syncApi: widget.syncApi!,
                             catalogInvalidationBus:
                                 widget.catalogInvalidationBus!,
+                            onHydrateDevice: widget.onHydrateDevice,
                           ),
                         ),
                       );
@@ -947,8 +951,8 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Fin de turno: contar efectivo, sincronizar pendientes y '
-                    'congelar el resumen. No reemplaza Sincronizar.',
+                    'Fin de turno: hay que enviar todo (ventas, ajustes, fotos). '
+                    'Sin internet o con cola pendiente, no se cierra.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: PosSaleUi.textMuted,
                       height: 1.35,

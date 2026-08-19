@@ -89,4 +89,27 @@ class BusinessSettings {
     if (s == 'false' || s == '0') return false;
     return defaultValue;
   }
+
+  /// Shape que espera [LocalPrefs.saveBusinessSettingsCache].
+  Map<String, dynamic> toPrefsJson() => {
+        'id': id,
+        'storeId': storeId,
+        'defaultMarginPercent': defaultMarginPercent,
+        'allowNegativeStockAtPos': allowNegativeStockAtPos,
+        'warnOnNegativeStock': warnOnNegativeStock,
+        'blockRestrictedProductsWithoutStock':
+            blockRestrictedProductsWithoutStock,
+        'requireSuccessfulSyncAtClose': requireSuccessfulSyncAtClose,
+        'functionalCurrency': {
+          'code': functionalCurrency.code,
+          'name': functionalCurrency.name,
+        },
+        'defaultSaleDocCurrency': defaultSaleDocCurrency == null
+            ? null
+            : {
+                'code': defaultSaleDocCurrency!.code,
+                'name': defaultSaleDocCurrency!.name,
+              },
+        'store': {'name': storeName, 'type': storeType},
+      };
 }

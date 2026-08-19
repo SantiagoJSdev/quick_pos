@@ -17,13 +17,12 @@ import '../../core/api/uploads_api.dart';
 import '../../features/dashboard/data/dashboard_repository.dart';
 import '../../core/cash/cash_session_service.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/catalog/catalog_offline_sync.dart';
 import '../../core/network/api_connectivity_debug.dart';
 import '../../core/network/connectivity_util.dart';
-import '../../core/photos/product_photo_upload_sync.dart';
+import '../../core/photos/pending_product_photo_upload_entry.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
-import '../../core/sync/sync_cycle.dart';
+import '../../core/sync/device_hydrate_sync.dart';
 import '../inventory/inventory_module_screen.dart';
 import '../settings/module_not_enabled_screen.dart';
 import '../settings/store_dashboard_screen.dart';
@@ -92,6 +91,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   DateTime? _lastAutoSyncAt;
   bool _autoSyncBusy = false;
   bool _manualHomeSyncBusy = false;
+  String? _hydrateStep;
   bool _isOnline = true;
   bool _backendReachable = true;
   bool _manualForceOffline = false;
@@ -282,69 +282,65 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _autoSyncBusy = true;
     _lastAutoSyncAt = now;
     try {
-      final t = await PosTerminalInfo.load(widget.localPrefs);
-      if (!mounted) return;
-      await runSyncCycle(
-        storeId: widget.storeId,
-        prefs: widget.localPrefs,
-        syncApi: widget.syncApi,
-        deviceId: t.deviceId,
-        appVersion: t.appVersion,
-        catalogInvalidation: widget.catalogInvalidationBus,
-        doPull: true,
-        doFlush: true,
-      );
-      // No tocar _backendReachable aquí: el sync (pull/watermark/cola) puede fallar
-      // aunque `GET .../business-settings` responda bien (como en Postman).
-      // El estado "online" lo define `_probeBackendHealth` con esa misma ruta.
-      await flushPendingCatalogMutations(
-        storeId: widget.storeId,
-        prefs: widget.localPrefs,
-        productsApi: widget.productsApi,
-        catalogInvalidation: widget.catalogInvalidationBus,
-      );
-      await flushPendingProductPhotoUploads(
-        storeId: widget.storeId,
-        prefs: widget.localPrefs,
-        uploader: (entry) async {
-          final upload = await widget.uploadsApi.uploadProductImage(
-            widget.storeId,
-            filePath: entry.localFilePath,
-          );
-          final updated = await widget.productsApi.associateProductImage(
-            widget.storeId,
-            entry.productId,
-            imageUrl: upload.url,
-          );
-          final cache = await widget.localPrefs.loadCatalogProductsCache();
-          final i = cache.indexWhere((p) => p.id == updated.id);
-          if (i >= 0) {
-            cache[i] = updated;
-          } else {
-            cache.add(updated);
-          }
-          await widget.localPrefs.saveCatalogProductsCache(cache);
-          widget.catalogInvalidationBus.invalidateFromLocalMutation(
-            productIds: {updated.id},
-          );
-        },
-      );
-      await widget.localPrefs.markLastSuccessfulSyncNow();
-      final cashSvc = CashSessionService(
-        prefs: widget.localPrefs,
-        api: widget.cashSessionsApi,
-      );
-      await cashSvc.tryTransmitPendingClose(
-        storeId: widget.storeId,
-        online: true,
-      );
+      await _hydrateDevice();
     } catch (e) {
       traceApiConnectivity(
-        'runSyncCycle / post-sync falló (no cambia online): $e',
+        'hydrate / post-sync falló (no cambia online): $e',
       );
     } finally {
       _autoSyncBusy = false;
     }
+  }
+
+  Future<void> _uploadPendingProductPhoto(
+    PendingProductPhotoUploadEntry entry,
+  ) async {
+    final upload = await widget.uploadsApi.uploadProductImage(
+      widget.storeId,
+      filePath: entry.localFilePath,
+    );
+    final updated = await widget.productsApi.associateProductImage(
+      widget.storeId,
+      entry.productId,
+      imageUrl: upload.url,
+    );
+    final cache = await widget.localPrefs.loadCatalogProductsCache();
+    final i = cache.indexWhere((p) => p.id == updated.id);
+    if (i >= 0) {
+      cache[i] = updated;
+    } else {
+      cache.add(updated);
+    }
+    await widget.localPrefs.saveCatalogProductsCache(cache);
+    widget.catalogInvalidationBus.invalidateFromLocalMutation(
+      productIds: {updated.id},
+    );
+  }
+
+  Future<DeviceHydrateResult> _hydrateDevice({
+    void Function(String step)? onProgress,
+    bool requireEmptyQueue = false,
+  }) async {
+    final t = await PosTerminalInfo.load(widget.localPrefs);
+    return hydrateDeviceFromServer(
+      storeId: widget.storeId,
+      prefs: widget.localPrefs,
+      syncApi: widget.syncApi,
+      productsApi: widget.productsApi,
+      inventoryApi: widget.inventoryApi,
+      storesApi: widget.storesApi,
+      exchangeRatesApi: widget.exchangeRatesApi,
+      deviceId: t.deviceId,
+      appVersion: t.appVersion,
+      catalogInvalidation: widget.catalogInvalidationBus,
+      cashSessions: CashSessionService(
+        prefs: widget.localPrefs,
+        api: widget.cashSessionsApi,
+      ),
+      photoUploader: _uploadPendingProductPhoto,
+      onProgress: onProgress,
+      requireEmptyQueue: requireEmptyQueue,
+    );
   }
 
   /// Sync manual desde Inicio: **solo online**. Loading hasta terminar.
@@ -366,7 +362,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() => _manualHomeSyncBusy = true);
+    setState(() {
+      _manualHomeSyncBusy = true;
+      _hydrateStep = 'Comprobando servidor…';
+    });
     try {
       // Comprobar red + backend antes de marcar “sincronizando”.
       try {
@@ -437,104 +436,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _autoSyncBusy = true;
       _lastAutoSyncAt = DateTime.now();
 
-      final t = await PosTerminalInfo.load(widget.localPrefs);
-      if (!mounted) return;
-
-      final cycle = await runSyncCycle(
-        storeId: widget.storeId,
-        prefs: widget.localPrefs,
-        syncApi: widget.syncApi,
-        deviceId: t.deviceId,
-        appVersion: t.appVersion,
-        catalogInvalidation: widget.catalogInvalidationBus,
-        doPull: true,
-        doFlush: true,
-      );
-
-      await flushPendingCatalogMutations(
-        storeId: widget.storeId,
-        prefs: widget.localPrefs,
-        productsApi: widget.productsApi,
-        catalogInvalidation: widget.catalogInvalidationBus,
-      );
-
-      // Catálogo fresco (obligatorio en sync manual).
-      final list = await widget.productsApi.listProducts(
-        widget.storeId,
-        includeInactive: false,
-      );
-      await widget.localPrefs.saveCatalogProductsCache(list);
-      widget.catalogInvalidationBus.invalidateFromLocalMutation();
-
-      // Settings + tasa (obligatorio si hay par distinto).
-      final settings = await widget.storesApi.getBusinessSettings(
-        widget.storeId,
-      );
-      await widget.localPrefs.saveBusinessSettingsCache(
-        widget.storeId,
-        {
-          'id': settings.id,
-          'storeId': settings.storeId,
-          'defaultMarginPercent': settings.defaultMarginPercent,
-          'functionalCurrency': {
-            'code': settings.functionalCurrency.code,
-            'name': settings.functionalCurrency.name,
-          },
-          'defaultSaleDocCurrency': settings.defaultSaleDocCurrency == null
-              ? null
-              : {
-                  'code': settings.defaultSaleDocCurrency!.code,
-                  'name': settings.defaultSaleDocCurrency!.name,
-                },
-          'store': {
-            'name': settings.storeName,
-            'type': settings.storeType,
-          },
+      final result = await _hydrateDevice(
+        onProgress: (s) {
+          if (mounted) setState(() => _hydrateStep = s);
         },
       );
-
-      final func = settings.functionalCurrency.code.trim();
-      final doc = (settings.defaultSaleDocCurrency?.code ?? func).trim();
-      var fxLabel = 'misma moneda';
-      if (func.toUpperCase() != doc.toUpperCase()) {
-        await _refreshExchangeRateCachesOnline(
-          storeId: widget.storeId,
-          functionalCode: func,
-          documentCode: doc,
-        );
-        fxLabel = 'tasa $func→$doc';
-      }
-
       if (!mounted) return;
-      await widget.localPrefs.markLastSuccessfulSyncNow();
-
-      final parts = <String>['catálogo/precios', fxLabel];
-      if (cycle.flush.removedCount > 0) {
-        parts.add('${cycle.flush.removedCount} op. enviadas');
-      }
-      if (cycle.pullOpsReceived > 0) {
-        parts.add('${cycle.pullOpsReceived} cambios recibidos');
-      }
-      if (cycle.pullError != null) {
-        parts.add('pull: ${cycle.pullError}');
-      }
-      try {
-        final cashSvc = CashSessionService(
-          prefs: widget.localPrefs,
-          api: widget.cashSessionsApi,
-        );
-        final transmitted = await cashSvc.tryTransmitPendingClose(
-          storeId: widget.storeId,
-          online: true,
-        );
-        if (transmitted) parts.add('cierre de caja');
-      } catch (_) {}
-
       messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(
         SnackBar(
-          content: Text('Sincronizado online: ${parts.join(' · ')}.'),
-          duration: const Duration(seconds: 5),
+          content: Text(result.userMessage),
+          duration: Duration(seconds: result.ok ? 5 : 7),
         ),
       );
     } catch (e) {
@@ -543,60 +455,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       messenger?.showSnackBar(
         SnackBar(
           content: Text(
-            'Sincronización incompleta (online requerido). '
-            'Revisá red/servidor y reintentá.\n$e',
+            'Sincronización incompleta. Revisá red/servidor y reintentá.\n$e',
           ),
           duration: const Duration(seconds: 6),
         ),
       );
     } finally {
       _autoSyncBusy = false;
-      if (mounted) setState(() => _manualHomeSyncBusy = false);
-    }
-  }
-
-  /// Baja la tasa vigente del servidor y actualiza cachés POS + «Tasa del día».
-  Future<void> _refreshExchangeRateCachesOnline({
-    required String storeId,
-    required String functionalCode,
-    required String documentCode,
-  }) async {
-    final func = functionalCode.trim();
-    final doc = documentCode.trim();
-
-    Object? lastError;
-    for (final pair in [
-      (func, doc),
-      (doc, func),
-    ]) {
-      try {
-        final rate = await widget.exchangeRatesApi.getLatest(
-          storeId,
-          baseCurrencyCode: pair.$1,
-          quoteCurrencyCode: pair.$2,
-        );
-        await widget.localPrefs.saveLatestRateCache(
-          storeId: storeId,
-          baseCurrencyCode: pair.$1,
-          quoteCurrencyCode: pair.$2,
-          effectiveOn: null,
-          rate: rate,
-        );
-        await widget.localPrefs.syncPosFxPairCacheFromFetchedRate(
-          storeId: storeId,
-          fetchedBase: pair.$1,
-          fetchedQuote: pair.$2,
-          rate: rate,
-        );
-        return;
-      } catch (e) {
-        lastError = e;
+      if (mounted) {
+        setState(() {
+          _manualHomeSyncBusy = false;
+          _hydrateStep = null;
+        });
       }
     }
-    throw StateError(
-      'No se pudo actualizar la tasa desde el servidor '
-      '($func / $doc): $lastError',
-    );
   }
 
   @override
@@ -621,7 +493,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       isOnline: _isOnline,
       manualForceOffline: _manualForceOffline,
       backendReachable: _backendReachable,
-      child: Scaffold(
+      child: Stack(
+        children: [
+          Scaffold(
         body: IndexedStack(
           index: _index,
           children: [
@@ -638,6 +512,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 onlineStatus: _isOnline,
                 syncBusy: _manualHomeSyncBusy,
                 onRequestSync: _runManualSyncFromHome,
+                onHydrateDevice: _hydrateDevice,
                 cashSessionsApi: widget.cashSessionsApi,
                 syncApi: widget.syncApi,
                 catalogInvalidationBus: widget.catalogInvalidationBus,
@@ -731,6 +606,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 catalogInvalidationBus: widget.catalogInvalidationBus,
                 localPrefs: widget.localPrefs,
                 shellOnline: _isOnline,
+                onHydrateDevice: _hydrateDevice,
               ),
             ),
             KeyedSubtree(
@@ -783,7 +659,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             ),
             NavigationBar(
               selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
+              onDestinationSelected: (i) {
+                if (_manualHomeSyncBusy) return;
+                setState(() => _index = i);
+              },
               destinations: const [
                 NavigationDestination(
                   icon: Icon(Icons.home_outlined),
@@ -809,6 +688,37 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             ),
           ],
         ),
+          ),
+          if (_manualHomeSyncBusy) ...[
+            const ModalBarrier(dismissible: false, color: Color(0x99000000)),
+            Center(
+              child: Card(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 16),
+                      Text(
+                        _hydrateStep ?? 'Sincronizando…',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'No se puede vender ni cambiar de pantalla hasta terminar.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

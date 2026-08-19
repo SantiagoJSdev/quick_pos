@@ -7,11 +7,10 @@ import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/cash/cash_session_service.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/models/business_settings.dart';
 import '../../core/models/cash_session.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
-import '../../core/sync/sync_cycle.dart';
+import '../../core/sync/device_hydrate_sync.dart';
 import '../shell/shell_online_scope.dart';
 import 'pos_sale_ui_tokens.dart';
 
@@ -24,6 +23,7 @@ class CashCloseScreen extends StatefulWidget {
     required this.cashSessionsApi,
     required this.syncApi,
     required this.catalogInvalidationBus,
+    this.onHydrateDevice,
   });
 
   final String storeId;
@@ -31,6 +31,7 @@ class CashCloseScreen extends StatefulWidget {
   final CashSessionsApi cashSessionsApi;
   final SyncApi syncApi;
   final CatalogInvalidationBus catalogInvalidationBus;
+  final DeviceHydrateCallback? onHydrateDevice;
 
   @override
   State<CashCloseScreen> createState() => _CashCloseScreenState();
@@ -44,12 +45,12 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
 
   bool _loading = true;
   bool _busy = false;
+  String? _hydrateStep;
   String? _error;
   LocalCashSession? _session;
   LocalClosePreview? _preview;
   CashSessionSummaryResponse? _remoteSummary;
   String? _statusHint;
-  BusinessSettings? _settings;
 
   @override
   void initState() {
@@ -131,9 +132,6 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         storeId: widget.storeId,
         session: session,
       );
-      final settings = await widget.localPrefs.loadBusinessSettingsCache(
-        widget.storeId,
-      );
 
       CashSessionSummaryResponse? remote;
       if (online &&
@@ -152,7 +150,6 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         _session = session;
         _preview = preview;
         _remoteSummary = remote;
-        _settings = settings;
         _loading = false;
       });
     } catch (e) {
@@ -164,6 +161,19 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
     }
   }
 
+  Future<DeviceHydrateResult?> _runHydrate({
+    required bool requireEmptyQueue,
+  }) async {
+    final fn = widget.onHydrateDevice;
+    if (fn == null) return null;
+    return fn(
+      onProgress: (s) {
+        if (mounted) setState(() => _hydrateStep = s);
+      },
+      requireEmptyQueue: requireEmptyQueue,
+    );
+  }
+
   Future<void> _syncThenRefresh() async {
     final online = ShellOnlineScope.of(context);
     if (!online) {
@@ -172,20 +182,17 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
       );
       return;
     }
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _hydrateStep = 'Sincronizando…';
+    });
     try {
-      final t = await PosTerminalInfo.load(widget.localPrefs);
-      await runSyncCycle(
-        storeId: widget.storeId,
-        prefs: widget.localPrefs,
-        syncApi: widget.syncApi,
-        deviceId: t.deviceId,
-        appVersion: t.appVersion,
-        catalogInvalidation: widget.catalogInvalidationBus,
-        doPull: true,
-        doFlush: true,
-      );
-      await widget.localPrefs.markLastSuccessfulSyncNow();
+      final result = await _runHydrate(requireEmptyQueue: false);
+      if (result != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.userMessage)),
+        );
+      }
       await _bootstrap();
     } catch (e) {
       if (mounted) {
@@ -194,7 +201,12 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _hydrateStep = null;
+        });
+      }
     }
   }
 
@@ -210,9 +222,18 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
     }
 
     final online = ShellOnlineScope.of(context);
+    if (!online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se puede cerrar caja sin internet: hay que enviar todo primero.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final pending = _preview?.pendingSalesCount ?? 0;
-    final requireSync = _settings?.requireSuccessfulSyncAtClose == true;
-    final syncSoftWarn = requireSync && pending > 0;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -222,15 +243,10 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
           style: TextStyle(color: PosSaleUi.text),
         ),
         content: Text(
-          [
-            if (online)
-              'Se sincronizará lo pendiente y se cerrará el turno.'
-            else
-              'Sin red: el cierre quedará marcado como pendiente transmitir.',
-            if (syncSoftWarn)
-              '\n\nAviso: quedan $pending venta(s) sin sincronizar. '
-              'La tienda pide sync exitoso al cierre; podés cerrar igual.',
-          ].join(),
+          pending > 0
+              ? 'Se van a enviar $pending venta(s) y el resto de la cola. '
+                  'Si algo no sale, la caja NO se cierra.'
+              : 'Se enviará todo lo pendiente y se cerrará el turno.',
           style: const TextStyle(color: PosSaleUi.textMuted),
         ),
         actions: [
@@ -247,26 +263,29 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
     );
     if (ok != true || !mounted) return;
 
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _hydrateStep = 'Enviando todo…';
+    });
     try {
-      if (online) {
-        final t = await PosTerminalInfo.load(widget.localPrefs);
-        await runSyncCycle(
-          storeId: widget.storeId,
-          prefs: widget.localPrefs,
-          syncApi: widget.syncApi,
-          deviceId: t.deviceId,
-          appVersion: t.appVersion,
-          catalogInvalidation: widget.catalogInvalidationBus,
-          doPull: true,
-          doFlush: true,
+      final hydrated = await _runHydrate(requireEmptyQueue: true);
+      if (hydrated == null || !hydrated.ok || !hydrated.flushedAll) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              hydrated?.userMessage ??
+                  'No se pudo enviar todo. La caja no se cerró.',
+            ),
+          ),
         );
-        await widget.localPrefs.markLastSuccessfulSyncNow();
+        await _bootstrap();
+        return;
       }
 
       final result = await _service.closeSession(
         storeId: widget.storeId,
-        online: online,
+        online: true,
         countedCash: counted,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         preview: _preview,
@@ -304,7 +323,12 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _hydrateStep = null;
+        });
+      }
     }
   }
 
@@ -488,7 +512,8 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
                       onPressed: _busy ? null : _confirmClose,
                       icon: const Icon(Icons.lock_outline),
                       label: Text(
-                        _busy ? 'Cerrando…' : 'Confirmar cierre de caja',
+                        _hydrateStep ??
+                            (_busy ? 'Cerrando…' : 'Confirmar cierre de caja'),
                       ),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
@@ -498,8 +523,8 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'El cierre no reemplaza el sync del día: fuerza un último '
-                      'envío (si hay red) y congela el resumen del turno.',
+                      'Sin internet no se cierra. Si queda algo sin enviar, '
+                      'la caja sigue abierta.',
                       style: TextStyle(
                         color: PosSaleUi.textFaint,
                         fontSize: 12,

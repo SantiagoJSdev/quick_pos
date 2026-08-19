@@ -530,6 +530,11 @@ class LocalPrefs {
     return list.where((e) => e.storeId == storeId).length;
   }
 
+  Future<int> countPendingProductPhotoUploadsForStore(String storeId) async {
+    final list = await loadPendingProductPhotoUploads();
+    return list.where((e) => e.storeId == storeId).length;
+  }
+
   Future<int> countPendingSyncOpsForStore(String storeId) async {
     final a = await countPendingSalesForStore(storeId);
     final b = await countPendingInventoryAdjustsForStore(storeId);
@@ -537,7 +542,8 @@ class LocalPrefs {
     final d = await countPendingSaleReturnsForStore(storeId);
     final e = await countPendingCatalogMutationsForStore(storeId);
     final f = await countPendingSupplierMutationsForStore(storeId);
-    return a + b + c + d + e + f;
+    final g = await countPendingProductPhotoUploadsForStore(storeId);
+    return a + b + c + d + e + f + g;
   }
 
   /// Quita una operación de **todas** las colas locales por [opId].
