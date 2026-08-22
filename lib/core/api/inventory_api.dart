@@ -1,5 +1,6 @@
 import '../models/inventory_adjustment_result.dart';
 import '../models/inventory_line.dart';
+import '../models/inventory_loss_result.dart';
 import '../models/stock_movement.dart';
 import 'api_client.dart';
 import 'api_error.dart';
@@ -60,5 +61,31 @@ class InventoryApi {
       body,
     );
     return InventoryAdjustmentResult.fromJson(json);
+  }
+
+  /// `POST /api/v1/inventory/losses` — merma a costo promedio (`opId` idempotente).
+  Future<InventoryLossResult> postLoss(
+    String storeId, {
+    required String productId,
+    required String quantity,
+    required String reason,
+    String? opId,
+  }) async {
+    final body = <String, dynamic>{
+      'productId': productId.trim(),
+      'quantity': quantity.trim(),
+      'reason': reason.trim(),
+    };
+    final oid = opId?.trim();
+    if (oid != null && oid.isNotEmpty) {
+      body['opId'] = oid;
+    }
+    final json = await _client.postJson(
+      '/inventory/losses',
+      storeId,
+      body,
+      idempotencyKey: oid,
+    );
+    return InventoryLossResult.fromJson(json);
   }
 }

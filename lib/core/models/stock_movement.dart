@@ -50,6 +50,10 @@ class StockMovement {
       case 'IN_PURCHASE':
       case 'PURCHASE_RECEIVE':
         return 'Compra';
+      case 'OUT_LOSS':
+      case 'LOSS':
+      case 'INVENTORY_LOSS':
+        return 'Merma';
       default:
         return type;
     }

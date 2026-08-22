@@ -16,6 +16,7 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
 import 'inventory_adjustment_screen.dart';
+import 'inventory_loss_sheet.dart';
 import 'product_form_screen.dart';
 
 /// B2 — detalle de stock + movimientos recientes.
@@ -181,6 +182,36 @@ class _InventoryProductDetailScreenState
     if (ok == true && mounted) await _load();
   }
 
+  Future<void> _openLoss(String productId, String label) async {
+    if (!widget.shellOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sin conexión: la merma requiere red.')),
+      );
+      return;
+    }
+    final unit = (_catalogProduct?.unit ?? '').trim().toUpperCase();
+    final isByWeight = unit == 'KG';
+    final line = _line ?? widget.initialLine;
+    final ok = await showInventoryLossSheet(
+      context,
+      storeId: widget.storeId,
+      inventoryApi: widget.inventoryApi,
+      productId: productId,
+      productLabel: label,
+      isByWeight: isByWeight,
+      currentQuantity: line.quantity,
+      catalogInvalidationBus: widget.catalogInvalidationBus,
+      shellOnline: widget.shellOnline,
+    );
+    if (ok && mounted) {
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Merma registrada')),
+      );
+    }
+  }
+
   Future<void> _openEditProduct(CatalogProduct product) async {
     final result = await Navigator.of(context).push<CatalogProduct?>(
       MaterialPageRoute(
@@ -260,6 +291,12 @@ class _InventoryProductDetailScreenState
               icon: const Icon(Icons.edit_outlined),
               tooltip: 'Editar producto y margen',
               onPressed: () => _openEditProduct(cat),
+            ),
+          if (pid.isNotEmpty && !_loading && _error == null)
+            IconButton(
+              icon: const Icon(Icons.remove_circle_outline),
+              tooltip: 'Registrar merma',
+              onPressed: () => _openLoss(pid, line.displayName),
             ),
           if (pid.isNotEmpty && !_loading && _error == null)
             IconButton(
@@ -502,6 +539,12 @@ class _InventoryProductDetailScreenState
                   ),
                   if (pid.isNotEmpty) ...[
                     const SizedBox(height: 12),
+                    FilledButton.tonalIcon(
+                      onPressed: () => _openLoss(pid, line.displayName),
+                      icon: const Icon(Icons.remove_circle_outline),
+                      label: const Text('Registrar merma'),
+                    ),
+                    const SizedBox(height: 8),
                     FilledButton.tonalIcon(
                       onPressed: () => _openAdjustment(pid, line.displayName),
                       icon: const Icon(Icons.inventory_2_outlined),
