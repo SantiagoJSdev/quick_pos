@@ -8,8 +8,10 @@ import '../../data/dashboard_repository.dart';
 import '../../domain/kpi_snapshot.dart';
 import '../controllers/dashboard_controller.dart';
 import '../widgets/date_range_selector.dart';
+import '../widgets/kpi_capital_panel.dart';
 import '../widgets/kpi_row.dart';
 import '../widgets/kpi_snapshot_panel.dart';
+import '../../domain/kpi_capital_series.dart';
 import '../widgets/last_updated_banner.dart';
 import '../widgets/payments_breakdown_list.dart';
 import '../widgets/sales_line_chart.dart';
@@ -39,6 +41,11 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
   bool _kpiLoading = false;
   String? _kpiError;
   ApiError? _kpiApiError;
+
+  String _capitalPreset = 'week';
+  KpiCapitalSeries? _capitalSeries;
+  bool _capitalLoading = false;
+  String? _capitalError;
 
   @override
   void initState() {
@@ -104,9 +111,42 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
     await _loadKpis();
   }
 
+  Future<void> _loadCapital() async {
+    if (!widget.shellOnline) return;
+    setState(() {
+      _capitalLoading = true;
+      _capitalError = null;
+    });
+    try {
+      final series = await widget.repository.loadCapitalSeries(
+        widget.storeId,
+        preset: _capitalPreset,
+      );
+      if (!mounted) return;
+      setState(() {
+        _capitalSeries = series;
+        _capitalLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _capitalLoading = false;
+        _capitalError = e is ApiError ? e.userMessageForSupport : e.toString();
+      });
+    }
+  }
+
+  Future<void> _setCapitalPreset(String preset) async {
+    if (_capitalPreset == preset) return;
+    setState(() => _capitalPreset = preset);
+    await _loadCapital();
+  }
+
   Future<void> _refreshCurrent() async {
     if (_tab == 0) {
       await _loadKpis();
+    } else if (_tab == 1) {
+      await _loadCapital();
     } else {
       await _controller.load();
     }
@@ -172,11 +212,16 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
               segments: const [
                 ButtonSegment<int>(
                   value: 0,
-                  label: Text('KPIs'),
+                  label: Text('Hoy'),
                   icon: Icon(Icons.insights_outlined),
                 ),
                 ButtonSegment<int>(
                   value: 1,
+                  label: Text('Capital'),
+                  icon: Icon(Icons.account_balance_outlined),
+                ),
+                ButtonSegment<int>(
+                  value: 2,
                   label: Text('Ventas'),
                   icon: Icon(Icons.point_of_sale_outlined),
                 ),
@@ -187,7 +232,10 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
                 if (_tab == 0 && _kpiSnapshot == null && !_kpiLoading) {
                   unawaited(_loadKpis());
                 }
-                if (_tab == 1 &&
+                if (_tab == 1 && _capitalSeries == null && !_capitalLoading) {
+                  unawaited(_loadCapital());
+                }
+                if (_tab == 2 &&
                     _controller.status == DashboardLoadStatus.idle) {
                   unawaited(_controller.load());
                 }
@@ -198,7 +246,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
               _kpiSnapshot?.loadedAt != null &&
               !_kpiLoading)
             LastUpdatedBanner(updatedAt: _kpiSnapshot!.loadedAt!),
-          if (_tab == 1 &&
+          if (_tab == 2 &&
               _controller.status == DashboardLoadStatus.success &&
               _controller.data != null)
             LastUpdatedBanner(updatedAt: _controller.data!.loadedAt),
@@ -210,7 +258,11 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
                       style: TextStyle(color: PosSaleUi.textMuted),
                     ),
                   )
-                : (_tab == 0 ? _buildKpiBody() : _buildSalesBody()),
+                : switch (_tab) {
+                    0 => _buildKpiBody(),
+                    1 => _buildCapitalBody(),
+                    _ => _buildSalesBody(),
+                  },
           ),
         ],
       ),
@@ -267,6 +319,58 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen> {
           onRefresh: _loadKpis,
         ),
         if (_kpiLoading)
+          const Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: LinearProgressIndicator(minHeight: 2),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCapitalBody() {
+    if (_capitalLoading && _capitalSeries == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_capitalError != null && _capitalSeries == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+              const SizedBox(height: 16),
+              Text(
+                _capitalError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: PosSaleUi.textMuted),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _loadCapital,
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_capitalSeries == null) {
+      return const Center(child: Text('Sin datos de capital'));
+    }
+    final currency = _kpiSnapshot?.currencyCode ?? 'USD';
+    return Stack(
+      children: [
+        KpiCapitalPanel(
+          series: _capitalSeries!,
+          preset: _capitalPreset,
+          onPresetChanged: _setCapitalPreset,
+          currencyCode: currency,
+          onRefresh: _loadCapital,
+        ),
+        if (_capitalLoading)
           const Positioned(
             left: 0,
             right: 0,

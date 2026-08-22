@@ -13,6 +13,7 @@ import '../domain/device_dashboard_payload.dart';
 import '../domain/payment_breakdown_item.dart';
 import 'dashboard_api.dart';
 import 'kpis_api.dart';
+import '../domain/kpi_capital_series.dart';
 import '../domain/kpi_snapshot.dart';
 
 /// Estado agregado del tablero operador (3 endpoints en paralelo).
@@ -71,6 +72,25 @@ class DashboardRepository {
       throw StateError('KpisApi no configurado en DashboardRepository');
     }
     return api.getSnapshot(
+      storeId,
+      preset: preset,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+  }
+
+  /// `GET /kpis/capital-series` — requiere [KpisApi].
+  Future<KpiCapitalSeries> loadCapitalSeries(
+    String storeId, {
+    String preset = 'week',
+    String? dateFrom,
+    String? dateTo,
+  }) {
+    final api = _kpisApi;
+    if (api == null) {
+      throw StateError('KpisApi no configurado en DashboardRepository');
+    }
+    return api.getCapitalSeries(
       storeId,
       preset: preset,
       dateFrom: dateFrom,

@@ -45,9 +45,20 @@ class KpiSnapshotPanel extends StatelessWidget {
                 color: PosSaleUi.textMuted,
               ),
         ),
+        if (snapshot.timezoneIsFallbackUtc) ...[
+          const SizedBox(height: 8),
+          const _TimezoneFallbackBanner(),
+        ],
         const SizedBox(height: 16),
         _RealProfitHero(real: real, currency: currency),
         const SizedBox(height: 12),
+        if (snapshot.cashAvailable?.suggestedWithdraw != null)
+          _SuggestedWithdrawChip(
+            amount: snapshot.cashAvailable!.suggestedWithdraw!,
+            currency: currency,
+          ),
+        if (snapshot.cashAvailable?.suggestedWithdraw != null)
+          const SizedBox(height: 12),
         _GrossProfitCard(
           gross: gross,
           currency: currency,
@@ -61,13 +72,22 @@ class KpiSnapshotPanel extends StatelessWidget {
             calendarDays: real.calendarDays,
           ),
         if (real?.deductions != null) const SizedBox(height: 12),
+        if (real?.explain?.warnings.isNotEmpty == true) ...[
+          _ExplainWarnings(warnings: real!.explain!.warnings),
+          const SizedBox(height: 12),
+        ],
+        if (snapshot.capital != null) ...[
+          _CapitalLiveCard(capital: snapshot.capital!, currency: currency),
+          const SizedBox(height: 12),
+        ],
         _PayablesCard(payables: debt, currency: currency),
         const SizedBox(height: 12),
         _StockAlertsCard(alerts: stock),
         const SizedBox(height: 12),
         Text(
-          'La ganancia real no es “efectivo disponible para sacar”. '
-          'Deuda y stock son snapshot actual (no siguen el período).',
+          'La ganancia real no es “efectivo para sacar”. '
+          'El chip de retiro usa suggestedWithdraw del servidor. '
+          'Deuda, stock y capital live son snapshot actual (no siguen el período).',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: PosSaleUi.textFaint,
                 height: 1.35,
@@ -395,20 +415,43 @@ class _DeductionsExpansion extends StatelessWidget {
       ].join(' '),
     );
     final pay = deductions.payroll;
-    add('Nómina', pay?.amount);
+    add(
+      'Nómina',
+      pay?.amount,
+      detail: [
+        if ((pay?.dailyTotal ?? '').isNotEmpty) '${pay!.dailyTotal}/día',
+        if (pay?.days != null) '× ${pay!.days} d',
+      ].join(' '),
+    );
     for (final e in pay?.employees ?? const <KpiPayrollLine>[]) {
       if ((e.amount ?? '').isEmpty) continue;
       add('  · ${e.name ?? 'Empleado'}', e.amount);
     }
     final fixed = deductions.fixed;
     add('Fijos (luz/alquiler/transporte)', fixed?.amount);
-    if ((fixed?.electricity ?? '').isNotEmpty) {
-      add('  · Luz', fixed!.electricity);
+    if ((fixed?.utilities ?? '').isNotEmpty) {
+      add('  · Luz', fixed!.utilities);
     }
     if ((fixed?.rent ?? '').isNotEmpty) add('  · Alquiler', fixed!.rent);
     if ((fixed?.transport ?? '').isNotEmpty) {
       add('  · Transporte', fixed!.transport);
     }
+    final losses = deductions.losses;
+    add(
+      'Merma',
+      losses?.amount,
+      detail: losses?.movementCount == null
+          ? null
+          : '${losses!.movementCount} mov.',
+    );
+    final commissions = deductions.paymentCommissions;
+    add(
+      'Comisiones de pago',
+      commissions?.amount,
+      detail: commissions?.paymentCount == null
+          ? null
+          : '${commissions!.paymentCount} pagos',
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -781,6 +824,178 @@ class _MiniChip extends StatelessWidget {
       child: Text(
         label,
         style: const TextStyle(fontSize: 11, color: PosSaleUi.textMuted),
+      ),
+    );
+  }
+}
+
+class _TimezoneFallbackBanner extends StatelessWidget {
+  const _TimezoneFallbackBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+      ),
+      child: const Text(
+        'Zona horaria de respaldo (UTC). No confíes en Hoy/Ayer hasta '
+        'configurar America/Caracas en la tienda.',
+        style: TextStyle(color: Colors.orange, fontSize: 12, height: 1.35),
+      ),
+    );
+  }
+}
+
+class _SuggestedWithdrawChip extends StatelessWidget {
+  const _SuggestedWithdrawChip({
+    required this.amount,
+    required this.currency,
+  });
+
+  final String amount;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: PosSaleUi.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: PosSaleUi.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.payments_outlined, color: PosSaleUi.primary, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Te puedes llevar hoy ~${DashboardMoneyFormat.displayAmount(amount, currencyCode: currency)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: PosSaleUi.text,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'suggestedWithdraw del servidor — no es la ganancia real',
+                  style: TextStyle(fontSize: 11, color: PosSaleUi.textMuted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExplainWarnings extends StatelessWidget {
+  const _ExplainWarnings({required this.warnings});
+
+  final List<String> warnings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: PosSaleUi.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: PosSaleUi.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Avisos del cálculo',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          const SizedBox(height: 6),
+          for (final w in warnings)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '· $w',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: PosSaleUi.textMuted,
+                  height: 1.35,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CapitalLiveCard extends StatelessWidget {
+  const _CapitalLiveCard({required this.capital, required this.currency});
+
+  final KpiCapitalLive capital;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: PosSaleUi.surface2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: PosSaleUi.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Patrimonio (ahora)',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            capital.netInventoryEquity == null
+                ? '—'
+                : DashboardMoneyFormat.displayAmount(
+                    capital.netInventoryEquity!,
+                    currencyCode: currency,
+                  ),
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            [
+              if ((capital.inventoryCapital ?? '').isNotEmpty)
+                'Inv. ${DashboardMoneyFormat.displayAmount(capital.inventoryCapital!, currencyCode: currency)}',
+              if ((capital.payablesDue ?? '').isNotEmpty)
+                'Deuda ${DashboardMoneyFormat.displayAmount(capital.payablesDue!, currencyCode: currency)}',
+            ].join(' · '),
+            style: const TextStyle(fontSize: 12, color: PosSaleUi.textMuted),
+          ),
+          if ((capital.lossCostToday ?? '').isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Merma hoy ${DashboardMoneyFormat.displayAmount(capital.lossCostToday!, currencyCode: currency)}'
+              '${capital.lossMovementCountToday == null ? '' : ' · ${capital.lossMovementCountToday} mov.'}',
+              style: const TextStyle(fontSize: 12, color: PosSaleUi.textFaint),
+            ),
+          ],
+        ],
       ),
     );
   }
