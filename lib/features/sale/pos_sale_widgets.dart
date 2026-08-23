@@ -895,13 +895,13 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                           ? PosSaleUi.primary
                           : PosSaleUi.textMuted,
                     ),
-                    tooltip: 'Pago $functionalCode',
+                    tooltip: 'Agregar pago',
                   ),
                   if (mixedPaymentDetailLine != null &&
                       onClearMixedPayment != null) ...[
                     IconButton(
                       onPressed: onClearMixedPayment,
-                      tooltip: 'Quitar pago $functionalCode',
+                      tooltip: 'Quitar pagos',
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
                         minWidth: 30,

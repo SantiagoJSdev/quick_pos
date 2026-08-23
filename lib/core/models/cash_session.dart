@@ -88,12 +88,14 @@ class CashSessionSummaryResponse {
     required this.summary,
     this.warnings = const [],
     this.requireSuccessfulSyncAtClose = false,
+    this.capitalPhoto,
   });
 
   final CashSessionInfo session;
   final CashSessionSummaryBlock summary;
   final List<String> warnings;
   final bool requireSuccessfulSyncAtClose;
+  final CashCapitalPhoto? capitalPhoto;
 
   static CashSessionSummaryResponse? tryFromJson(Map<String, dynamic> json) {
     final session = CashSessionInfo.tryFromJson(
@@ -118,6 +120,33 @@ class CashSessionSummaryResponse {
       ),
       warnings: warnings,
       requireSuccessfulSyncAtClose: json['requireSuccessfulSyncAtClose'] == true,
+      capitalPhoto: CashCapitalPhoto.tryFromJson(
+        json['capitalPhoto'] is Map
+            ? Map<String, dynamic>.from(json['capitalPhoto'] as Map)
+            : null,
+      ),
+    );
+  }
+}
+
+/// Foto de patrimonio al cerrar caja — `docs/KPI_CONTRATO_FRONT.md` §7.
+class CashCapitalPhoto {
+  const CashCapitalPhoto({
+    this.date,
+    this.ok = false,
+    this.netInventoryEquity,
+  });
+
+  final String? date;
+  final bool ok;
+  final String? netInventoryEquity;
+
+  static CashCapitalPhoto? tryFromJson(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    return CashCapitalPhoto(
+      date: json['date']?.toString(),
+      ok: json['ok'] == true,
+      netInventoryEquity: json['netInventoryEquity']?.toString(),
     );
   }
 }

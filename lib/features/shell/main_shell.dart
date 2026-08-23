@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/inventory_api.dart';
+import '../../core/api/payment_methods_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/purchases_api.dart';
 import '../../core/api/sale_returns_api.dart';
@@ -43,6 +44,7 @@ class MainShell extends StatefulWidget {
     required this.productsApi,
     required this.salesApi,
     required this.cashSessionsApi,
+    required this.paymentMethodsApi,
     required this.purchasesApi,
     required this.saleReturnsApi,
     required this.suppliersApi,
@@ -61,6 +63,7 @@ class MainShell extends StatefulWidget {
   final ProductsApi productsApi;
   final SalesApi salesApi;
   final CashSessionsApi cashSessionsApi;
+  final PaymentMethodsApi paymentMethodsApi;
   final PurchasesApi purchasesApi;
   final SaleReturnsApi saleReturnsApi;
   final SuppliersApi suppliersApi;
@@ -600,6 +603,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 exchangeRatesApi: widget.exchangeRatesApi,
                 salesApi: widget.salesApi,
                 cashSessionsApi: widget.cashSessionsApi,
+                paymentMethodsApi: widget.paymentMethodsApi,
                 saleReturnsApi: widget.saleReturnsApi,
                 syncApi: widget.syncApi,
                 uploadsApi: widget.uploadsApi,

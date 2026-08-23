@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
+import '../../core/api/payment_methods_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/sale_returns_api.dart';
 import '../../core/api/sales_api.dart';
@@ -34,6 +35,7 @@ class SalesModuleScreen extends StatefulWidget {
     required this.exchangeRatesApi,
     required this.salesApi,
     required this.cashSessionsApi,
+    required this.paymentMethodsApi,
     required this.saleReturnsApi,
     required this.syncApi,
     required this.uploadsApi,
@@ -49,6 +51,7 @@ class SalesModuleScreen extends StatefulWidget {
   final ExchangeRatesApi exchangeRatesApi;
   final SalesApi salesApi;
   final CashSessionsApi cashSessionsApi;
+  final PaymentMethodsApi paymentMethodsApi;
   final SaleReturnsApi saleReturnsApi;
   final SyncApi syncApi;
   final UploadsApi uploadsApi;
@@ -86,6 +89,7 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
                       exchangeRatesApi: widget.exchangeRatesApi,
                       salesApi: widget.salesApi,
                       cashSessionsApi: widget.cashSessionsApi,
+                      paymentMethodsApi: widget.paymentMethodsApi,
                       syncApi: widget.syncApi,
                       catalogInvalidationBus: widget.catalogInvalidationBus,
                       localPrefs: widget.localPrefs,

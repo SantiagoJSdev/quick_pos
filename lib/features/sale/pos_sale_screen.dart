@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart' show RenderStack;
 import '../../core/api/api_error.dart';
 import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
+import '../../core/api/payment_methods_api.dart';
 import '../../core/api/products_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
@@ -21,6 +22,7 @@ import '../../core/models/catalog_product.dart';
 import '../../core/models/held_ticket.dart';
 import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/inventory_line.dart';
+import '../../core/models/payment_method.dart';
 import '../../core/models/pos_cart_line.dart';
 import '../../core/pos/money_string_math.dart';
 import '../../core/pos/pos_cash_advance.dart';
@@ -38,6 +40,7 @@ import '../shell/shell_online_scope.dart';
 import 'barcode_scanner_screen.dart';
 import 'pos_cart_quantity.dart';
 import 'pos_held_tickets_ui.dart';
+import 'pos_payment_sheet.dart';
 import 'pos_sale_sheets.dart';
 import 'pos_sale_ui_tokens.dart';
 import 'pos_sale_widgets.dart';
@@ -65,6 +68,7 @@ class PosSaleScreen extends StatefulWidget {
     required this.catalogInvalidationBus,
     required this.localPrefs,
     this.cashSessionsApi,
+    this.paymentMethodsApi,
     this.onRequestExit,
     this.onHydrateDevice,
   });
@@ -78,6 +82,7 @@ class PosSaleScreen extends StatefulWidget {
   final CatalogInvalidationBus catalogInvalidationBus;
   final LocalPrefs localPrefs;
   final CashSessionsApi? cashSessionsApi;
+  final PaymentMethodsApi? paymentMethodsApi;
 
   /// Si no es null (p. ej. módulo Ventas), muestra atrás en la barra superior.
   final VoidCallback? onRequestExit;
@@ -103,7 +108,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _paymentFunctionalCtrl = TextEditingController();
-  double _appliedFunctionalPayment = 0;
+  final List<PosAppliedPayment> _appliedPayments = [];
+  List<PaymentMethod> _paymentMethods = [];
   List<CatalogProduct> _all = [];
   final List<PosCartLine> _cart = [];
   List<InventoryLine> _inventoryCache = [];
@@ -1331,7 +1337,39 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       }
     }
 
+    unawaited(_refreshPaymentMethods());
+
     return true;
+  }
+
+  Future<void> _refreshPaymentMethods() async {
+    final api = widget.paymentMethodsApi;
+    if (api == null || !_shellOnline) return;
+    try {
+      final list = await api.listActive(widget.storeId);
+      if (!mounted || list.isEmpty) return;
+      setState(() => _paymentMethods = list);
+    } catch (e) {
+      debugPrint('[POS] payment-methods load failed: $e');
+    }
+  }
+
+  List<PaymentMethod> get _activePaymentMethods {
+    if (_paymentMethods.isNotEmpty) return _paymentMethods;
+    final func = _functionalCode;
+    if (func.isEmpty) return const [];
+    return [PaymentMethod.fallbackCash(func)];
+  }
+
+  PaymentMethod? _defaultCashMethod(String functionalCode) {
+    final code = 'CASH_${functionalCode.trim().toUpperCase()}';
+    for (final m in _activePaymentMethods) {
+      if (m.code.trim().toUpperCase() == code) return m;
+    }
+    for (final m in _activePaymentMethods) {
+      if (m.isCashLike) return m;
+    }
+    return null;
   }
 
   /// Hay catálogo + settings en memoria/cache para vender sin esperar red.
@@ -2120,7 +2158,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     return value.toStringAsFixed(2);
   }
 
-  double get _paymentFunctionalAmount => _appliedFunctionalPayment;
+  double get _paymentFunctionalAmount =>
+      _appliedPayments.fold(0.0, (a, p) => a + p.amountFunctional);
 
   double get _paymentFunctionalAppliedToSale {
     final total = _cartTotalFunctionalAmount;
@@ -2182,14 +2221,15 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   String get _remainingMixedLabel =>
       '$_remainingFunctionalLabel · $_remainingDocumentLabel';
 
-  /// Una línea compacta para el panel de cobro (pago mixto).
   String? get _mixedPaymentDetailLine {
     if (!_hasAnyMixedPaymentInput) return null;
-    final func = _functionalCode;
     final doc = _selectedDocumentCurrency ?? '';
     final remDoc = _cartTotalDocumentAmount - _paymentTotalInDocument;
     final remDocClamped = remDoc < 0 ? 0.0 : remDoc;
-    return '$func: ${_fmt2(_paymentFunctionalAmount)} · resta $doc: ${_fmt2(remDocClamped)}';
+    final methods = _appliedPayments
+        .map((p) => '${p.methodName}: ${_fmt2(p.amountFunctional)}')
+        .join(' · ');
+    return '$methods · resta $doc: ${_fmt2(remDocClamped)}';
   }
 
   double get _mixedChangeFunctional {
@@ -2197,44 +2237,24 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     return change > 0 ? change : 0;
   }
 
-  Future<void> _openUsdPaymentModal() async {
+  Future<void> _openPaymentSheet() async {
     final func = _functionalCode;
     if (func.isEmpty) return;
-    _paymentFunctionalCtrl.clear();
-    final accepted = await showDialog<double>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Pago en $func'),
-        content: TextField(
-          controller: _paymentFunctionalCtrl,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Monto',
-            hintText: '0.00',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final v = _parseAmountInput(_paymentFunctionalCtrl.text);
-              Navigator.pop(ctx, v);
-            },
-            child: const Text('Aceptar'),
-          ),
-        ],
-      ),
+    final remaining = max(
+      0.0,
+      _cartTotalFunctionalAmount - _paymentFunctionalAmount,
     );
-    if (!mounted || accepted == null || accepted <= 0) return;
-    setState(() {
-      _appliedFunctionalPayment += accepted;
-    });
+    final added = await showPosPaymentSheet(
+      context,
+      methods: _activePaymentMethods,
+      functionalCode: func,
+      remainingFunctional: remaining,
+    );
+    if (!mounted || added == null) return;
+    setState(() => _appliedPayments.add(added));
     _showCheckoutPanelMessage(
-      'Pago aplicado: ${_fmt2(accepted)} $func. $_remainingMixedLabel',
+      'Pago ${added.methodName}: ${_fmt2(added.amountFunctional)} $func. '
+      '$_remainingMixedLabel',
     );
   }
 
@@ -2312,22 +2332,44 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     required Map<String, dynamic> saleFxSnapshot,
   }) {
     final payments = <Map<String, dynamic>>[];
-    if (_paymentFunctionalAmount > 0) {
-      final fx = <String, dynamic>{...saleFxSnapshot};
+    final fx = <String, dynamic>{...saleFxSnapshot};
+    final totalSale = _cartTotalFunctionalAmount;
+    if (totalSale <= 0) return null;
+
+    final lines = _appliedPayments.isEmpty
+        ? () {
+            final cash = _defaultCashMethod(functionalCode);
+            if (cash == null) return <PosAppliedPayment>[];
+            return [
+              PosAppliedPayment(
+                methodCode: cash.code,
+                methodName: cash.name,
+                amountFunctional: totalSale,
+              ),
+            ];
+          }()
+        : List<PosAppliedPayment>.from(_appliedPayments);
+
+    var remaining = totalSale;
+    for (final p in lines) {
+      if (remaining <= 0) break;
+      final applied = min(p.amountFunctional, remaining);
+      if (applied <= 0) continue;
       payments.add({
-        'method': 'CASH_${functionalCode.toUpperCase()}',
-        'amount': _fmt2(_paymentFunctionalAppliedToSale),
+        'method': p.methodCode,
+        'amount': _fmt2(applied),
         'currencyCode': functionalCode.toUpperCase(),
         if (functionalCode.toUpperCase() != documentCode.toUpperCase())
           'fxSnapshot': Map<String, dynamic>.from(fx),
       });
+      remaining -= applied;
     }
     return payments.isEmpty ? null : payments;
   }
 
   void _clearMixedPaymentInputs() {
     _paymentFunctionalCtrl.clear();
-    _appliedFunctionalPayment = 0;
+    _appliedPayments.clear();
   }
 
   String _functionalFromDocument(String documentAmount) {
@@ -3279,8 +3321,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
                   cartNotEmpty: !cartEmpty,
                   cartFeedback: _cartFeedback,
                   cartFeedbackIsError: _cartFeedbackIsError,
-                  onOpenMixedPayment: _openUsdPaymentModal,
-                  onClearMixedPayment: _appliedFunctionalPayment > 0
+                  onOpenMixedPayment: _openPaymentSheet,
+                  onClearMixedPayment: _appliedPayments.isNotEmpty
                       ? () => setState(_clearMixedPaymentInputs)
                       : null,
                   mixedPaymentDetailLine: _mixedPaymentDetailLine,
