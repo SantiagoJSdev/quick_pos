@@ -352,12 +352,12 @@ class _TicketHistoryScreenState extends State<TicketHistoryScreen>
           ),
           content: SingleChildScrollView(
             child: Text(
-              'Se enviará sola al reconectar (sync en segundo plano al abrir la app '
-              'o cada ~240 s). También podés usar Sincronizar en Inicio.\n\n'
+              'Se enviará al servidor cuando toques Sincronizar o Cierres caja.\n\n'
               'Total: ${t.totalDocument} ${t.documentCurrencyCode}\n'
               '${t.totalFunctional != null && t.totalFunctional!.isNotEmpty ? '\$${t.totalFunctional}\n' : ''}'
               '${noLabel.isNotEmpty ? 'Nº ticket: ${noLabel.replaceFirst('#', '')}\n' : ''}'
               '\nProductos (copia local):\n$lines\n\n'
+              'Para anular/devolver: primero sincronizá para que exista en el servidor.\n\n'
               'ID interno (soporte):\n${t.saleId}',
               style: const TextStyle(color: PosSaleUi.textMuted, fontSize: 13),
             ),

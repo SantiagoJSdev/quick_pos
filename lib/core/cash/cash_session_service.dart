@@ -65,9 +65,7 @@ class CashSessionService {
             'Hay un cierre pendiente de enviar. Sincronizá antes de abrir otro turno.',
       );
     }
-    if (existing != null &&
-        existing.isOpen &&
-        !LocalCashSession.isZeroOpeningCash(existing.openingCash)) {
+    if (existing != null && existing.allowsPosSales) {
       return CashOpenResult(
         ok: true,
         alreadyOpen: true,
@@ -86,6 +84,7 @@ class CashSessionService {
       openedAtIso: existing?.isOpen == true ? existing!.openedAtIso : openedAt,
       openingCash: openingNorm,
       remoteId: existing?.isOpen == true ? existing!.remoteId : null,
+      openingCountedByUser: true,
     );
 
     if (!online) {
@@ -162,6 +161,7 @@ class CashSessionService {
         remoteId: remote.id,
         openingCash: openingNorm,
         transmitStatus: LocalCashSession.transmitSynced,
+        openingCountedByUser: true,
       );
       await prefs.saveLocalCashSession(linked);
       return CashOpenResult(

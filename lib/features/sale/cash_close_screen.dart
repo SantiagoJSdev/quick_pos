@@ -140,14 +140,14 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
         return;
       }
 
-      if (LocalCashSession.isZeroOpeningCash(session.openingCash)) {
+      if (!session.allowsPosSales) {
         if (!mounted) return;
         setState(() {
           _session = session;
           _loading = false;
           _error =
-              'Este turno tiene fondo 0 (apertura vieja). '
-              'Cerralo o volvé a Abrir caja desde POS para poner el monto.';
+              'Este turno no tiene apertura contada. '
+              'Entrá a POS y abrí caja con el fondo (puede ser 0).';
         });
         return;
       }

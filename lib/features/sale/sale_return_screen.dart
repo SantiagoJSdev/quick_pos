@@ -324,8 +324,8 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
       if (hit.status == RecentSaleTicket.statusQueued) {
         setState(() {
           _error =
-              'Ese ticket aún no llegó al servidor. Esperá la sincronización automática '
-              'y volvé a intentar, o usá el UUID si ya figura en General.';
+              'Ese ticket aún está en cola local (no llegó al servidor). '
+              'Tocá Sincronizar y después podés anular/devolver.';
         });
         return;
       }

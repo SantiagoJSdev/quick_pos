@@ -166,6 +166,7 @@ class LocalCashSession {
     this.countedCash,
     this.closeMode,
     this.notes,
+    this.openingCountedByUser = false,
   });
 
   static const statusOpen = 'OPEN';
@@ -187,6 +188,10 @@ class LocalCashSession {
   final String? closeMode;
   final String? notes;
 
+  /// True si el cajero pasó por «Abrir caja» (incluye fondo 0 intencional).
+  /// False = OPEN legado/zombie automático con `0.00`.
+  final bool openingCountedByUser;
+
   bool get isOpen => status == statusOpen;
   bool get isClosed => status == statusClosed;
   bool get needsTransmit =>
@@ -195,6 +200,9 @@ class LocalCashSession {
   /// OPEN local aún no creada en el servidor (`POST /cash-sessions` pendiente).
   bool get needsOpenTransmit =>
       isOpen && (remoteId == null || remoteId!.trim().isEmpty);
+
+  /// Puede entrar al POS: turno OPEN y apertura confirmada por el cajero.
+  bool get allowsPosSales => isOpen && openingCountedByUser;
 
   static bool isZeroOpeningCash(String? raw) {
     final n = double.tryParse((raw ?? '').trim().replaceAll(',', '.'));
@@ -211,6 +219,7 @@ class LocalCashSession {
     String? countedCash,
     String? closeMode,
     String? notes,
+    bool? openingCountedByUser,
     bool clearRemoteId = false,
   }) {
     return LocalCashSession(
@@ -226,6 +235,8 @@ class LocalCashSession {
       countedCash: countedCash ?? this.countedCash,
       closeMode: closeMode ?? this.closeMode,
       notes: notes ?? this.notes,
+      openingCountedByUser:
+          openingCountedByUser ?? this.openingCountedByUser,
     );
   }
 
@@ -242,6 +253,7 @@ class LocalCashSession {
     'countedCash': countedCash,
     'closeMode': closeMode,
     'notes': notes,
+    'openingCountedByUser': openingCountedByUser,
   };
 
   static LocalCashSession? tryFromJson(Map<String, dynamic> json) {
@@ -260,6 +272,9 @@ class LocalCashSession {
         opened.isEmpty) {
       return null;
     }
+    final countedFlag = json['openingCountedByUser'];
+    final countedByUser = countedFlag == true ||
+        countedFlag?.toString().toLowerCase() == 'true';
     return LocalCashSession(
       localId: localId,
       remoteId: json['remoteId']?.toString(),
@@ -273,6 +288,7 @@ class LocalCashSession {
       countedCash: json['countedCash']?.toString(),
       closeMode: json['closeMode']?.toString(),
       notes: json['notes']?.toString(),
+      openingCountedByUser: countedByUser,
     );
   }
 }

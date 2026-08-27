@@ -90,12 +90,10 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
       }
       return false;
     }
-    if (session != null &&
-        session.isOpen &&
-        !LocalCashSession.isZeroOpeningCash(session.openingCash)) {
+    if (session != null && session.allowsPosSales) {
       return true;
     }
-    // Sin OPEN, o zombie openingCash 0 → pantalla de conteo.
+    // Sin OPEN contada por el cajero (incluye zombie legado openingCash 0).
     final ok = await Navigator.of(navCtx).push<bool>(
       MaterialPageRoute<bool>(
         builder: (c) => CashOpenScreen(

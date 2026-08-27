@@ -114,8 +114,7 @@ class _CashOpenScreenState extends State<CashOpenScreen> {
     });
     try {
       final existing = await _service.loadOpenSession(widget.storeId);
-      if (existing != null &&
-          !LocalCashSession.isZeroOpeningCash(existing.openingCash)) {
+      if (existing != null && existing.allowsPosSales) {
         if (!mounted) return;
         Navigator.of(context).pop(true);
         return;
