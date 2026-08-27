@@ -14,22 +14,6 @@ import '../../core/sync/device_hydrate_sync.dart';
 import '../shell/shell_online_scope.dart';
 import 'pos_sale_ui_tokens.dart';
 
-String _formatCloseSuccessMessage(String base, CashCapitalPhoto? photo) {
-  if (photo?.ok != true) return base;
-  final date = photo!.date?.trim();
-  final equity = photo.netInventoryEquity?.trim();
-  final buf = StringBuffer(base);
-  buf.writeln();
-  buf.writeln();
-  buf.write('Patrimonio tienda registrado');
-  if (date != null && date.isNotEmpty) buf.write(' ($date)');
-  if (equity != null && equity.isNotEmpty) buf.write(': $equity');
-  buf.write('.');
-  buf.writeln();
-  buf.write('No es el resumen de ventas de este POS.');
-  return buf.toString();
-}
-
 /// Flujo **Cerrar caja** (conteo efectivo + sync + resumen + confirmar).
 class CashCloseScreen extends StatefulWidget {
   const CashCloseScreen({
@@ -318,8 +302,7 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
       );
 
       if (!mounted) return;
-      final photo = result.remoteSummary?.capitalPhoto;
-      final message = _formatCloseSuccessMessage(result.message, photo);
+      final message = result.message;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
