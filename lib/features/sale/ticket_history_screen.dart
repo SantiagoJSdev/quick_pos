@@ -744,11 +744,17 @@ class _DeviceHistoryTabState extends State<_DeviceHistoryTab> {
                     itemBuilder: (context, i) {
                       final t = _items[i];
                       final queued = t.status == RecentSaleTicket.statusQueued;
+                      final returned =
+                          t.status == RecentSaleTicket.statusReturned;
                       final dt = DateTime.tryParse(t.recordedAtIso);
+                      final statusLabel = returned
+                          ? 'Devuelta / anulada'
+                          : (queued
+                              ? 'Pendiente envío'
+                              : 'Registrada');
                       final sub = dt != null
-                          ? '${dt.toLocal().toString().substring(0, 19)} · '
-                                '${queued ? "Pendiente envío (sync auto.)" : "Registrada"}'
-                          : t.status;
+                          ? '${dt.toLocal().toString().substring(0, 19)} · $statusLabel'
+                          : statusLabel;
                       final no = _ticketShortNumberLabel(t.displayCode);
                       final docLine = no.isEmpty
                           ? '${t.totalDocument} ${t.documentCurrencyCode}'

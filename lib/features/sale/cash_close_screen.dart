@@ -75,7 +75,10 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
       prefs: widget.localPrefs,
       api: widget.cashSessionsApi,
     );
-    unawaited(_bootstrap());
+    // ShellOnlineScope no se puede leer en initState (InheritedWidget).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_bootstrap());
+    });
   }
 
   @override
@@ -464,8 +467,24 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
                     children: [
                       _kv('Tickets (local)', '${p?.ticketsCount ?? '—'}'),
                       _kv(
-                        'Ventas approx. (local)',
-                        p?.salesTotalDocumentApprox ?? '—',
+                        p?.salesPreferFunctional == true
+                            ? 'Ventas approx. (local, USD)'
+                            : 'Ventas approx. (local)',
+                        p?.salesTotalLabel ?? '—',
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        p?.salesPreferFunctional == true
+                            ? 'Suma tickets del turno en moneda principal. '
+                                'No incluye anuladas/devueltas. '
+                                'El resumen del servidor es la referencia al cerrar.'
+                            : 'Suma en moneda documento (p. ej. Bs). '
+                                'No confundir con USD. Anuladas se excluyen al marcarse.',
+                        style: const TextStyle(
+                          color: PosSaleUi.textFaint,
+                          fontSize: 11,
+                          height: 1.3,
+                        ),
                       ),
                       _kv(
                         'Pendientes en cola',

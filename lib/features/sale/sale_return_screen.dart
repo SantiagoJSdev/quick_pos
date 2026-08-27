@@ -469,6 +469,8 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
     try {
       await widget.saleReturnsApi.createSaleReturn(widget.storeId, restBody);
       if (!mounted) return;
+      await widget.localPrefs.markRecentSaleTicketReturned(originalSaleId);
+      if (!mounted) return;
       widget.catalogInvalidationBus.invalidateFromLocalMutation(
         productIds: productIds,
       );
@@ -512,6 +514,7 @@ class _SaleReturnScreenState extends State<SaleReturnScreen> {
             opTimestampIso: DateTime.now().toUtc().toIso8601String(),
           ),
         );
+        await widget.localPrefs.markRecentSaleTicketReturned(originalSaleId);
         if (!mounted) return;
         widget.catalogInvalidationBus.invalidateFromLocalMutation(
           productIds: productIds,

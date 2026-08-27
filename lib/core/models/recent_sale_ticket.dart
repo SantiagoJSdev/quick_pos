@@ -14,6 +14,8 @@ class RecentSaleTicket {
 
   static const statusSynced = 'synced';
   static const statusQueued = 'queued';
+  /// Devolución/anulación registrada (no suma en cierre local).
+  static const statusReturned = 'returned';
 
   final String storeId;
   final String saleId;
@@ -21,7 +23,7 @@ class RecentSaleTicket {
   final String documentCurrencyCode;
   final String recordedAtIso;
 
-  /// [statusSynced] = respuesta `POST /sales`; [statusQueued] = cola offline.
+  /// [statusSynced] = en servidor; [statusQueued] = cola; [statusReturned] = anulada/devuelta.
   final String status;
 
   /// Número corto del día (ej. `00042`) para copiar / devoluciones; opcional en datos viejos.

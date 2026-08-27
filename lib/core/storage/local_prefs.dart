@@ -1324,6 +1324,24 @@ class LocalPrefs {
     if (changed) await saveRecentSaleTickets(out);
   }
 
+  /// Tras devolución/anulación exitosa: no contar en cierre local.
+  Future<void> markRecentSaleTicketReturned(String saleId) async {
+    if (saleId.isEmpty) return;
+    final list = await loadRecentSaleTickets();
+    var changed = false;
+    final out = <RecentSaleTicket>[];
+    for (final t in list) {
+      if (t.saleId == saleId &&
+          t.status != RecentSaleTicket.statusReturned) {
+        changed = true;
+        out.add(t.copyWith(status: RecentSaleTicket.statusReturned));
+      } else {
+        out.add(t);
+      }
+    }
+    if (changed) await saveRecentSaleTickets(out);
+  }
+
   /// Busca en historial **de hoy** de este dispositivo por número corto (4–5 dígitos con o sin ceros).
   Future<RecentSaleTicket?> findRecentSaleTicketByDisplayCode(
     String storeId,

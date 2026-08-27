@@ -2,6 +2,7 @@ import '../api/api_error.dart';
 import '../api/cash_sessions_api.dart';
 import '../idempotency/client_mutation_id.dart';
 import '../models/cash_session.dart';
+import '../models/recent_sale_ticket.dart';
 import '../pos/pos_terminal_info.dart';
 import '../storage/local_prefs.dart';
 
@@ -259,13 +260,28 @@ class CashSessionService {
     final opened = DateTime.tryParse(session.openedAtIso)?.toLocal();
     final tickets = await prefs.loadRecentSaleTickets();
     var ticketCount = 0;
-    double salesSum = 0;
+    double salesSumFunctional = 0;
+    double salesSumDocument = 0;
+    var hasFunctional = false;
+    String? functionalCode;
+    String? documentCode;
     for (final t in tickets) {
       if (t.storeId != storeId) continue;
+      if (t.status == RecentSaleTicket.statusReturned) continue;
       final at = DateTime.tryParse(t.recordedAtIso)?.toLocal();
       if (opened != null && at != null && at.isBefore(opened)) continue;
       ticketCount++;
-      salesSum += double.tryParse(t.totalDocument.replaceAll(',', '.')) ?? 0;
+      documentCode ??= t.documentCurrencyCode;
+      final docAmt =
+          double.tryParse(t.totalDocument.replaceAll(',', '.')) ?? 0;
+      salesSumDocument += docAmt;
+      final tf = t.totalFunctional?.trim();
+      if (tf != null && tf.isNotEmpty) {
+        hasFunctional = true;
+        functionalCode ??= t.functionalCurrencyCode ?? 'USD';
+        salesSumFunctional +=
+            double.tryParse(tf.replaceAll(',', '.')) ?? 0;
+      }
     }
     final pending = await pendingSalesDeclaration(storeId);
     final inv = await prefs.loadInventoryCache(storeId);
@@ -274,9 +290,16 @@ class CashSessionService {
       final q = line.quantityAsDouble ?? 0;
       if (q < 0) negative++;
     }
+    final useFunc = hasFunctional;
+    final code = useFunc
+        ? (functionalCode ?? 'USD')
+        : (documentCode ?? '');
+    final amount = useFunc ? salesSumFunctional : salesSumDocument;
     return LocalClosePreview(
       ticketsCount: ticketCount,
-      salesTotalDocumentApprox: salesSum.toStringAsFixed(2),
+      salesTotalDocumentApprox: amount.toStringAsFixed(2),
+      salesCurrencyCode: code,
+      salesPreferFunctional: useFunc,
       pendingSalesCount: pending.length,
       negativeSkuCount: negative,
       pendingSales: pending,
@@ -438,13 +461,24 @@ class LocalClosePreview {
     required this.pendingSalesCount,
     required this.negativeSkuCount,
     required this.pendingSales,
+    this.salesCurrencyCode = '',
+    this.salesPreferFunctional = false,
   });
 
   final int ticketsCount;
+  /// Monto de referencia (funcional si hay datos; si no, documento).
   final String salesTotalDocumentApprox;
+  final String salesCurrencyCode;
+  final bool salesPreferFunctional;
   final int pendingSalesCount;
   final int negativeSkuCount;
   final List<PendingSaleCloseDeclaration> pendingSales;
+
+  String get salesTotalLabel {
+    final c = salesCurrencyCode.trim();
+    if (c.isEmpty) return salesTotalDocumentApprox;
+    return '$salesTotalDocumentApprox $c';
+  }
 }
 
 class CashCloseResult {
