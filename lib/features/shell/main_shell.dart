@@ -34,6 +34,10 @@ import '../suppliers/suppliers_module_screen.dart';
 /// Navegación principal: **Inicio**, **Inventario**, **Venta** (menú → POS / historial / precios), **Proveedores** (C1/C2).
 ///
 /// Usa [IndexedStack] para conservar el estado de cada pestaña al cambiar.
+///
+/// **Sin sync en segundo plano:** no hay timer, ni hydrate al resume/arranque/
+/// reconectar. El backend solo se toca con Sincronizar, cierre/apertura de caja,
+/// Inventario, Proveedores, o un gesto explícito (Poner Online / reintentar).
 class MainShell extends StatefulWidget {
   const MainShell({
     super.key,
@@ -78,29 +82,20 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
+class _MainShellState extends State<MainShell> {
   int _index = 0;
 
-  static const _syncDebounce = Duration(seconds: 8);
-  static const _syncPeriodic = Duration(seconds: 240);
-  static const _healthProbeBase = Duration(seconds: 15);
-  static const _healthProbeMax = Duration(seconds: 120);
   static const _probeFailsToGoOffline = 2;
 
-  Timer? _periodicSync;
-  Timer? _healthProbeTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   List<ConnectivityResult>? _lastConn;
-  DateTime? _lastAutoSyncAt;
-  bool _autoSyncBusy = false;
+  bool _hydrateBusy = false;
   bool _manualHomeSyncBusy = false;
   String? _hydrateStep;
   bool _isOnline = true;
   bool _backendReachable = true;
   bool _manualForceOffline = false;
   int _consecutiveProbeFailures = 0;
-  Duration _healthProbeInterval = _healthProbeBase;
-  bool _healthProbeInFlight = false;
   bool _inventoryModuleEnabled = false;
   bool _suppliersModuleEnabled = false;
 
@@ -111,35 +106,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _isOnline = !_manualForceOffline && hasNetwork && _backendReachable;
   }
 
-  void _rescheduleHealthProbe() {
-    _healthProbeTimer?.cancel();
-    _healthProbeTimer = Timer(_healthProbeInterval, () {
-      unawaited(_probeBackendHealth());
-    });
-  }
-
-  void _onProbeSuccess({required bool wasReachable}) {
+  void _onBackendOk() {
     _consecutiveProbeFailures = 0;
-    _healthProbeInterval = _healthProbeBase;
-    final becameReachable = !_backendReachable;
-    if (becameReachable) {
+    if (!_backendReachable) {
       _backendReachable = true;
       if (mounted) setState(_recomputeOnlineFlag);
-    }
-    if ((!wasReachable || becameReachable) &&
-        _backendReachable &&
-        !_manualForceOffline &&
-        mounted) {
-      unawaited(_runAutoSync(reason: 'backend-recovered'));
     }
   }
 
   void _onProbeFailure() {
     _consecutiveProbeFailures++;
-    // Backoff mientras el backend no responde.
-    final nextMs = (_healthProbeInterval.inMilliseconds * 2)
-        .clamp(_healthProbeBase.inMilliseconds, _healthProbeMax.inMilliseconds);
-    _healthProbeInterval = Duration(milliseconds: nextMs);
     if (_consecutiveProbeFailures >= _probeFailsToGoOffline &&
         _backendReachable) {
       _backendReachable = false;
@@ -150,7 +126,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     unawaited(_restoreManualOfflineThenStart());
     unawaited(_loadDeviceModules());
   }
@@ -179,71 +154,37 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _manualForceOffline = forced;
       _recomputeOnlineFlag();
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_runAutoSync(reason: 'startup'));
-    });
     await _initConnectivityHooks();
   }
 
   Future<void> _initConnectivityHooks() async {
     try {
       _lastConn = await Connectivity().checkConnectivity();
+      final hasNetwork = connectivityAppearsOnline(_lastConn!);
+      // Optimista: con red asumimos backend OK hasta un fallo explícito.
+      _backendReachable = hasNetwork;
       _recomputeOnlineFlag();
       if (mounted) setState(() {});
     } catch (_) {}
     _connSub = Connectivity().onConnectivityChanged.listen((next) {
       final prev = _lastConn;
       _lastConn = List<ConnectivityResult>.from(next);
+      final nowOnline = connectivityAppearsOnline(next);
+      if (!nowOnline) {
+        _backendReachable = false;
+      } else if (connectivityTransitionedToOnline(prev, next)) {
+        // Solo bandera local: no hydrate ni probe al reconectar.
+        _backendReachable = true;
+        _consecutiveProbeFailures = 0;
+      }
       if (mounted) {
         setState(_recomputeOnlineFlag);
       }
-      if (connectivityTransitionedToOnline(prev, next)) {
-        unawaited(_runAutoSync(reason: 'connectivity'));
-      }
     });
-    _periodicSync = Timer.periodic(_syncPeriodic, (_) {
-      unawaited(_runAutoSync(reason: 'periodic'));
-    });
-    unawaited(_probeBackendHealth());
   }
 
-  Future<void> _probeBackendHealth() async {
-    if (!mounted) return;
-    if (_healthProbeInFlight) {
-      _rescheduleHealthProbe();
-      return;
-    }
-    _healthProbeInFlight = true;
-    try {
-      final hasNetwork = connectivityAppearsOnline(
-        _lastConn ?? const [ConnectivityResult.none],
-      );
-      if (!hasNetwork) {
-        _consecutiveProbeFailures = _probeFailsToGoOffline;
-        if (_backendReachable) {
-          _backendReachable = false;
-          if (mounted) setState(_recomputeOnlineFlag);
-        }
-        return;
-      }
-      final wasReachable = _backendReachable;
-      try {
-        await widget.storesApi.getBusinessSettings(widget.storeId);
-        _onProbeSuccess(wasReachable: wasReachable);
-      } catch (e) {
-        traceApiConnectivity(
-          'Health probe GET business-settings falló '
-          '(storeId=${widget.storeId}, fallos=$_consecutiveProbeFailures): $e',
-        );
-        _onProbeFailure();
-      }
-    } finally {
-      _healthProbeInFlight = false;
-      if (mounted) _rescheduleHealthProbe();
-    }
-  }
-
-  /// Reintento explícito (Inventario / Inicio): probe inmediato + sync si hay red.
+  /// Un solo GET settings (gesto explícito: Poner Online / reintentar Inventario).
+  /// No hidrata ni envía cola.
   Future<void> _requestReconnect({String reason = 'manual-retry'}) async {
     if (!mounted) return;
     if (_manualForceOffline) {
@@ -253,45 +194,24 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       });
       unawaited(widget.localPrefs.setManualForceOffline(false));
     }
-    _healthProbeInterval = _healthProbeBase;
-    await _probeBackendHealth();
-    if (_backendReachable && !_manualForceOffline) {
-      unawaited(_runAutoSync(reason: reason));
-    }
-  }
-
-  /// [startup] y [backend-recovered] sin debounce; el resto evita ráfagas.
-  Future<void> _runAutoSync({required String reason}) async {
-    if (!mounted) return;
-    if (_manualForceOffline) return;
-    if (_autoSyncBusy) return;
-    final now = DateTime.now();
-    if (reason != 'startup' &&
-        reason != 'backend-recovered' &&
-        _lastAutoSyncAt != null &&
-        now.difference(_lastAutoSyncAt!) < _syncDebounce) {
-      return;
-    }
-    if (reason == 'periodic' ||
-        reason == 'resumed' ||
-        reason == 'backend-recovered') {
-      try {
-        final c = await Connectivity().checkConnectivity();
-        if (!connectivityAppearsOnline(c)) return;
-      } catch (_) {
+    try {
+      final c = await Connectivity().checkConnectivity();
+      _lastConn = List<ConnectivityResult>.from(c);
+      if (!connectivityAppearsOnline(c)) {
+        _backendReachable = false;
+        if (mounted) setState(_recomputeOnlineFlag);
         return;
       }
-    }
-    _autoSyncBusy = true;
-    _lastAutoSyncAt = now;
+    } catch (_) {}
     try {
-      await _hydrateDevice();
+      await widget.storesApi.getBusinessSettings(widget.storeId);
+      _onBackendOk();
+      if (mounted) setState(_recomputeOnlineFlag);
+      traceApiConnectivity('Reconnect OK ($reason)');
     } catch (e) {
-      traceApiConnectivity(
-        'hydrate / post-sync falló (no cambia online): $e',
-      );
-    } finally {
-      _autoSyncBusy = false;
+      traceApiConnectivity('Reconnect probe falló ($reason): $e');
+      _onProbeFailure();
+      if (mounted) setState(_recomputeOnlineFlag);
     }
   }
 
@@ -347,7 +267,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   /// Sync manual desde Inicio: **solo online**. Loading hasta terminar.
-  /// Obliga a refrescar catálogo + tasa desde el servidor (no usa caché vieja).
   Future<void> _runManualSyncFromHome() async {
     if (!mounted || _manualHomeSyncBusy) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -370,7 +289,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _hydrateStep = 'Comprobando servidor…';
     });
     try {
-      // Comprobar red + backend antes de marcar “sincronizando”.
       try {
         final c = await Connectivity().checkConnectivity();
         if (!connectivityAppearsOnline(c)) {
@@ -431,13 +349,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         return;
       }
 
-      // Evitar que el auto-sync concurrente pise este ciclo.
-      while (_autoSyncBusy) {
+      while (_hydrateBusy) {
         await Future<void>.delayed(const Duration(milliseconds: 120));
         if (!mounted) return;
       }
-      _autoSyncBusy = true;
-      _lastAutoSyncAt = DateTime.now();
+      _hydrateBusy = true;
 
       final result = await _hydrateDevice(
         onProgress: (s) {
@@ -445,6 +361,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         },
       );
       if (!mounted) return;
+      if (result.downloadedOk || result.ok) {
+        _onBackendOk();
+      }
       messenger?.hideCurrentSnackBar();
       messenger?.showSnackBar(
         SnackBar(
@@ -464,7 +383,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         ),
       );
     } finally {
-      _autoSyncBusy = false;
+      _hydrateBusy = false;
       if (mounted) {
         setState(() {
           _manualHomeSyncBusy = false;
@@ -475,17 +394,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      unawaited(_runAutoSync(reason: 'resumed'));
-    }
-  }
-
-  @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _periodicSync?.cancel();
-    _healthProbeTimer?.cancel();
     _connSub?.cancel();
     super.dispose();
   }
@@ -523,8 +432,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   unawaited(_loadDeviceModules());
                 },
                 onBackendTransportFailure: () {
-                  // No bajar a offline al primer fallo de transporte: cuenta
-                  // como un fallo de probe (hace falta 2 seguidos).
                   if (!mounted) return;
                   _onProbeFailure();
                   if (mounted) setState(_recomputeOnlineFlag);
@@ -553,8 +460,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     );
                     return;
                   }
-                  // Reconectar: no forzar offline ni borrar "alcanzable".
-                  // Probe en silencio; UI sigue con cache hasta confirmar.
                   if (_manualForceOffline) {
                     setState(() {
                       _manualForceOffline = false;

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 ///
 /// [isOnline]: operación normal contra backend (red + servidor + no forzado offline).
 /// [manualForceOffline]: el usuario eligió «Poner Offline» hasta revertir en Inicio.
-/// [backendReachable]: último resultado del health probe (sync automático no corre si
-/// [manualForceOffline], pero el probe sigue para UX p. ej. banner en POS).
+/// [backendReachable]: último resultado conocido del servidor (gesto Sync /
+/// Poner Online / fallo de transporte). Sin probe periódico en segundo plano.
 class ShellOnlineScope extends InheritedWidget {
   const ShellOnlineScope({
     super.key,

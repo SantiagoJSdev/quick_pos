@@ -34,7 +34,7 @@ typedef PendingSalesFlushResult = SyncFlushResult;
 
 Completer<void>? _flushGate;
 
-/// Un solo flush a la vez (shell auto-sync + POS sincronizar).
+/// Un solo flush a la vez (Sincronizar manual / cierre de caja).
 Future<T> _withSyncFlushLock<T>(Future<T> Function() action) async {
   while (_flushGate != null) {
     await _flushGate!.future;

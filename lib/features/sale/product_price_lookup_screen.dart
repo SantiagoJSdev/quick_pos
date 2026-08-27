@@ -2,16 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../core/api/api_error.dart';
 import '../../core/api/products_api.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/storage/local_prefs.dart';
-import '../shell/shell_online_scope.dart';
 import 'barcode_scanner_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 
 /// Consulta rápida de precio de lista (catálogo) sin agregar al ticket.
-/// Offline-first: lee cache local; la red solo en pull-to-refresh o refresh silencioso.
+/// Solo cache local; actualizá el catálogo con Sincronizar en Inicio/POS.
 class ProductPriceLookupScreen extends StatefulWidget {
   const ProductPriceLookupScreen({
     super.key,
@@ -43,7 +41,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
-    unawaited(_bootstrapFromCacheThenMaybeSilentRefresh());
+    unawaited(_reloadFromCache());
   }
 
   @override
@@ -77,45 +75,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
     });
   }
 
-  Future<void> _bootstrapFromCacheThenMaybeSilentRefresh() async {
-    final cached = await widget.localPrefs.loadCatalogProductsCache();
-    if (!mounted) return;
-    if (cached.isNotEmpty) {
-      setState(() {
-        _all = cached.where((p) => p.active).toList();
-        _loading = false;
-        _error = null;
-        _fromCacheOnly = true;
-      });
-      await _refreshStaleFlags();
-      if (!mounted) return;
-      final online = ShellOnlineScope.of(context);
-      if (online) {
-        unawaited(_silentNetworkRefresh());
-      }
-      return;
-    }
-
-    // Sin cache: solo entonces spinner + red (si hay).
-    if (!mounted) return;
-    final online = ShellOnlineScope.of(context);
-    if (!online) {
-      setState(() {
-        _loading = false;
-        _error =
-            'Sin catálogo en este dispositivo. Conectate y usá Sincronizar en Inicio.';
-      });
-      return;
-    }
-    await _loadFromNetwork(showSpinner: true);
-  }
-
-  Future<void> _silentNetworkRefresh() async {
-    if (_refreshing) return;
-    await _loadFromNetwork(showSpinner: false);
-  }
-
-  Future<void> _loadFromNetwork({required bool showSpinner}) async {
+  Future<void> _reloadFromCache({bool showSpinner = true}) async {
     if (showSpinner) {
       setState(() {
         _loading = true;
@@ -124,61 +84,26 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
     } else {
       setState(() => _refreshing = true);
     }
-    try {
-      final list = await widget.productsApi.listProducts(
-        widget.storeId,
-        includeInactive: false,
-      );
-      await widget.localPrefs.saveCatalogProductsCache(list);
-      await widget.localPrefs.markLastSuccessfulSyncNow();
-      if (!mounted) return;
+    final cached = await widget.localPrefs.loadCatalogProductsCache();
+    if (!mounted) return;
+    if (cached.isNotEmpty) {
       setState(() {
-        _all = list.where((p) => p.active).toList();
+        _all = cached.where((p) => p.active).toList();
         _loading = false;
         _refreshing = false;
         _error = null;
-        _fromCacheOnly = false;
+        _fromCacheOnly = true;
       });
       await _refreshStaleFlags();
-    } on ApiError catch (e) {
-      final cached = await widget.localPrefs.loadCatalogProductsCache();
-      if (!mounted) return;
-      if (cached.isNotEmpty) {
-        setState(() {
-          _all = cached.where((p) => p.active).toList();
-          _error = null;
-          _loading = false;
-          _refreshing = false;
-          _fromCacheOnly = true;
-        });
-        await _refreshStaleFlags();
-      } else {
-        setState(() {
-          _error = e.userMessageForSupport;
-          _loading = false;
-          _refreshing = false;
-        });
-      }
-    } catch (e) {
-      final cached = await widget.localPrefs.loadCatalogProductsCache();
-      if (!mounted) return;
-      if (cached.isNotEmpty) {
-        setState(() {
-          _all = cached.where((p) => p.active).toList();
-          _error = null;
-          _loading = false;
-          _refreshing = false;
-          _fromCacheOnly = true;
-        });
-        await _refreshStaleFlags();
-      } else {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-          _refreshing = false;
-        });
-      }
+      return;
     }
+    setState(() {
+      _all = [];
+      _loading = false;
+      _refreshing = false;
+      _error =
+          'Sin catálogo en este dispositivo. Tocá Sincronizar en Inicio.';
+    });
   }
 
   List<CatalogProduct> get _filtered {
@@ -327,7 +252,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                             const SizedBox(height: 16),
                             FilledButton(
                               onPressed: () =>
-                                  _loadFromNetwork(showSpinner: true),
+                                  _reloadFromCache(showSpinner: true),
                               child: const Text('Reintentar'),
                             ),
                           ],
@@ -336,7 +261,7 @@ class _ProductPriceLookupScreenState extends State<ProductPriceLookupScreen> {
                     )
                   : RefreshIndicator(
                       color: PosSaleUi.primary,
-                      onRefresh: () => _loadFromNetwork(showSpinner: false),
+                      onRefresh: () => _reloadFromCache(showSpinner: false),
                       child: _filtered.isEmpty
                           ? ListView(
                               physics: const AlwaysScrollableScrollPhysics(),

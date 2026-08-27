@@ -38,8 +38,9 @@ class DeviceDashboardController extends ChangeNotifier {
 
   void startAutoRefresh() {
     _timer?.cancel();
+    _timer = null;
+    // Sin poll periódico: solo carga al abrir (refresh manual en la UI).
     unawaited(refresh());
-    _timer = Timer.periodic(refreshInterval, (_) => unawaited(refresh()));
   }
 
   void stopAutoRefresh() {

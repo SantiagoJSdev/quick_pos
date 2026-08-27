@@ -4,7 +4,6 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderStack;
 
-import '../../core/api/api_error.dart';
 import '../../core/api/cash_sessions_api.dart';
 import '../../core/api/exchange_rates_api.dart';
 import '../../core/api/payment_methods_api.dart';
@@ -96,9 +95,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     with WidgetsBindingObserver {
   static const double _kSearchRowExtent = 72;
   static const int _kSearchVisibleRows = 5;
-
-  /// Si el servidor no responde a tiempo, dejamos de mostrar el spinner y usamos caché (como offline).
-  static const Duration _kPosOnlineLoadBudget = Duration(seconds: 8);
 
   /// Min vertical space kept for ticket + list; search suggestions use the rest (up to 5 rows).
   static const double _kSearchCartReserveMin = 96;
@@ -212,31 +208,17 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     unawaited(_refreshInventoryCacheSilent());
   }
 
-  /// Catálogo desde cache (+ red en background si online). No toca [_loading].
+  /// Catálogo solo desde cache local (sin GET al backend).
   Future<void> _refreshCatalogSilent() async {
     final cached = await widget.localPrefs.loadCatalogProductsCache();
     if (!mounted) return;
-    if (cached.isNotEmpty) {
-      final active = cached.where((p) => p.active).toList()
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      setState(() {
-        _all = active.isNotEmpty ? active : cached;
-        if (_error != null && _all.isNotEmpty) _error = null;
-      });
-    }
-    if (!_shellOnline) return;
-    try {
-      final list = await widget.productsApi.listProducts(
-        widget.storeId,
-        includeInactive: false,
-      );
-      if (!mounted) return;
-      await widget.localPrefs.saveCatalogProductsCache(list);
-      if (!mounted) return;
-      setState(() => _all = list);
-    } catch (e) {
-      debugPrint('[POS] silent catalog refresh failed: $e');
-    }
+    if (cached.isEmpty) return;
+    final active = cached.where((p) => p.active).toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    setState(() {
+      _all = active.isNotEmpty ? active : cached;
+      if (_error != null && _all.isNotEmpty) _error = null;
+    });
   }
 
   Future<void> _refreshPendingCount() async {
@@ -468,8 +450,11 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       try {
         final result = await hydrate(requireEmptyQueue: false);
         if (!mounted) return;
+        await _bootstrapShellOfflineLoad();
         await _refreshPendingCount();
         await _refreshInventoryCacheSilent();
+        await _refreshCatalogSilent();
+        await _refreshPaymentMethods();
         _showCheckoutPanelMessage(
           result.userMessage,
           error: !result.ok,
@@ -707,30 +692,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
 
   String get _functionalCode => _settings?.functionalCurrency.code ?? '';
 
-  Future<SaleFxPair?> _fetchFxPair(String func, String doc) async {
-    try {
-      final r = await widget.exchangeRatesApi.getLatest(
-        widget.storeId,
-        baseCurrencyCode: func,
-        quoteCurrencyCode: doc,
-      );
-      return SaleFxPair(rate: r, inverted: false);
-    } on ApiError catch (e) {
-      if (e.statusCode != 404) rethrow;
-      try {
-        final r2 = await widget.exchangeRatesApi.getLatest(
-          widget.storeId,
-          baseCurrencyCode: doc,
-          quoteCurrencyCode: func,
-        );
-        return SaleFxPair(rate: r2, inverted: true);
-      } on ApiError catch (e2) {
-        if (e2.statusCode == 404) return null;
-        rethrow;
-      }
-    }
-  }
-
   Future<void> _reloadFxForDocumentCurrency({
     bool rebuildDocumentLinePrices = true,
   }) async {
@@ -752,69 +713,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       if (mounted) setState(() {});
       return;
     }
-    if (!_shellOnline) {
-      await _applyFxFromPrefsCacheOnly();
-      if (rebuildDocumentLinePrices) {
-        _rebuildCartDocumentPrices();
-      }
-      if (mounted) setState(() {});
-      return;
-    }
-    try {
-      final pair = await _fetchFxPair(func, doc);
-      if (!mounted) return;
-      setState(() {
-        _fxPair = pair;
-        if (pair == null) {
-          _fxLoadError =
-              'No hay tasa $func → $doc. Registrá la tasa en Inicio o usá moneda documento = funcional.';
-        }
-      });
-      if (pair != null) {
-        await widget.localPrefs.savePosFxPairCache(
-          storeId: widget.storeId,
-          functionalCode: func,
-          documentCode: doc,
-          pair: pair,
-        );
-      }
-    } on ApiError catch (e) {
-      final cached = await widget.localPrefs.loadPosFxPairCache(
-        storeId: widget.storeId,
-        functionalCode: func,
-        documentCode: doc,
-      );
-      if (!mounted) return;
-      if (cached != null) {
-        setState(() {
-          _fxPair = cached;
-          _fxLoadError = null;
-        });
-      } else {
-        setState(() {
-          _fxPair = null;
-          _fxLoadError = e.userMessageForSupport;
-        });
-      }
-    } catch (e) {
-      final cached = await widget.localPrefs.loadPosFxPairCache(
-        storeId: widget.storeId,
-        functionalCode: func,
-        documentCode: doc,
-      );
-      if (!mounted) return;
-      if (cached != null) {
-        setState(() {
-          _fxPair = cached;
-          _fxLoadError = null;
-        });
-      } else {
-        setState(() {
-          _fxPair = null;
-          _fxLoadError = e.toString();
-        });
-      }
-    }
+    // Tasa solo desde cache: se actualiza con Sincronizar / apertura / cierre.
+    await _applyFxFromPrefsCacheOnly();
     if (rebuildDocumentLinePrices) {
       _rebuildCartDocumentPrices();
     }
@@ -1219,129 +1119,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     _rebuildCartDocumentPrices();
   }
 
-  /// `true` → [_load] debe hacer `loading=false` y refrescos; `false` → ya se cerró el loading (p. ej. catálogo vacío).
-  Future<bool> _loadFromNetworkWithCacheFallback({
-    bool rebuildCartPrices = true,
-  }) async {
-    try {
-      final list = await widget.productsApi.listProducts(
-        widget.storeId,
-        includeInactive: false,
-      );
-      if (!mounted) return false;
-      await widget.localPrefs.saveCatalogProductsCache(list);
-      if (!mounted) return false;
-      setState(() => _all = list);
-    } on ApiError catch (e) {
-      final cached = await widget.localPrefs.loadCatalogProductsCache();
-      if (!mounted) return false;
-      if (cached.isEmpty) {
-        setState(() {
-          _all = [];
-          _error = e.userMessageForSupport;
-          _loading = false;
-        });
-        return false;
-      }
-      setState(() => _all = cached);
-    } catch (e) {
-      final cached = await widget.localPrefs.loadCatalogProductsCache();
-      if (!mounted) return false;
-      if (cached.isEmpty) {
-        setState(() {
-          _all = [];
-          _error = e.toString();
-          _loading = false;
-        });
-        return false;
-      }
-      setState(() => _all = cached);
-    }
-
-    try {
-      final settings = await widget.storesApi.getBusinessSettings(
-        widget.storeId,
-      );
-      if (!mounted) return false;
-      await widget.localPrefs.saveBusinessSettingsCache(
-        widget.storeId,
-        _businessSettingsToCacheMap(settings),
-      );
-      if (!mounted) return false;
-      final doc =
-          settings.defaultSaleDocCurrency?.code ??
-          settings.functionalCurrency.code;
-      setState(() {
-        _settings = settings;
-        _contextError = null;
-        if (_cart.isEmpty) {
-          _selectedDocumentCurrency = doc;
-        }
-      });
-      await _reloadFxForDocumentCurrency(
-        rebuildDocumentLinePrices: rebuildCartPrices,
-      );
-    } on ApiError catch (e) {
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(
-        widget.storeId,
-      );
-      if (!mounted) return false;
-      if (cached != null) {
-        final doc =
-            cached.defaultSaleDocCurrency?.code ??
-            cached.functionalCurrency.code;
-        setState(() {
-          _settings = cached;
-          _contextError = null;
-          if (_cart.isEmpty) {
-            _selectedDocumentCurrency = doc;
-          }
-        });
-        await _reloadFxForDocumentCurrency(
-          rebuildDocumentLinePrices: rebuildCartPrices,
-        );
-      } else {
-        setState(() {
-          _settings = null;
-          _contextError = e.userMessageForSupport;
-          _fxPair = null;
-          _selectedDocumentCurrency = null;
-        });
-      }
-    } catch (e) {
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(
-        widget.storeId,
-      );
-      if (!mounted) return false;
-      if (cached != null) {
-        final doc =
-            cached.defaultSaleDocCurrency?.code ??
-            cached.functionalCurrency.code;
-        setState(() {
-          _settings = cached;
-          _contextError = null;
-          if (_cart.isEmpty) {
-            _selectedDocumentCurrency = doc;
-          }
-        });
-        await _reloadFxForDocumentCurrency(
-          rebuildDocumentLinePrices: rebuildCartPrices,
-        );
-      } else {
-        setState(() {
-          _settings = null;
-          _contextError = e.toString();
-          _fxPair = null;
-          _selectedDocumentCurrency = null;
-        });
-      }
-    }
-
-    unawaited(_refreshPaymentMethods());
-
-    return true;
-  }
-
   Future<void> _refreshPaymentMethods() async {
     final api = widget.paymentMethodsApi;
     if (api == null || !_shellOnline) return;
@@ -1376,119 +1153,35 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   bool get _hasUsablePosLocalData =>
       _all.isNotEmpty && _settings != null && _selectedDocumentCurrency != null;
 
-  /// Refresh de red sin spinner (tras pintar desde cache).
-  Future<void> _silentNetworkRefresh() async {
-    if (!_shellOnline || !mounted) return;
-    try {
-      // No reprecia el carrito abierto: precio congelado al agregar.
-      await _loadFromNetworkWithCacheFallback(
-        rebuildCartPrices: false,
-      ).timeout(_kPosOnlineLoadBudget);
-    } on TimeoutException {
-      debugPrint('[POS load] silent network refresh timeout (cache ya visible)');
-    } catch (e) {
-      debugPrint('[POS load] silent network refresh failed: $e');
-    }
-  }
-
   Future<void> _load() async {
     debugPrint(
       '[POS load] start online=$_shellOnline loadingWas=$_loading '
       'hasLocal=$_hasUsablePosLocalData',
     );
 
-    // 1) Siempre intentar cache primero (online u offline).
+    // Solo cache local: productos/precios/tasa vienen de Sincronizar (o apertura/cierre).
     await _bootstrapShellOfflineLoad();
     if (!mounted) return;
 
     final usable = _hasUsablePosLocalData ||
         (_all.isNotEmpty && _settings != null);
 
-    if (usable) {
-      setState(() {
-        _loading = false;
-        _error = _all.isEmpty
-            ? 'Sin productos en caché. Sincronizá desde Inicio.'
-            : null;
-      });
-      await _restoreActiveCartDraftIfNeeded();
-      await _refreshPendingCount();
-      await _refreshHeldCount();
-      unawaited(_refreshInventoryCacheSilent());
-      debugPrint('[POS load] painted from cache; silent refresh=$_shellOnline');
-      if (_shellOnline) {
-        unawaited(_silentNetworkRefresh());
-      }
-      return;
-    }
-
-    // 2) Sin cache usable: solo entonces spinner / red.
-    if (!_shellOnline) {
-      setState(() => _loading = false);
-      await _restoreActiveCartDraftIfNeeded();
-      await _refreshPendingCount();
-      await _refreshHeldCount();
-      debugPrint('[POS load] end offline no-cache branch');
-      return;
-    }
-
     setState(() {
-      _loading = true;
-      _error = null;
+      _loading = false;
+      if (!usable) {
+        _error =
+            'Sin datos locales. Tocá Sincronizar o sincronizá desde Inicio.';
+      } else if (_all.isEmpty) {
+        _error = 'Sin productos en caché. Sincronizá desde Inicio.';
+      } else {
+        _error = null;
+      }
     });
-
-    var shouldFinalizeLoading = true;
-    try {
-      shouldFinalizeLoading = await _loadFromNetworkWithCacheFallback().timeout(
-        _kPosOnlineLoadBudget,
-      );
-    } on TimeoutException {
-      if (!mounted) return;
-      await _bootstrapShellOfflineLoad();
-      if (!mounted) return;
-      setState(() => _loading = false);
-      await _restoreActiveCartDraftIfNeeded();
-      await _refreshPendingCount();
-      await _refreshHeldCount();
-      debugPrint('[POS load] end online timeout→cache branch');
-      return;
-    }
-
-    if (!mounted) return;
-    if (shouldFinalizeLoading) {
-      setState(() => _loading = false);
-      await _restoreActiveCartDraftIfNeeded();
-      await _refreshPendingCount();
-      await _refreshHeldCount();
-    }
-    debugPrint(
-      '[POS load] end mounted=$mounted loading=$_loading '
-      'finalize=$shouldFinalizeLoading err=$_error',
-    );
-  }
-
-  Map<String, dynamic> _businessSettingsToCacheMap(BusinessSettings s) {
-    return {
-      'id': s.id,
-      'storeId': s.storeId,
-      'defaultMarginPercent': s.defaultMarginPercent,
-      'functionalCurrency': {
-        'code': s.functionalCurrency.code,
-        'name': s.functionalCurrency.name,
-      },
-      'defaultSaleDocCurrency': s.defaultSaleDocCurrency == null
-          ? null
-          : {
-              'code': s.defaultSaleDocCurrency!.code,
-              'name': s.defaultSaleDocCurrency!.name,
-            },
-      'store': {'name': s.storeName, 'type': s.storeType},
-      'allowNegativeStockAtPos': s.allowNegativeStockAtPos,
-      'warnOnNegativeStock': s.warnOnNegativeStock,
-      'blockRestrictedProductsWithoutStock':
-          s.blockRestrictedProductsWithoutStock,
-      'requireSuccessfulSyncAtClose': s.requireSuccessfulSyncAtClose,
-    };
+    await _restoreActiveCartDraftIfNeeded();
+    await _refreshPendingCount();
+    await _refreshHeldCount();
+    unawaited(_refreshInventoryCacheSilent());
+    debugPrint('[POS load] painted from cache only (no background network)');
   }
 
   String? _documentPriceLabel(CatalogProduct p) {
@@ -2031,16 +1724,12 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (!mounted) return;
 
     _showCheckoutPanelMessage(
-      _shellOnline
-          ? 'Venta registrada.'
-          : 'Venta registrada. Se sincronizará al reconectar.',
+      'Venta registrada. Pendiente de enviar con Sincronizar o Cerrar caja.',
       error: false,
-      duration: Duration(seconds: _shellOnline ? 2 : 5),
+      duration: const Duration(seconds: 3),
     );
 
-    if (_shellOnline) {
-      unawaited(_runSyncCycle(silent: true, doPull: false));
-    }
+    // Cola local: no flush automático. Sale con Sincronizar o Cerrar caja.
   }
 
   PosCartLine _cloneCartLine(PosCartLine l) {

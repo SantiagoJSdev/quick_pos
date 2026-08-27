@@ -263,19 +263,21 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     );
   }
 
-  Future<void> _loadDeviceDashboardAccess() async {
+  Future<void> _loadDeviceDashboardAccess({bool allowNetwork = false}) async {
     final deviceId = _deviceId ?? await widget.localPrefs.getOrCreateDeviceId();
     if (!mounted) return;
     setState(() => _deviceAccessLoading = true);
+    final canHitNetwork =
+        allowNetwork && widget.onlineStatus && !widget.forcedOffline;
     final visible = await widget.dashboardRepository
         .operationalDashboardVisibleCached(
           widget.storeId,
           deviceId,
-          online: widget.onlineStatus && !widget.forcedOffline,
+          online: canHitNetwork,
         );
     if (!mounted) return;
     DeviceDashboardConfig? config;
-    if (widget.onlineStatus && !widget.forcedOffline) {
+    if (canHitNetwork) {
       try {
         config = await widget.dashboardRepository.fetchDeviceConfig(
           widget.storeId,
@@ -286,22 +288,28 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
     if (!mounted) return;
     setState(() {
       _operationalDashboardVisible = visible;
-      _deviceDashboardConfig = config;
+      if (config != null) _deviceDashboardConfig = config;
       _deviceAccessLoading = false;
     });
   }
 
-  Future<BusinessSettings> _loadSettingsWithCache() async {
+  Future<BusinessSettings> _loadSettingsWithCache({
+    bool allowNetwork = false,
+  }) async {
+    final cached = await widget.localPrefs.loadBusinessSettingsCache(
+      widget.storeId,
+    );
+    if (cached != null && !allowNetwork) {
+      _settingsFromCache = true;
+      return cached;
+    }
     if (!widget.onlineStatus || widget.forcedOffline) {
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(
-        widget.storeId,
-      );
       if (cached != null) {
         _settingsFromCache = true;
         return cached;
       }
       throw StateError(
-        'Sin configuración en caché. Conectate o esperá a recuperar red.',
+        'Sin configuración en caché. Tocá Sincronizar cuando haya red.',
       );
     }
     try {
@@ -328,9 +336,6 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
       if (_isLikelyTransportFailure(e)) {
         widget.onBackendTransportFailure();
       }
-      final cached = await widget.localPrefs.loadBusinessSettingsCache(
-        widget.storeId,
-      );
       if (cached != null) {
         _settingsFromCache = true;
         return cached;
@@ -363,11 +368,11 @@ class _StoreDashboardScreenState extends State<StoreDashboardScreen> {
 
   Future<void> _refresh() async {
     setState(() {
-      _future = _loadSettingsWithCache();
+      _future = _loadSettingsWithCache(allowNetwork: true);
     });
     await Future.wait([
       _future,
-      _loadDeviceDashboardAccess(),
+      _loadDeviceDashboardAccess(allowNetwork: true),
       _loadDeviceModules(),
     ]);
   }
