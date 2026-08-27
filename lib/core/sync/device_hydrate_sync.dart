@@ -78,6 +78,12 @@ Future<DeviceHydrateResult> hydrateDeviceFromServer({
           online: true,
         );
       } catch (_) {}
+      try {
+        await cashSessions.tryTransmitPendingOpen(
+          storeId: storeId,
+          online: true,
+        );
+      } catch (_) {}
     }
 
     final cycle = await runSyncCycle(

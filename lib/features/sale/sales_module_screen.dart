@@ -10,10 +10,13 @@ import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
 import '../../core/api/uploads_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
+import '../../core/models/cash_session.dart';
+import '../../core/pos/pos_terminal_info.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/device_hydrate_sync.dart';
 import '../../core/widgets/quickmarket_branding.dart';
 import 'cash_close_screen.dart';
+import 'cash_open_screen.dart';
 import 'pos_sale_screen.dart';
 import 'pos_sale_ui_tokens.dart';
 import 'pending_sync_ops_screen.dart';
@@ -69,6 +72,43 @@ class SalesModuleScreen extends StatefulWidget {
 class _SalesModuleScreenState extends State<SalesModuleScreen> {
   final GlobalKey<NavigatorState> _nestedNavKey = GlobalKey<NavigatorState>();
 
+  Future<bool> _ensureCashOpen(BuildContext navCtx) async {
+    final terminal = await PosTerminalInfo.load(widget.localPrefs);
+    final session = await widget.localPrefs.loadLocalCashSession(
+      storeId: widget.storeId,
+      deviceId: terminal.deviceId,
+    );
+    if (session != null && session.needsTransmit) {
+      if (navCtx.mounted) {
+        ScaffoldMessenger.of(navCtx).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Hay un cierre pendiente de enviar. Sincronizá antes de vender.',
+            ),
+          ),
+        );
+      }
+      return false;
+    }
+    if (session != null &&
+        session.isOpen &&
+        !LocalCashSession.isZeroOpeningCash(session.openingCash)) {
+      return true;
+    }
+    // Sin OPEN, o zombie openingCash 0 → pantalla de conteo.
+    final ok = await Navigator.of(navCtx).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (c) => CashOpenScreen(
+          storeId: widget.storeId,
+          localPrefs: widget.localPrefs,
+          cashSessionsApi: widget.cashSessionsApi,
+          onHydrateDevice: widget.onHydrateDevice,
+        ),
+      ),
+    );
+    return ok == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Navigator(
@@ -79,8 +119,11 @@ class _SalesModuleScreenState extends State<SalesModuleScreen> {
           return MaterialPageRoute<void>(
             settings: settings,
             builder: (navCtx) => _VentasMenuPage(
-              onOpenPos: () {
-                Navigator.of(navCtx).push<void>(
+              onOpenPos: () async {
+                final opened = await _ensureCashOpen(navCtx);
+                if (!opened || !navCtx.mounted) return;
+                if (!mounted) return;
+                await Navigator.of(navCtx).push<void>(
                   MaterialPageRoute<void>(
                     builder: (c) => PosSaleScreen(
                       storeId: widget.storeId,
@@ -194,7 +237,7 @@ class _VentasMenuPage extends StatelessWidget {
     required this.onOpenCerrarCaja,
   });
 
-  final VoidCallback onOpenPos;
+  final Future<void> Function() onOpenPos;
   final VoidCallback onOpenHistorial;
   final VoidCallback onOpenPrecios;
   final VoidCallback onOpenDevolucion;
@@ -218,8 +261,8 @@ class _VentasMenuPage extends StatelessWidget {
             _VentasTile(
               icon: Icons.shopping_cart_outlined,
               title: 'POS — Facturar ticket',
-              subtitle: 'Buscar productos, escanear y cobrar como siempre',
-              onTap: onOpenPos,
+              subtitle: 'Abrí caja con el fondo y cobrá',
+              onTap: () => onOpenPos(),
             ),
             const SizedBox(height: 12),
             _VentasTile(

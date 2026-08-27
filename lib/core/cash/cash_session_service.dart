@@ -5,7 +5,7 @@ import '../models/cash_session.dart';
 import '../pos/pos_terminal_info.dart';
 import '../storage/local_prefs.dart';
 
-/// Apertura automática (sin UI de fondo) + helpers de cierre.
+/// Apertura explícita con fondo contado + helpers de cierre.
 class CashSessionService {
   CashSessionService({
     required this.prefs,
@@ -15,81 +15,216 @@ class CashSessionService {
   final LocalPrefs prefs;
   final CashSessionsApi api;
 
-  /// Garantiza sesión OPEN local. Si hay red, sincroniza con `POST /cash-sessions`
-  /// (`openingCash: 0.00` — sin pantalla de apertura).
-  Future<LocalCashSession> ensureOpenSession({
+  Future<LocalCashSession?> loadOpenSession(String storeId) async {
+    final terminal = await PosTerminalInfo.load(prefs);
+    final session = await prefs.loadLocalCashSession(
+      storeId: storeId,
+      deviceId: terminal.deviceId,
+    );
+    if (session == null || !session.isOpen) return null;
+    return session;
+  }
+
+  /// True si este dispositivo ya tiene turno OPEN (puede entrar al POS).
+  Future<bool> hasOpenSession(String storeId) async {
+    final s = await loadOpenSession(storeId);
+    return s != null;
+  }
+
+  /// Abre turno con [openingCashFunctional] (siempre moneda funcional, ej. USD).
+  ///
+  /// Online: `POST /cash-sessions` (si hay OPEN remota con fondo 0, pide actualizar;
+  /// si fondo ≠ 0, error para cerrar primero).
+  /// Offline: guarda OPEN local; Sync transmitirá después.
+  Future<CashOpenResult> openCountedSession({
     required String storeId,
     required bool online,
+    required String openingCashFunctional,
   }) async {
+    final opening = openingCashFunctional.trim().replaceAll(',', '.');
+    final parsed = double.tryParse(opening);
+    if (parsed == null || parsed < 0) {
+      return const CashOpenResult(
+        ok: false,
+        message: 'Ingresá un monto de apertura válido (≥ 0).',
+      );
+    }
+    final openingNorm = parsed.toStringAsFixed(2);
+
     final terminal = await PosTerminalInfo.load(prefs);
     final deviceId = terminal.deviceId;
+
     final existing = await prefs.loadLocalCashSession(
       storeId: storeId,
       deviceId: deviceId,
     );
-    if (existing != null && existing.isOpen) {
-      if (online && (existing.remoteId == null || existing.remoteId!.isEmpty)) {
-        return _linkOrOpenRemote(existing, terminal.appVersion, online: online);
-      }
-      return existing;
-    }
-
-    // Sesión cerrada pendiente de transmitir: no abrir otra hasta resolver.
     if (existing != null && existing.needsTransmit) {
-      return existing;
+      return const CashOpenResult(
+        ok: false,
+        message:
+            'Hay un cierre pendiente de enviar. Sincronizá antes de abrir otro turno.',
+      );
+    }
+    if (existing != null &&
+        existing.isOpen &&
+        !LocalCashSession.isZeroOpeningCash(existing.openingCash)) {
+      return CashOpenResult(
+        ok: true,
+        alreadyOpen: true,
+        session: existing,
+        message: 'Ya hay un turno abierto.',
+      );
     }
 
-    final local = LocalCashSession(
-      localId: ClientMutationId.newId(),
+    final openedAt = DateTime.now().toUtc().toIso8601String();
+    var local = LocalCashSession(
+      localId: existing?.localId ?? ClientMutationId.newId(),
       storeId: storeId,
       deviceId: deviceId,
       status: LocalCashSession.statusOpen,
       transmitStatus: LocalCashSession.transmitSynced,
-      openedAtIso: DateTime.now().toUtc().toIso8601String(),
-      openingCash: '0.00',
+      openedAtIso: existing?.isOpen == true ? existing!.openedAtIso : openedAt,
+      openingCash: openingNorm,
+      remoteId: existing?.isOpen == true ? existing!.remoteId : null,
     );
 
     if (!online) {
-      await prefs.saveLocalCashSession(local);
-      return local;
-    }
-
-    return _linkOrOpenRemote(local, terminal.appVersion, online: true);
-  }
-
-  Future<LocalCashSession> _linkOrOpenRemote(
-    LocalCashSession local,
-    String appVersion, {
-    required bool online,
-  }) async {
-    if (!online) {
-      await prefs.saveLocalCashSession(local);
-      return local;
-    }
-    try {
-      final current = await api.getCurrent(
-        local.storeId,
-        deviceId: local.deviceId,
+      await prefs.saveLocalCashSession(
+        local.copyWith(clearRemoteId: true),
       );
-      final remote = current ??
-          await api.openSession(
-            local.storeId,
-            deviceId: local.deviceId,
-            openingCash: local.openingCash,
-            appVersion: appVersion,
+      final saved = await prefs.loadLocalCashSession(
+        storeId: storeId,
+        deviceId: deviceId,
+      );
+      return CashOpenResult(
+        ok: true,
+        session: saved ?? local,
+        offline: true,
+        message:
+            'Turno abierto sin internet. Vas a vender con los datos guardados '
+            'en este teléfono. Sincronizá cuando haya red.',
+      );
+    }
+
+    try {
+      final current = await api.getCurrent(storeId, deviceId: deviceId);
+      if (current != null && current.isOpen) {
+        if (!LocalCashSession.isZeroOpeningCash(current.openingCash)) {
+          // Turno real en servidor: no pisar.
+          final linked = local.copyWith(
+            remoteId: current.id,
+            openingCash: current.openingCash ?? local.openingCash,
           );
+          await prefs.saveLocalCashSession(linked);
+          return CashOpenResult(
+            ok: false,
+            session: linked,
+            message:
+                'Hay un turno abierto en el servidor con fondo '
+                '${current.openingCash}. Cerralo antes de abrir otro.',
+          );
+        }
+        // Zombie openingCash 0: POST con fondo contado (backend debe actualizar).
+      }
+
+      // Contrato actual (CASH_SESSIONS.md): deviceId + openingCash + appVersion.
+      // NO mandar clientOpenedAt hasta que el back lo acepte (pedido pendiente).
+      final remote = await api.openSession(
+        storeId,
+        deviceId: deviceId,
+        openingCash: openingNorm,
+        appVersion: terminal.appVersion,
+      );
+
+      // Si el backend devolvió OPEN con fondo ≠ 0 distinto al pedido, no pisamos.
+      if (!LocalCashSession.isZeroOpeningCash(remote.openingCash) &&
+          remote.openingCash != null &&
+          remote.openingCash!.trim().replaceAll(',', '.') != openingNorm) {
+        final remoteAmt =
+            double.tryParse(remote.openingCash!.replaceAll(',', '.')) ?? -1;
+        if (remoteAmt > 0 && (remoteAmt - parsed).abs() > 0.001) {
+          final linked = local.copyWith(
+            remoteId: remote.id,
+            openingCash: remote.openingCash,
+          );
+          await prefs.saveLocalCashSession(linked);
+          return CashOpenResult(
+            ok: false,
+            session: linked,
+            message:
+                'Hay un turno abierto con fondo ${remote.openingCash}. '
+                'Cerralo antes de abrir otro.',
+          );
+        }
+      }
+
       final linked = local.copyWith(
         remoteId: remote.id,
+        openingCash: openingNorm,
         transmitStatus: LocalCashSession.transmitSynced,
       );
       await prefs.saveLocalCashSession(linked);
-      return linked;
-    } on ApiError {
-      await prefs.saveLocalCashSession(local);
-      return local;
+      return CashOpenResult(
+        ok: true,
+        session: linked,
+        message: 'Turno abierto. Fondo: $openingNorm (moneda principal).',
+      );
+    } on ApiError catch (e) {
+      return CashOpenResult(
+        ok: false,
+        message:
+            'No se pudo abrir en el servidor (HTTP ${e.statusCode}).\n'
+            '${e.userMessageForSupport}',
+      );
+    } catch (e) {
+      return CashOpenResult(
+        ok: false,
+        message: 'No se pudo abrir en el servidor.\n$e',
+      );
+    }
+  }
+
+  /// Si hay OPEN local sin remoteId, intenta `POST /cash-sessions`.
+  Future<bool> tryTransmitPendingOpen({
+    required String storeId,
+    required bool online,
+  }) async {
+    if (!online) return false;
+    final terminal = await PosTerminalInfo.load(prefs);
+    final session = await prefs.loadLocalCashSession(
+      storeId: storeId,
+      deviceId: terminal.deviceId,
+    );
+    if (session == null || !session.needsOpenTransmit) return false;
+    try {
+      final current = await api.getCurrent(
+        storeId,
+        deviceId: terminal.deviceId,
+      );
+      if (current != null &&
+          current.isOpen &&
+          !LocalCashSession.isZeroOpeningCash(current.openingCash)) {
+        // Ya hay turno real remoto: vincular sin pisar fondo.
+        await prefs.saveLocalCashSession(
+          session.copyWith(
+            remoteId: current.id,
+            openingCash: current.openingCash ?? session.openingCash,
+          ),
+        );
+        return true;
+      }
+      final remote = await api.openSession(
+        storeId,
+        deviceId: terminal.deviceId,
+        openingCash: session.openingCash,
+        appVersion: terminal.appVersion,
+      );
+      await prefs.saveLocalCashSession(
+        session.copyWith(remoteId: remote.id),
+      );
+      return true;
     } catch (_) {
-      await prefs.saveLocalCashSession(local);
-      return local;
+      return false;
     }
   }
 
@@ -148,133 +283,95 @@ class CashSessionService {
     );
   }
 
-  /// Cierra en local y, si hay red + remoteId, llama `POST .../close`.
+  /// Cierra en servidor (ONLINE). No abre sesión automáticamente.
+  /// Si falla el POST, **no** guarda cierre local `pending_transmit`.
   Future<CashCloseResult> closeSession({
     required String storeId,
-    required bool online,
     required String countedCash,
     String? notes,
     LocalClosePreview? preview,
   }) async {
     final terminal = await PosTerminalInfo.load(prefs);
-    var session = await prefs.loadLocalCashSession(
-      storeId: storeId,
-      deviceId: terminal.deviceId,
-    );
-    if (session == null || !session.isOpen) {
-      if (online) {
-        session = await ensureOpenSession(storeId: storeId, online: true);
-      }
-    }
-    session ??= await prefs.loadLocalCashSession(
+    final session = await prefs.loadLocalCashSession(
       storeId: storeId,
       deviceId: terminal.deviceId,
     );
     if (session == null || !session.isOpen) {
       return const CashCloseResult(
         ok: false,
-        message: 'No hay caja abierta en este dispositivo.',
+        message: 'No hay caja abierta. Abrí el turno antes de cerrar.',
       );
     }
-    var openSession = session;
+    final remoteId = session.remoteId?.trim() ?? '';
+    if (remoteId.isEmpty) {
+      return const CashCloseResult(
+        ok: false,
+        message:
+            'La apertura aún no está en el servidor. Tocá Sincronizar e intentá de nuevo.',
+      );
+    }
 
     final pending = preview?.pendingSales ??
         await pendingSalesDeclaration(storeId);
-    final closeMode = online &&
-            openSession.remoteId != null &&
-            openSession.remoteId!.trim().isNotEmpty
-        ? 'ONLINE'
-        : 'OFFLINE';
 
-    CashSessionSummaryResponse? remoteSummary;
-    var transmit = LocalCashSession.transmitSynced;
-    String? message;
-
-    if (closeMode == 'ONLINE') {
-      try {
-        remoteSummary = await api.closeSession(
-          storeId,
-          openSession.remoteId!,
-          closeMode: 'ONLINE',
+    try {
+      final remoteSummary = await api.closeSession(
+        storeId,
+        remoteId,
+        closeMode: 'ONLINE',
+        countedCash: countedCash,
+        pendingSales: pending,
+        notes: notes,
+      );
+      final closed = session.copyWith(
+        status: LocalCashSession.statusClosed,
+        transmitStatus: LocalCashSession.transmitSynced,
+        closedAtIso: DateTime.now().toUtc().toIso8601String(),
+        countedCash: countedCash,
+        closeMode: 'ONLINE',
+        notes: notes,
+      );
+      await prefs.saveLocalCashSession(closed);
+      return CashCloseResult(
+        ok: true,
+        message: 'Caja cerrada y enviada al servidor.',
+        session: closed,
+        remoteSummary: remoteSummary,
+      );
+    } on ApiError catch (e) {
+      if (e.statusCode == 409) {
+        // Ya cerrada en server.
+        final closed = session.copyWith(
+          status: LocalCashSession.statusClosed,
+          transmitStatus: LocalCashSession.transmitSynced,
+          closedAtIso: DateTime.now().toUtc().toIso8601String(),
           countedCash: countedCash,
-          pendingSales: pending,
+          closeMode: 'ONLINE',
           notes: notes,
         );
-        transmit = LocalCashSession.transmitSynced;
-        message = 'Caja cerrada y enviada al servidor.';
-      } catch (e) {
-        transmit = LocalCashSession.transmitPending;
-        message =
-            'Caja cerrada en el dispositivo. Pendiente transmitir: $e';
+        await prefs.saveLocalCashSession(closed);
+        return CashCloseResult(
+          ok: true,
+          message: 'La caja ya estaba cerrada en el servidor.',
+          session: closed,
+        );
       }
-    } else {
-      transmit = LocalCashSession.transmitPending;
-      message =
-          'Caja cerrada · pendiente transmitir (sin red o sin sesión remota).';
-      if (online &&
-          (openSession.remoteId == null ||
-              openSession.remoteId!.trim().isEmpty)) {
-        try {
-          final linked = await _linkOrOpenRemote(
-            openSession,
-            terminal.appVersion,
-            online: true,
-          );
-          openSession = linked;
-          if (linked.remoteId != null && linked.remoteId!.isNotEmpty) {
-            remoteSummary = await api.closeSession(
-              storeId,
-              linked.remoteId!,
-              closeMode: online ? 'ONLINE' : 'OFFLINE',
-              countedCash: countedCash,
-              pendingSales: pending,
-              notes: notes,
-            );
-            transmit = LocalCashSession.transmitSynced;
-            message = 'Caja cerrada y enviada al servidor.';
-          }
-        } catch (_) {
-          transmit = LocalCashSession.transmitPending;
-        }
-      } else if (online && openSession.remoteId != null) {
-        try {
-          remoteSummary = await api.closeSession(
-            storeId,
-            openSession.remoteId!,
-            closeMode: 'OFFLINE',
-            countedCash: countedCash,
-            pendingSales: pending,
-            notes: notes,
-          );
-          transmit = LocalCashSession.transmitSynced;
-          message = 'Caja cerrada (modo OFFLINE declarado) en el servidor.';
-        } catch (e) {
-          transmit = LocalCashSession.transmitPending;
-          message = 'Caja cerrada localmente · pendiente transmitir: $e';
-        }
-      }
+      return CashCloseResult(
+        ok: false,
+        message: 'No se pudo cerrar en el servidor. La caja sigue abierta.\n'
+            '${e.userMessage}',
+        session: session,
+      );
+    } catch (e) {
+      return CashCloseResult(
+        ok: false,
+        message: 'No se pudo cerrar en el servidor. La caja sigue abierta.\n$e',
+        session: session,
+      );
     }
-
-    final closed = openSession.copyWith(
-      status: LocalCashSession.statusClosed,
-      transmitStatus: transmit,
-      closedAtIso: DateTime.now().toUtc().toIso8601String(),
-      countedCash: countedCash,
-      closeMode: closeMode,
-      notes: notes,
-    );
-    await prefs.saveLocalCashSession(closed);
-
-    return CashCloseResult(
-      ok: true,
-      message: message ?? 'Caja cerrada.',
-      session: closed,
-      remoteSummary: remoteSummary,
-      needsTransmit: transmit == LocalCashSession.transmitPending,
-    );
   }
 
-  /// Reintenta enviar un cierre `pending_transmit` si hay red.
+  /// Reintenta enviar un cierre `pending_transmit` viejo (migración Fase 1).
   Future<bool> tryTransmitPendingClose({
     required String storeId,
     required bool online,
@@ -286,28 +383,16 @@ class CashSessionService {
       deviceId: terminal.deviceId,
     );
     if (session == null || !session.needsTransmit) return false;
-    final pending = await pendingSalesDeclaration(storeId);
     var remoteId = session.remoteId;
     if (remoteId == null || remoteId.isEmpty) {
-      try {
-        final linked = await _linkOrOpenRemote(
-          session.copyWith(status: LocalCashSession.statusOpen),
-          terminal.appVersion,
-          online: true,
-        );
-        // Si ya estaba closed, abrimos remota solo para poder cerrar declaración —
-        // mejor: open current or open then close with OFFLINE.
-        remoteId = linked.remoteId;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
-    if (remoteId == null || remoteId.isEmpty) return false;
+    final pending = await pendingSalesDeclaration(storeId);
     try {
       await api.closeSession(
         storeId,
         remoteId,
-        closeMode: 'OFFLINE',
+        closeMode: 'ONLINE',
         countedCash: session.countedCash ?? '0.00',
         pendingSales: pending,
         notes: session.notes ?? 'Cierre pendiente transmitido',
@@ -318,7 +403,6 @@ class CashSessionService {
       return true;
     } on ApiError catch (e) {
       if (e.statusCode == 409) {
-        // Ya cerrada en server.
         await prefs.saveLocalCashSession(
           session.copyWith(transmitStatus: LocalCashSession.transmitSynced),
         );
@@ -329,6 +413,22 @@ class CashSessionService {
       return false;
     }
   }
+}
+
+class CashOpenResult {
+  const CashOpenResult({
+    required this.ok,
+    required this.message,
+    this.session,
+    this.offline = false,
+    this.alreadyOpen = false,
+  });
+
+  final bool ok;
+  final String message;
+  final LocalCashSession? session;
+  final bool offline;
+  final bool alreadyOpen;
 }
 
 class LocalClosePreview {

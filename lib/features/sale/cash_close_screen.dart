@@ -123,23 +123,31 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
           _session = session;
           _loading = false;
           _statusHint =
-              'Caja ya cerrada · pendiente transmitir. Conectate y abrí de nuevo.';
+              'Caja ya cerrada · pendiente transmitir. Conectate y sincronizá.';
         });
         return;
       }
 
-      session = await _service.ensureOpenSession(
-        storeId: widget.storeId,
-        online: online,
-      );
-
-      if (session.needsTransmit) {
+      // Fase 2: no abrir sesión con fondo 0 aquí. Debe existir OPEN con monto.
+      if (session == null || !session.isOpen) {
         if (!mounted) return;
         setState(() {
           _session = session;
           _loading = false;
-          _statusHint =
-              'No se puede abrir un turno nuevo: hay un cierre pendiente de enviar.';
+          _error =
+              'No hay caja abierta. En Ventas → POS abrí el turno con el fondo.';
+        });
+        return;
+      }
+
+      if (LocalCashSession.isZeroOpeningCash(session.openingCash)) {
+        if (!mounted) return;
+        setState(() {
+          _session = session;
+          _loading = false;
+          _error =
+              'Este turno tiene fondo 0 (apertura vieja). '
+              'Cerralo o volvé a Abrir caja desde POS para poner el monto.';
         });
         return;
       }
@@ -301,7 +309,6 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
 
       final result = await _service.closeSession(
         storeId: widget.storeId,
-        online: true,
         countedCash: counted,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         preview: _preview,

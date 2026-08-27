@@ -9,17 +9,25 @@ class CashSessionsApi {
   final ApiClient _client;
 
   /// `POST /cash-sessions` — idempotente por `deviceId` OPEN.
+  ///
+  /// [openingCash] en **moneda funcional** (ej. USD).
+  ///
+  /// [clientOpenedAt] solo si el backend lo soporta (pedido en
+  /// `BACKEND_CASH_SESSIONS_PEDIDO.md`). El front **no** lo envía por defecto.
   Future<CashSessionInfo> openSession(
     String storeId, {
     required String deviceId,
     String openingCash = '0.00',
     String? appVersion,
+    String? clientOpenedAt,
   }) async {
     final body = <String, dynamic>{
       'deviceId': deviceId,
       'openingCash': openingCash,
       if (appVersion != null && appVersion.trim().isNotEmpty)
         'appVersion': appVersion.trim(),
+      if (clientOpenedAt != null && clientOpenedAt.trim().isNotEmpty)
+        'clientOpenedAt': clientOpenedAt.trim(),
     };
     final json = await _client.postJson('/cash-sessions', storeId, body);
     final session = CashSessionInfo.tryFromJson(json) ??

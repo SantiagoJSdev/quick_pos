@@ -11,9 +11,8 @@ import '../../core/api/products_api.dart';
 import '../../core/api/sales_api.dart';
 import '../../core/api/stores_api.dart';
 import '../../core/api/sync_api.dart';
-import '../../core/cash/cash_session_service.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
-import '../../core/network/product_image_url.dart';
+import '../../core/config/app_config.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/active_pos_cart_draft.dart';
 import '../../core/models/business_settings.dart';
@@ -23,12 +22,12 @@ import '../../core/models/recent_sale_ticket.dart';
 import '../../core/models/inventory_line.dart';
 import '../../core/models/payment_method.dart';
 import '../../core/models/pos_cart_line.dart';
+import '../../core/network/product_image_url.dart';
 import '../../core/pos/money_string_math.dart';
 import '../../core/pos/pos_cash_advance.dart';
 import '../../core/pos/pos_sale_pricing.dart';
 import '../../core/pos/pos_stock_assessment.dart';
 import '../../core/pos/pos_terminal_info.dart';
-import '../../core/config/app_config.dart';
 import '../../core/pos/recent_sale_functional_enricher.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
@@ -1693,19 +1692,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     );
     unawaited(_refreshInventoryCacheSilent());
 
-    // Apertura automática de turno (sin UI de fondo).
-    final cashApi = widget.cashSessionsApi;
-    if (cashApi != null) {
-      unawaited(
-        CashSessionService(
-          prefs: widget.localPrefs,
-          api: cashApi,
-        ).ensureOpenSession(
-          storeId: widget.storeId,
-          online: _shellOnline,
-        ),
-      );
-    }
+    // Apertura es pantalla explícita (Fase 2); no abrir con fondo 0 al cobrar.
 
     if (!mounted) return;
     setState(() {

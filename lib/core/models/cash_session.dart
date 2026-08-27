@@ -192,11 +192,22 @@ class LocalCashSession {
   bool get needsTransmit =>
       isClosed && transmitStatus == transmitPending;
 
+  /// OPEN local aún no creada en el servidor (`POST /cash-sessions` pendiente).
+  bool get needsOpenTransmit =>
+      isOpen && (remoteId == null || remoteId!.trim().isEmpty);
+
+  static bool isZeroOpeningCash(String? raw) {
+    final n = double.tryParse((raw ?? '').trim().replaceAll(',', '.'));
+    return n == null || n == 0;
+  }
+
   LocalCashSession copyWith({
     String? remoteId,
     String? status,
     String? transmitStatus,
+    String? openedAtIso,
     String? closedAtIso,
+    String? openingCash,
     String? countedCash,
     String? closeMode,
     String? notes,
@@ -209,9 +220,9 @@ class LocalCashSession {
       deviceId: deviceId,
       status: status ?? this.status,
       transmitStatus: transmitStatus ?? this.transmitStatus,
-      openedAtIso: openedAtIso,
+      openedAtIso: openedAtIso ?? this.openedAtIso,
       closedAtIso: closedAtIso ?? this.closedAtIso,
-      openingCash: openingCash,
+      openingCash: openingCash ?? this.openingCash,
       countedCash: countedCash ?? this.countedCash,
       closeMode: closeMode ?? this.closeMode,
       notes: notes ?? this.notes,
