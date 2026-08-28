@@ -12,6 +12,7 @@ import '../models/catalog_product.dart';
 import '../models/business_settings.dart';
 import '../models/inventory_line.dart';
 import '../models/latest_exchange_rate.dart';
+import '../models/payment_method.dart';
 import '../models/sales_list_page.dart';
 import '../photos/pending_product_photo_upload_entry.dart';
 import '../pos/sale_checkout_payload.dart';
@@ -40,6 +41,7 @@ const _kLocalCashSessionPrefix = 'local_cash_session_v1_';
 const _kCatalogProductsCacheV1 = 'catalog_products_cache_v1';
 const _kPendingCatalogMutationsV1 = 'pending_catalog_mutations_v1';
 const _kBusinessSettingsCachePrefix = 'business_settings_cache_v1_';
+const _kPaymentMethodsCachePrefix = 'payment_methods_cache_v1_';
 const _kPosFxPairCachePrefix = 'pos_fx_pair_cache_v1_';
 const _kInventoryCachePrefix = 'inventory_cache_v1_';
 const _kSalesGeneralCachePrefix = 'sales_general_cache_v1_';
@@ -739,6 +741,36 @@ class LocalPrefs {
       return BusinessSettings.fromJson(Map<String, dynamic>.from(decoded));
     } catch (_) {
       return null;
+    }
+  }
+
+  Future<void> savePaymentMethodsCache(
+    String storeId,
+    List<PaymentMethod> items,
+  ) async {
+    await _prefs.setString(
+      '$_kPaymentMethodsCachePrefix${storeId.trim()}',
+      jsonEncode(items.map((e) => e.toJson()).toList()),
+    );
+  }
+
+  Future<List<PaymentMethod>> loadPaymentMethodsCache(String storeId) async {
+    final raw = _prefs.getString(
+      '$_kPaymentMethodsCachePrefix${storeId.trim()}',
+    );
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final out = <PaymentMethod>[];
+      for (final e in decoded) {
+        if (e is! Map) continue;
+        final m = PaymentMethod.tryFromJson(Map<String, dynamic>.from(e));
+        if (m != null && m.active) out.add(m);
+      }
+      return out;
+    } catch (_) {
+      return const [];
     }
   }
 

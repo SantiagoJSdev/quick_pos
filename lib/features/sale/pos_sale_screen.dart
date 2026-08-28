@@ -453,6 +453,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         await _refreshPendingCount();
         await _refreshInventoryCacheSilent();
         await _refreshCatalogSilent();
+        await _loadPaymentMethodsFromCache();
         await _refreshPaymentMethods();
         _showCheckoutPanelMessage(
           result.userMessage,
@@ -536,6 +537,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         setState(() => _flushBusy = false);
       }
       await _refreshPendingCount();
+      if (_shellOnline) {
+        await _refreshPaymentMethods();
+      }
     }
   }
 
@@ -1088,6 +1092,15 @@ class _PosSaleScreenState extends State<PosSaleScreen>
             : null;
       });
     }
+    await _loadPaymentMethodsFromCache();
+  }
+
+  Future<void> _loadPaymentMethodsFromCache() async {
+    final cached = await widget.localPrefs.loadPaymentMethodsCache(
+      widget.storeId,
+    );
+    if (!mounted || cached.isEmpty) return;
+    setState(() => _paymentMethods = cached);
   }
 
   Future<void> _applyFxFromPrefsCacheOnly() async {
@@ -1120,13 +1133,31 @@ class _PosSaleScreenState extends State<PosSaleScreen>
 
   Future<void> _refreshPaymentMethods() async {
     final api = widget.paymentMethodsApi;
-    if (api == null || !_shellOnline) return;
+    if (api == null) {
+      await _loadPaymentMethodsFromCache();
+      return;
+    }
+    if (!_shellOnline) {
+      await _loadPaymentMethodsFromCache();
+      return;
+    }
     try {
       final list = await api.listActive(widget.storeId);
-      if (!mounted || list.isEmpty) return;
+      if (!mounted) return;
+      if (list.isEmpty) {
+        debugPrint(
+          '[POS] payment-methods: servidor devolvió 0 activos '
+          '(store=${widget.storeId})',
+        );
+        await _loadPaymentMethodsFromCache();
+        return;
+      }
+      await widget.localPrefs.savePaymentMethodsCache(widget.storeId, list);
       setState(() => _paymentMethods = list);
+      debugPrint('[POS] payment-methods loaded: ${list.length}');
     } catch (e) {
       debugPrint('[POS] payment-methods load failed: $e');
+      await _loadPaymentMethodsFromCache();
     }
   }
 
@@ -1180,7 +1211,10 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     await _refreshPendingCount();
     await _refreshHeldCount();
     unawaited(_refreshInventoryCacheSilent());
-    debugPrint('[POS load] painted from cache only (no background network)');
+    if (_shellOnline) {
+      unawaited(_refreshPaymentMethods());
+    }
+    debugPrint('[POS load] painted from cache (payment-methods if online)');
   }
 
   String? _documentPriceLabel(CatalogProduct p) {

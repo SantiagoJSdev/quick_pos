@@ -184,25 +184,6 @@ class _PosPaymentSheetState extends State<_PosPaymentSheet> {
                               ],
                             ),
                           ),
-                          if (m.hasCommissionWarning)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${m.commissionPercent}%',
-                                style: const TextStyle(
-                                  color: Colors.orange,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
                         ],
                       ),
                     ),

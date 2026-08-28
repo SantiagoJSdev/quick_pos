@@ -23,6 +23,15 @@ class PaymentMethod {
 
   bool get hasCommissionWarning => commissionPercentValue > 0;
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'code': code,
+        'name': name,
+        'commissionPercent': commissionPercent,
+        'isCashLike': isCashLike,
+        'active': active,
+      };
+
   static PaymentMethod? tryFromJson(Map<String, dynamic> json) {
     final id = json['id']?.toString().trim() ?? '';
     final code = json['code']?.toString().trim() ?? '';

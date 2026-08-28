@@ -253,6 +253,7 @@ class _MainShellState extends State<MainShell> {
       inventoryApi: widget.inventoryApi,
       storesApi: widget.storesApi,
       exchangeRatesApi: widget.exchangeRatesApi,
+      paymentMethodsApi: widget.paymentMethodsApi,
       deviceId: t.deviceId,
       appVersion: t.appVersion,
       catalogInvalidation: widget.catalogInvalidationBus,

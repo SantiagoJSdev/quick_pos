@@ -1,5 +1,6 @@
 import '../api/exchange_rates_api.dart';
 import '../api/inventory_api.dart';
+import '../api/payment_methods_api.dart';
 import '../api/products_api.dart';
 import '../api/stores_api.dart';
 import '../api/sync_api.dart';
@@ -26,6 +27,7 @@ class DeviceHydrateResult {
     this.downloadedOk = false,
     this.productCount = 0,
     this.inventoryCount = 0,
+    this.paymentMethodCount = 0,
     this.flushedOps = 0,
     this.remainingOps = 0,
     this.fxLabel,
@@ -38,12 +40,13 @@ class DeviceHydrateResult {
   final bool downloadedOk;
   final int productCount;
   final int inventoryCount;
+  final int paymentMethodCount;
   final int flushedOps;
   final int remainingOps;
   final String? fxLabel;
 }
 
-/// Flush + GET /products + GET /inventory + settings/FX.
+/// Flush + GET /products + GET /inventory + métodos de pago + settings/FX.
 ///
 /// Si [requireEmptyQueue] (cierre de caja): `ok` solo si no queda nada pendiente
 /// **y** se guardó el snapshot. Si no: se baja igual el stock, y `ok` exige
@@ -56,6 +59,7 @@ Future<DeviceHydrateResult> hydrateDeviceFromServer({
   required InventoryApi inventoryApi,
   required StoresApi storesApi,
   required ExchangeRatesApi exchangeRatesApi,
+  PaymentMethodsApi? paymentMethodsApi,
   required String deviceId,
   required String appVersion,
   CatalogInvalidationBus? catalogInvalidation,
@@ -138,6 +142,14 @@ Future<DeviceHydrateResult> hydrateDeviceFromServer({
     step('Bajando stock…');
     final inventory = await inventoryApi.listInventory(storeId);
 
+    step('Bajando métodos de pago…');
+    var paymentMethodCount = 0;
+    if (paymentMethodsApi != null) {
+      final methods = await paymentMethodsApi.listActive(storeId);
+      paymentMethodCount = methods.length;
+      await prefs.savePaymentMethodsCache(storeId, methods);
+    }
+
     step('Actualizando tasa…');
     await prefs.saveBusinessSettingsCache(storeId, settings.toPrefsJson());
     var fxLabel = 'misma moneda';
@@ -168,6 +180,9 @@ Future<DeviceHydrateResult> hydrateDeviceFromServer({
       '${inventory.length} stock',
       fxLabel,
     ];
+    if (paymentMethodCount > 0) {
+      parts.add('$paymentMethodCount métodos de pago');
+    }
     if (cycle.flush.removedCount > 0) {
       parts.add('${cycle.flush.removedCount} op. enviadas');
     }
@@ -184,11 +199,12 @@ Future<DeviceHydrateResult> hydrateDeviceFromServer({
       downloadedOk: downloadedOk,
       productCount: products.length,
       inventoryCount: inventory.length,
+      paymentMethodCount: paymentMethodCount,
       flushedOps: cycle.flush.removedCount,
       remainingOps: remaining,
       fxLabel: fxLabel,
       userMessage: flushedAll
-          ? 'Sincronizado: se envió todo y se actualizaron ${parts.take(3).join(', ')}.'
+          ? 'Sincronizado: se envió todo y se actualizaron ${parts.join(', ')}.'
           : 'Se actualizaron productos y stock, pero quedan $remaining '
               'operación(es) sin enviar. Reintentá Sincronizar.',
     );
