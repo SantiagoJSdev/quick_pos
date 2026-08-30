@@ -34,9 +34,9 @@ class CashSessionService {
 
   /// Abre turno con [openingCashFunctional] (siempre moneda funcional, ej. USD).
   ///
-  /// Online: `POST /cash-sessions` (si hay OPEN remota con fondo 0, pide actualizar;
-  /// si fondo ≠ 0, error para cerrar primero).
-  /// Offline: guarda OPEN local; Sync transmitirá después.
+  /// Online: `POST /cash-sessions` con `clientOpenedAt`. Zombie remoto con fondo
+  /// 0 → el back actualiza al monto enviado. Fondo remoto ≠ 0 → no pisar.
+  /// Offline: guarda OPEN local + hora UTC; Sync manda `clientOpenedAt`.
   Future<CashOpenResult> openCountedSession({
     required String storeId,
     required bool online,
@@ -75,6 +75,7 @@ class CashSessionService {
       );
     }
 
+    // Hora real de apertura en el POS (UTC). También se manda como clientOpenedAt.
     final openedAt = DateTime.now().toUtc().toIso8601String();
     var local = LocalCashSession(
       localId: existing?.localId ?? ClientMutationId.newId(),
@@ -82,7 +83,7 @@ class CashSessionService {
       deviceId: deviceId,
       status: LocalCashSession.statusOpen,
       transmitStatus: LocalCashSession.transmitSynced,
-      openedAtIso: existing?.isOpen == true ? existing!.openedAtIso : openedAt,
+      openedAtIso: openedAt,
       openingCash: openingNorm,
       remoteId: existing?.isOpen == true ? existing!.remoteId : null,
       openingCountedByUser: true,
@@ -114,6 +115,7 @@ class CashSessionService {
           final linked = local.copyWith(
             remoteId: current.id,
             openingCash: current.openingCash ?? local.openingCash,
+            openedAtIso: current.openedAt ?? local.openedAtIso,
           );
           await prefs.saveLocalCashSession(linked);
           return CashOpenResult(
@@ -124,43 +126,41 @@ class CashSessionService {
                 '${current.openingCash}. Cerralo antes de abrir otro.',
           );
         }
-        // Zombie openingCash 0: POST con fondo contado (backend debe actualizar).
+        // Zombie openingCash 0: POST con fondo contado (back actualiza).
       }
 
-      // Contrato actual (CASH_SESSIONS.md): deviceId + openingCash + appVersion.
-      // NO mandar clientOpenedAt hasta que el back lo acepte (pedido pendiente).
       final remote = await api.openSession(
         storeId,
         deviceId: deviceId,
         openingCash: openingNorm,
         appVersion: terminal.appVersion,
+        clientOpenedAt: openedAt,
       );
 
-      // Si el backend devolvió OPEN con fondo ≠ 0 distinto al pedido, no pisamos.
-      if (!LocalCashSession.isZeroOpeningCash(remote.openingCash) &&
-          remote.openingCash != null &&
-          remote.openingCash!.trim().replaceAll(',', '.') != openingNorm) {
-        final remoteAmt =
-            double.tryParse(remote.openingCash!.replaceAll(',', '.')) ?? -1;
-        if (remoteAmt > 0 && (remoteAmt - parsed).abs() > 0.001) {
-          final linked = local.copyWith(
-            remoteId: remote.id,
-            openingCash: remote.openingCash,
-          );
-          await prefs.saveLocalCashSession(linked);
-          return CashOpenResult(
-            ok: false,
-            session: linked,
-            message:
-                'Hay un turno abierto con fondo ${remote.openingCash}. '
-                'Cerralo antes de abrir otro.',
-          );
-        }
+      final mismatch = _openingCashMismatch(
+        sent: openingNorm,
+        received: remote.openingCash,
+      );
+      if (mismatch != null) {
+        final linked = local.copyWith(
+          remoteId: remote.id,
+          openingCash: remote.openingCash ?? openingNorm,
+          openedAtIso: remote.openedAt ?? openedAt,
+        );
+        await prefs.saveLocalCashSession(linked);
+        return CashOpenResult(
+          ok: false,
+          session: linked,
+          message: mismatch,
+        );
       }
 
       final linked = local.copyWith(
         remoteId: remote.id,
-        openingCash: openingNorm,
+        openingCash: _normalizeOpeningCash(remote.openingCash) ?? openingNorm,
+        openedAtIso: remote.openedAt?.trim().isNotEmpty == true
+            ? remote.openedAt!.trim()
+            : openedAt,
         transmitStatus: LocalCashSession.transmitSynced,
         openingCountedByUser: true,
       );
@@ -168,7 +168,8 @@ class CashSessionService {
       return CashOpenResult(
         ok: true,
         session: linked,
-        message: 'Turno abierto. Fondo: $openingNorm (moneda principal).',
+        message:
+            'Turno abierto. Fondo: ${linked.openingCash} (moneda principal).',
       );
     } on ApiError catch (e) {
       return CashOpenResult(
@@ -185,7 +186,8 @@ class CashSessionService {
     }
   }
 
-  /// Si hay OPEN local sin remoteId, intenta `POST /cash-sessions`.
+  /// Si hay OPEN local sin remoteId, intenta `POST /cash-sessions`
+  /// con `clientOpenedAt` = [LocalCashSession.openedAtIso].
   Future<bool> tryTransmitPendingOpen({
     required String storeId,
     required bool online,
@@ -210,6 +212,7 @@ class CashSessionService {
           session.copyWith(
             remoteId: current.id,
             openingCash: current.openingCash ?? session.openingCash,
+            openedAtIso: current.openedAt ?? session.openedAtIso,
           ),
         );
         return true;
@@ -219,14 +222,57 @@ class CashSessionService {
         deviceId: terminal.deviceId,
         openingCash: session.openingCash,
         appVersion: terminal.appVersion,
+        clientOpenedAt: session.openedAtIso,
       );
+      if (_openingCashMismatch(
+            sent: session.openingCash,
+            received: remote.openingCash,
+          ) !=
+          null) {
+        return false;
+      }
       await prefs.saveLocalCashSession(
-        session.copyWith(remoteId: remote.id),
+        session.copyWith(
+          remoteId: remote.id,
+          openingCash:
+              _normalizeOpeningCash(remote.openingCash) ?? session.openingCash,
+          openedAtIso: remote.openedAt?.trim().isNotEmpty == true
+              ? remote.openedAt!.trim()
+              : session.openedAtIso,
+        ),
       );
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  static String? _normalizeOpeningCash(String? raw) {
+    final n = double.tryParse((raw ?? '').trim().replaceAll(',', '.'));
+    if (n == null || n.isNaN) return null;
+    return n.toStringAsFixed(2);
+  }
+
+  /// null = ok. Mensaje si el fondo remoto no coincide con lo enviado
+  /// (p. ej. OPEN con fondo ≠ 0 que el back no pisa).
+  static String? _openingCashMismatch({
+    required String sent,
+    required String? received,
+  }) {
+    final sentN = _normalizeOpeningCash(sent);
+    final recvN = _normalizeOpeningCash(received);
+    if (sentN == null) return null;
+    if (recvN == null) {
+      return 'El servidor no devolvió openingCash. Reintentá abrir caja.';
+    }
+    if (sentN == recvN) return null;
+    final recvAmt = double.tryParse(recvN) ?? -1;
+    if (recvAmt > 0) {
+      return 'Hay un turno abierto con fondo $recvN. '
+          'Cerralo antes de abrir otro.';
+    }
+    return 'El servidor no guardó el fondo $sentN (sigue en $recvN). '
+        'Reintentá o revisá el backend.';
   }
 
   Future<List<PendingSaleCloseDeclaration>> pendingSalesDeclaration(

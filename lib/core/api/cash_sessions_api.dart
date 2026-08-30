@@ -11,9 +11,8 @@ class CashSessionsApi {
   /// `POST /cash-sessions` — idempotente por `deviceId` OPEN.
   ///
   /// [openingCash] en **moneda funcional** (ej. USD).
-  ///
-  /// [clientOpenedAt] solo si el backend lo soporta (pedido en
-  /// `BACKEND_CASH_SESSIONS_PEDIDO.md`). El front **no** lo envía por defecto.
+  /// [clientOpenedAt] ISO-8601 UTC: hora real de apertura en el POS
+  /// (resuelve summary si se abrió offline y se sincroniza después).
   Future<CashSessionInfo> openSession(
     String storeId, {
     required String deviceId,
