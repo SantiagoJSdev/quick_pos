@@ -4,6 +4,7 @@ import '../../core/api/api_error.dart';
 import '../../core/api/inventory_api.dart';
 import '../../core/catalog/catalog_invalidation_bus.dart';
 import '../../core/idempotency/client_mutation_id.dart';
+import '../../core/inventory/in_adjust_unit_cost_policy.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/inventory_adjust_payload_builder.dart';
@@ -20,6 +21,8 @@ class InventoryAdjustmentScreen extends StatefulWidget {
     required this.localPrefs,
     required this.productId,
     required this.productLabel,
+    this.currentStockQuantity = 0,
+    this.catalogUnitCost,
     this.suggestedReason,
     this.catalogInvalidationBus,
   });
@@ -30,7 +33,13 @@ class InventoryAdjustmentScreen extends StatefulWidget {
   final String productId;
   final String productLabel;
 
-  /// P. ej. alta de producto + `IN_ADJUST` “Inventario inicial” (`FRONT_INVENTORY_SUPPLIERS_MARGINS_SYNC.md` §3).
+  /// Stock disponible antes del ajuste (`GET /inventory`).
+  final double currentStockQuantity;
+
+  /// `Product.cost` — si > 0 y stock ≤ 0, el back usa catálogo sin `unitCostFunctional`.
+  final String? catalogUnitCost;
+
+  /// P. ej. alta de producto + `IN_ADJUST` “Inventario inicial”.
   final String? suggestedReason;
 
   final CatalogInvalidationBus? catalogInvalidationBus;
@@ -54,8 +63,13 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
   /// Asignado en el primer envío que pasa validación; se reutiliza en reintentos.
   String? _opId;
 
-  /// Tras fallo de red/API: si el usuario edita el formulario, nueva operación (`_opId` nulo).
+  /// Tras fallo de red/API: si el usuario edita el formulario, nueva operación.
   bool _failedAwaitingRetry = false;
+
+  late final InAdjustUnitCostPolicy _costPolicy = InAdjustUnitCostPolicy(
+    currentStockQuantity: widget.currentStockQuantity,
+    catalogUnitCost: widget.catalogUnitCost,
+  );
 
   @override
   void initState() {
@@ -85,6 +99,26 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
     super.dispose();
   }
 
+  bool get _showInAdjustCostHints => _type == _inType;
+
+  String get _unitCostLabel {
+    if (_costPolicy.unitCostRequired) {
+      return 'Costo unitario (funcional) *';
+    }
+    return 'Costo unitario (funcional), opcional';
+  }
+
+  String get _unitCostHint {
+    if (_costPolicy.unitCostRequired) {
+      return 'Obligatorio: stock en cero y sin costo en catálogo';
+    }
+    if (_costPolicy.isZeroOrNegativeStock && _costPolicy.catalogHasPositiveCost) {
+      final c = widget.catalogUnitCost?.trim();
+      return 'Opcional: si no indicás, el servidor usa catálogo ($c)';
+    }
+    return 'Solo entradas; si falta, usa costo medio o catálogo';
+  }
+
   Future<void> _submit() async {
     setState(() => _error = null);
     final qty = _quantity.text.trim();
@@ -104,15 +138,18 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
     }
 
     final cost = _unitCost.text.trim();
+    final costValidation = _costPolicy.validateForSubmit(
+      adjustType: _type,
+      unitCostRaw: cost,
+    );
+    if (costValidation != null) {
+      setState(() => _error = costValidation);
+      return;
+    }
+
     String? unitCost;
     if (_type == _inType && cost.isNotEmpty) {
-      if (!_decimalPositive.hasMatch(cost)) {
-        setState(
-          () => _error = 'Costo unitario (func.): número decimal válido.',
-        );
-        return;
-      }
-      unitCost = cost;
+      unitCost = InAdjustUnitCostPolicy.parsePositiveAmount(cost)?.toString();
     }
 
     final payload = InventoryAdjustPayloadBuilder.fromForm(
@@ -143,9 +180,8 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      final msg = e.userMessageForSupport;
       setState(() {
-        _error = msg;
+        _error = e.inventoryAdjustMessageEs;
         _failedAwaitingRetry = true;
       });
     } catch (e) {
@@ -195,11 +231,41 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           Text(
+            'Disponible ahora: ${widget.currentStockQuantity}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          Text(
             'UUID: ${widget.productId}',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
+          if (_showInAdjustCostHints &&
+              _costPolicy.isZeroOrNegativeStock) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer
+                    .withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _costPolicy.catalogHasPositiveCost
+                    ? 'Stock en cero: podés omitir el costo unitario; '
+                        'el servidor usará el costo de catálogo '
+                        '(${widget.catalogUnitCost?.trim()}).'
+                    : 'Stock en cero y sin costo en catálogo: '
+                        'indicá costo unitario (funcional) al reingresar.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
           if (_failedAwaitingRetry && _opId != null) ...[
             const SizedBox(height: 12),
             Text(
@@ -263,11 +329,10 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _unitCost,
-            decoration: const InputDecoration(
-              labelText: 'Costo unitario (funcional), opcional',
-              hintText:
-                  'Solo aplica a entradas; si falta usa costo medio o producto',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: _unitCostLabel,
+              hintText: _unitCostHint,
+              border: const OutlineInputBorder(),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             enabled: !_loading && _type == _inType,

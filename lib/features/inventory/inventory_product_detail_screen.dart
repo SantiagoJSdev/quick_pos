@@ -167,6 +167,7 @@ class _InventoryProductDetailScreenState
   }
 
   Future<void> _openAdjustment(String productId, String label) async {
+    final line = _line ?? widget.initialLine;
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (ctx) => InventoryAdjustmentScreen(
@@ -175,6 +176,8 @@ class _InventoryProductDetailScreenState
           localPrefs: widget.localPrefs,
           productId: productId,
           productLabel: label,
+          currentStockQuantity: line.quantityAsDouble ?? 0,
+          catalogUnitCost: _catalogProduct?.cost,
           catalogInvalidationBus: widget.catalogInvalidationBus,
         ),
       ),

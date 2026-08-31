@@ -101,6 +101,27 @@ class ApiError implements Exception {
     return raw;
   }
 
+  /// Mensaje en español para `POST /inventory/adjustments`.
+  String get inventoryAdjustMessageEs {
+    final blob =
+        '${error.toUpperCase()}\n${messages.join('\n').toUpperCase()}';
+    if (blob.contains('UNIT_COST_REQUIRED_FOR_ZERO_STOCK')) {
+      return 'Con stock en cero tenés que indicar el costo unitario '
+          '(funcional), o cargar costo en la ficha del producto.';
+    }
+    if (blob.contains('INVALID_UNIT_COST_FOR_IN_ADJUST')) {
+      return 'Costo unitario inválido: debe ser un número mayor que 0.';
+    }
+    final lower = blob.toLowerCase();
+    if (lower.contains('invalid unit cost') &&
+        lower.contains('in adjust')) {
+      return 'Costo unitario inválido para esta entrada. '
+          'Con stock en cero, indicá un costo mayor que 0 o revisá el costo '
+          'en catálogo.';
+    }
+    return userMessageForSupport;
+  }
+
   bool get isClientError => statusCode >= 400 && statusCode < 500;
   bool get isServerError => statusCode >= 500 && statusCode < 600;
 
