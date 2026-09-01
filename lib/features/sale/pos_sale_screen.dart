@@ -23,6 +23,7 @@ import '../../core/models/inventory_line.dart';
 import '../../core/models/payment_method.dart';
 import '../../core/models/pos_cart_line.dart';
 import '../../core/network/product_image_url.dart';
+import '../../core/pos/catalog_unit_cost_functional.dart';
 import '../../core/pos/money_string_math.dart';
 import '../../core/pos/pos_cash_advance.dart';
 import '../../core/pos/pos_sale_pricing.dart';
@@ -1633,6 +1634,51 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (mounted) setState(() {});
   }
 
+  CatalogProduct? _catalogProductById(String productId) {
+    for (final p in _all) {
+      if (p.id == productId) return p;
+    }
+    return null;
+  }
+
+  /// Costo unitario funcional congelado al cobrar (`Product.cost` del cache local).
+  bool _resolveFrozenUnitCostsForCheckout(Map<String, String> out) {
+    final doc = _selectedDocumentCurrency;
+    if (doc == null) return false;
+    final func = _functionalCode;
+    for (final l in _cart) {
+      if (l.isCashAdvance) {
+        out[l.productId] = '0.00';
+        continue;
+      }
+      final p = _catalogProductById(l.productId);
+      if (p == null) {
+        _showCheckoutPanelMessage(
+          'No se encontró "${l.name}" en el catálogo local. Sincronizá antes de cobrar.',
+          error: true,
+        );
+        return false;
+      }
+      final cost = catalogUnitCostFunctional(
+        catalogCost: p.cost,
+        catalogCurrency: p.currency,
+        functionalCurrencyCode: func,
+        documentCurrencyCode: doc,
+        pair: _fxPair,
+      );
+      if (cost == null) {
+        _showCheckoutPanelMessage(
+          'No se pudo convertir el costo de "${l.name}" a $func. '
+          'Revisá la moneda del producto o la tasa del día.',
+          error: true,
+        );
+        return false;
+      }
+      out[l.productId] = cost;
+    }
+    return true;
+  }
+
   Future<void> _onCheckout() async {
     if (_cart.isEmpty) return;
     final s = _settings;
@@ -1671,6 +1717,11 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     if (!mounted) return;
 
     _pendingSaleId ??= ClientMutationId.newId();
+    final unitCostFunctionalByProductId = <String, String>{};
+    if (!_resolveFrozenUnitCostsForCheckout(unitCostFunctionalByProductId)) {
+      return;
+    }
+    final clientSoldAt = DateTime.now().toUtc().toIso8601String();
     final restBody = SaleCheckoutPayload.build(
       documentCurrencyCode: doc,
       functionalCurrencyCode: func,
@@ -1687,6 +1738,8 @@ class _PosSaleScreenState extends State<PosSaleScreen>
         ),
       ),
       clientSaleId: _pendingSaleId,
+      clientSoldAt: clientSoldAt,
+      unitCostFunctionalByProductId: unitCostFunctionalByProductId,
       stockConflictDetected: _checkoutStockConflict ? true : null,
       inventoryValidationMode: _checkoutStockConflict
           ? 'LOCAL_ESTIMATED'

@@ -40,6 +40,8 @@ class SaleCheckoutPayload {
     required String appVersion,
     List<Map<String, dynamic>>? payments,
     String? clientSaleId,
+    String? clientSoldAt,
+    Map<String, String>? unitCostFunctionalByProductId,
     String? fxSource,
     bool? stockConflictDetected,
     String? inventoryValidationMode,
@@ -78,15 +80,24 @@ class SaleCheckoutPayload {
       'appVersion': appVersion,
       'lines': lines
           .map(
-            (l) => <String, dynamic>{
-              'productId': l.productId.toString(),
-              'quantity': l.quantity.toString(),
-              'price': l.documentUnitPriceForCheckout,
-              'discount': '0',
+            (l) {
+              final row = <String, dynamic>{
+                'productId': l.productId.toString(),
+                'quantity': l.quantity.toString(),
+                'price': l.documentUnitPriceForCheckout,
+                'discount': '0',
+              };
+              final frozen = unitCostFunctionalByProductId?[l.productId]?.trim();
+              if (frozen != null && frozen.isNotEmpty) {
+                row['unitCostFunctional'] = frozen;
+              }
+              return row;
             },
           )
           .toList(),
       'fxSnapshot': fxSnapshot,
+      if (clientSoldAt != null && clientSoldAt.trim().isNotEmpty)
+        'clientSoldAt': clientSoldAt.trim(),
       if (payments != null && payments.isNotEmpty)
         'payments': _coercePaymentsForJson(payments),
       if (stockConflictDetected != null)
@@ -166,6 +177,9 @@ class SaleCheckoutPayload {
         if (m.containsKey('discount')) {
           m['discount'] = _scalarToJsonString(m['discount']);
         }
+        if (m.containsKey('unitCostFunctional')) {
+          m['unitCostFunctional'] = _scalarToJsonString(m['unitCostFunctional']);
+        }
         return m;
       }).toList();
     }
@@ -209,6 +223,9 @@ class SaleCheckoutPayload {
       'deviceId': restBody['deviceId'],
       'lines': restBody['lines'],
       'fxSnapshot': fx,
+      if (restBody['clientSoldAt'] != null &&
+          '${restBody['clientSoldAt']}'.trim().isNotEmpty)
+        'clientSoldAt': restBody['clientSoldAt'],
       if (restBody['payments'] is List) 'payments': restBody['payments'],
     };
     return coerceSalePayloadForSyncPush(sale);
