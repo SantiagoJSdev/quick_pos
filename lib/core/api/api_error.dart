@@ -122,6 +122,17 @@ class ApiError implements Exception {
     return userMessageForSupport;
   }
 
+  /// Mensaje en español para `POST /purchases` y sync `PURCHASE_RECEIVE`.
+  String get purchaseReceiveMessageEs {
+    final blob =
+        '${error.toUpperCase()}\n${messages.join('\n').toUpperCase()}';
+    if (blob.contains('DUPLICATE_PRODUCT_IN_PURCHASE')) {
+      return 'El mismo producto aparece más de una vez en la factura. '
+          'Dejá una sola línea por producto (podés sumar cantidades).';
+    }
+    return userMessageForSupport;
+  }
+
   bool get isClientError => statusCode >= 400 && statusCode < 500;
   bool get isServerError => statusCode >= 500 && statusCode < 600;
 

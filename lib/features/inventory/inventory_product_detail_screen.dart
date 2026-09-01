@@ -14,6 +14,7 @@ import '../../core/api/uploads_api.dart';
 import '../../core/network/product_image_url.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/stock_movement.dart';
+import '../../core/pos/money_string_math.dart';
 import '../../core/pos/post_purchase_price_hint.dart';
 import 'inventory_adjustment_screen.dart';
 import 'inventory_loss_sheet.dart';
@@ -458,18 +459,18 @@ class _InventoryProductDetailScreenState
                           if (line.minStock != null &&
                               line.minStock!.trim().isNotEmpty)
                             _kv('Stock mínimo', line.minStock!),
-                          if (line.averageUnitCostFunctional != null &&
-                              line.averageUnitCostFunctional!.isNotEmpty)
+                          if (cat != null &&
+                              cat.cost.trim().isNotEmpty) ...[
                             _kv(
-                              'Costo medio (func.)',
-                              line.averageUnitCostFunctional!,
+                              'Costo catálogo',
+                              '${cat.cost.trim()} ${cat.currency}',
                             ),
-                          if (line.totalCostFunctional != null &&
-                              line.totalCostFunctional!.isNotEmpty)
-                            _kv(
-                              'Valor stock (func.)',
-                              line.totalCostFunctional!,
-                            ),
+                            if (line.quantity.trim().isNotEmpty)
+                              _kv(
+                                'Valor stock (catálogo)',
+                                '${MoneyStringMath.multiply(line.quantity, cat.cost.trim())} ${cat.currency}',
+                              ),
+                          ],
                           _kv('SKU', line.displaySku),
                           if (line.product?.barcode != null &&
                               line.product!.barcode!.isNotEmpty)
@@ -488,8 +489,8 @@ class _InventoryProductDetailScreenState
                   ),
                   Builder(
                     builder: (ctx) {
-                      final avg = line.averageUnitCostFunctional?.trim();
-                      if (avg == null || avg.isEmpty) {
+                      final catalogCost = cat?.cost.trim();
+                      if (catalogCost == null || catalogCost.isEmpty) {
                         return const SizedBox.shrink();
                       }
                       final p = _catalogProduct;
@@ -498,7 +499,7 @@ class _InventoryProductDetailScreenState
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
                             'Precio manual: no aplica sugerencia por margen '
-                            'sobre el costo medio de depósito.',
+                            'sobre el costo de catálogo.',
                             style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
                               color: Theme.of(ctx).colorScheme.onSurfaceVariant,
                               height: 1.35,
@@ -507,7 +508,7 @@ class _InventoryProductDetailScreenState
                         );
                       }
                       final marginPct =
-                          PostPurchasePriceHint.marginPercentForAverageCostSuggestion(
+                          PostPurchasePriceHint.marginPercentForCatalogCostSuggestion(
                             product: p,
                             storeDefaultMarginPercent:
                                 widget.storeDefaultMarginPercent,
@@ -516,8 +517,8 @@ class _InventoryProductDetailScreenState
                         return const SizedBox.shrink();
                       }
                       final localSug =
-                          PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-                            line.averageUnitCostFunctional,
+                          PostPurchasePriceHint.suggestedListFromCatalogCostAndMargin(
+                            catalogCost,
                             marginPct,
                           );
                       if (localSug == null) {
@@ -526,11 +527,12 @@ class _InventoryProductDetailScreenState
                       final src = p?.pricingMode == 'USE_PRODUCT_OVERRIDE'
                           ? 'margen propio del producto'
                           : 'margen de la tienda';
+                      final currency = cat?.currency ?? '';
                       return Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          'Sugerido sobre costo medio ($src, $marginPct%): '
-                          '$localSug (moneda funcional). '
+                          'Sugerido sobre costo catálogo ($src, $marginPct%): '
+                          '$localSug $currency. '
                           '${PostPurchasePriceHint.catalogSuggestedUsesProductCost}',
                           style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
                             color: Theme.of(ctx).colorScheme.onSurfaceVariant,

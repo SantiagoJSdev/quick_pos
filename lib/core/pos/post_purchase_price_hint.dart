@@ -6,9 +6,9 @@ import 'money_string_math.dart';
 class PostPurchasePriceHint {
   PostPurchasePriceHint._();
 
-  /// % para sugerencia sobre **costo medio de inventario**: margen propio del producto,
+  /// % para sugerencia sobre **costo de catálogo** (`Product.cost`): margen propio,
   /// margen de tienda si aplica `USE_STORE_DEFAULT`, o `null` en `MANUAL_PRICE` / sin dato.
-  static String? marginPercentForAverageCostSuggestion({
+  static String? marginPercentForCatalogCostSuggestion({
     required CatalogProduct? product,
     String? storeDefaultMarginPercent,
   }) {
@@ -20,6 +20,16 @@ class PostPurchasePriceHint {
     }
     return _trimOrNull(storeDefaultMarginPercent);
   }
+
+  @Deprecated('Usar marginPercentForCatalogCostSuggestion')
+  static String? marginPercentForAverageCostSuggestion({
+    required CatalogProduct? product,
+    String? storeDefaultMarginPercent,
+  }) =>
+      marginPercentForCatalogCostSuggestion(
+        product: product,
+        storeDefaultMarginPercent: storeDefaultMarginPercent,
+      );
 
   static String? _trimOrNull(String? s) {
     final t = s?.trim();
@@ -38,12 +48,12 @@ class PostPurchasePriceHint {
     }
   }
 
-  /// Precio sugerido = costo medio funcional × (1 + margenTienda/100). Solo UI; no sustituye `GET /products` (usa `Product.cost`).
-  static String? suggestedListFromAverageCostAndStoreMargin(
-    String? averageUnitCostFunctional,
+  /// Precio sugerido = costo catálogo × (1 + margen/100). Solo UI.
+  static String? suggestedListFromCatalogCostAndMargin(
+    String? catalogUnitCost,
     String? storeMarginPercent,
   ) {
-    final c = averageUnitCostFunctional?.trim();
+    final c = catalogUnitCost?.trim();
     final m = storeMarginPercent?.trim();
     if (c == null || c.isEmpty || m == null || m.isEmpty) return null;
     final md = double.tryParse(m.replaceAll(',', '.'));
@@ -51,6 +61,16 @@ class PostPurchasePriceHint {
     final factor = ((100 + md) / 100).toString();
     return MoneyStringMath.multiply(c, factor, fractionDigits: 2);
   }
+
+  @Deprecated('Usar suggestedListFromCatalogCostAndMargin')
+  static String? suggestedListFromAverageCostAndStoreMargin(
+    String? averageUnitCostFunctional,
+    String? storeMarginPercent,
+  ) =>
+      suggestedListFromCatalogCostAndMargin(
+        averageUnitCostFunctional,
+        storeMarginPercent,
+      );
 
   static String get afterPurchaseSnackMessage =>
       'Compra registrada.\n\n'
@@ -65,10 +85,13 @@ class PostPurchasePriceHint {
       'al valor sugerido que devuelve el servidor tras el cambio de costo.\n\n'
       'Los productos en precio manual solo actualizaron costo: revisá el precio de lista en Catálogo.';
 
+  static String get zeroCostLineNote =>
+      'Costo 0 en una línea: el catálogo no se modifica para ese producto.';
+
   static String get stockDetailPolicyLine =>
-      'Tras una compra el costo medio de depósito se actualiza aquí; '
-      'el precio de lista se edita en Catálogo (el servidor no lo cambia en silencio).';
+      'El valor de stock usa el costo de catálogo (Product.cost). '
+      'El precio de lista se edita en Catálogo.';
 
   static String get catalogSuggestedUsesProductCost =>
-      'El «Sugerido API» en catálogo usa Product.cost, no el costo medio de inventario.';
+      'El «Sugerido API» en catálogo también usa Product.cost.';
 }

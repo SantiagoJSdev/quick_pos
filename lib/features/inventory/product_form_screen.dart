@@ -199,7 +199,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _suggestedListPriceFromCost(String cost) {
     final margin = _marginPercentForListPrice();
     if (margin == null || margin.isEmpty) return null;
-    return PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+    return PostPurchasePriceHint.suggestedListFromCatalogCostAndMargin(
       cost,
       margin,
     );
@@ -222,14 +222,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (_pricingMode == 'USE_PRODUCT_OVERRIDE') {
       final mo = _marginPercentOverride.text.trim();
       if (!_marginPercentInRange(mo)) return null;
-      return PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
-        cost,
-        mo,
-      );
+      return PostPurchasePriceHint.suggestedListFromCatalogCostAndMargin(
+      cost,
+      mo,
+    );
     }
     final margin = _marginPercentForListPrice();
     if (margin == null || margin.isEmpty) return null;
-    return PostPurchasePriceHint.suggestedListFromAverageCostAndStoreMargin(
+    return PostPurchasePriceHint.suggestedListFromCatalogCostAndMargin(
       cost,
       margin,
     );

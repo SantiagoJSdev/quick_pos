@@ -420,6 +420,26 @@ class _CashCloseScreenState extends State<CashCloseScreen> {
                       ),
                     ),
                   ],
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: PosSaleUi.surface2,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: PosSaleUi.border),
+                    ),
+                    child: const Text(
+                      'Al cerrar caja con éxito el servidor guarda una foto '
+                      'diaria de patrimonio (capital e inventario). '
+                      'Usala para KPI históricos en Inicio → Capital.',
+                      style: TextStyle(
+                        color: PosSaleUi.textMuted,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   _card(
                     title: 'Turno',

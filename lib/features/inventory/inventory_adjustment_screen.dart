@@ -116,7 +116,7 @@ class _InventoryAdjustmentScreenState extends State<InventoryAdjustmentScreen> {
       final c = widget.catalogUnitCost?.trim();
       return 'Opcional: si no indicás, el servidor usa catálogo ($c)';
     }
-    return 'Solo entradas; si falta, usa costo medio o catálogo';
+    return 'Solo entradas; si falta, usa el costo de catálogo';
   }
 
   Future<void> _submit() async {

@@ -61,6 +61,15 @@ class KpiCapitalPanel extends StatelessWidget {
                 color: PosSaleUi.textMuted,
               ),
         ),
+        const SizedBox(height: 8),
+        Text(
+          'La foto oficial del día se toma al cerrar caja (CASH_CLOSE). '
+          'Sin cierre, algunos días pueden aparecer en «Días sin foto».',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: PosSaleUi.textMuted,
+                height: 1.35,
+              ),
+        ),
         const SizedBox(height: 16),
         _EquityHero(latest: latest, currency: currencyCode),
         if (series.missingDates.isNotEmpty) ...[

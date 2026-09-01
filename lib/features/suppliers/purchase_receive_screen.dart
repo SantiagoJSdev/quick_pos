@@ -27,6 +27,24 @@ import '../shell/shell_online_scope.dart';
 import 'supplier_form_screen.dart';
 
 final _decimalPositive = RegExp(r'^\d+(\.\d+)?$');
+final _decimalNonNegative = RegExp(r'^\d+(\.\d+)?$');
+
+String _mergeQuantityStrings(String a, String b) {
+  final sum = double.parse(a.replaceAll(',', '.')) +
+      double.parse(b.replaceAll(',', '.'));
+  if (sum == sum.roundToDouble()) return sum.round().toString();
+  return sum.toString();
+}
+
+String _normalizePurchaseUnitCost(String raw) {
+  final t = raw.trim().replaceAll(',', '.');
+  return t.isEmpty ? '0' : t;
+}
+
+bool _isZeroUnitCost(String unitCost) {
+  final v = double.tryParse(unitCost.replaceAll(',', '.'));
+  return v != null && v == 0;
+}
 
 /// Línea agregada a la recepción (varios productos por documento).
 class _PurchaseLineDraft {
@@ -448,7 +466,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     }
     setState(() => _selectedProduct = prod);
     final qty = _quantity.text.trim();
-    final cost = _unitCost.text.trim();
+    final costNorm = _normalizePurchaseUnitCost(_unitCost.text);
     if (!_decimalPositive.hasMatch(qty)) {
       setState(() => _formError = 'Cantidad: número decimal > 0.');
       return;
@@ -458,24 +476,51 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       setState(() => _formError = 'Cantidad debe ser mayor que 0.');
       return;
     }
-    if (!_decimalPositive.hasMatch(cost)) {
+    if (!_decimalNonNegative.hasMatch(costNorm)) {
       setState(
-        () => _formError = 'Costo unitario (moneda documento): decimal válido.',
+        () => _formError = 'Costo unitario (moneda documento): decimal válido ≥ 0.',
       );
       return;
     }
-    final costVal = double.tryParse(cost);
-    if (costVal == null || costVal <= 0) {
-      setState(() => _formError = 'Costo unitario debe ser mayor que 0.');
+    final costVal = double.tryParse(costNorm);
+    if (costVal == null || costVal < 0) {
+      setState(() => _formError = 'Costo unitario inválido.');
       return;
     }
+
+    final existingIdx = _lines.indexWhere((e) => e.product.id == prod.id);
+    if (existingIdx >= 0) {
+      final existing = _lines[existingIdx];
+      if (existing.unitCost != costNorm) {
+        setState(
+          () => _formError =
+              '«${prod.name}» ya está en la factura con costo ${existing.unitCost}. '
+              'Quitá esa línea o usá el mismo costo para sumar cantidad.',
+        );
+        return;
+      }
+      setState(() {
+        _lines[existingIdx] = _PurchaseLineDraft(
+          lineKey: existing.lineKey,
+          product: prod,
+          quantity: _mergeQuantityStrings(existing.quantity, qty),
+          unitCost: costNorm,
+        );
+        _selectedProduct = null;
+        _productField.clear();
+        _quantity.clear();
+        _unitCost.clear();
+      });
+      return;
+    }
+
     setState(() {
       _lines.add(
         _PurchaseLineDraft(
           lineKey: ClientMutationId.newId(),
           product: prod,
           quantity: qty,
-          unitCost: cost,
+          unitCost: costNorm,
         ),
       );
       _selectedProduct = null;
@@ -497,6 +542,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     final failures = <String>[];
     final refreshedProducts = <CatalogProduct>[];
     for (final draft in _lines) {
+      if (_isZeroUnitCost(draft.unitCost)) continue;
       final p = draft.product;
       final costStr = purchaseUnitCostInProductCurrency(
         unitCostDocument: draft.unitCost,
@@ -550,6 +596,14 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       setState(
         () => _formError =
             'Agregá al menos una línea (producto, cantidad y costo).',
+      );
+      return;
+    }
+    final productIds = _lines.map((e) => e.product.id).toList();
+    if (productIds.toSet().length != productIds.length) {
+      setState(
+        () => _formError =
+            'Hay productos duplicados en la factura. Dejá una línea por producto.',
       );
       return;
     }
@@ -671,15 +725,18 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         ),
       );
       final String snackText;
+      final hasZeroCostLines = _lines.any((e) => _isZeroUnitCost(e.unitCost));
       if (costFailures.isEmpty) {
         snackText =
-            PostPurchasePriceHint.afterPurchaseWithCatalogCostUpdatedSnackMessage;
+            '${PostPurchasePriceHint.afterPurchaseWithCatalogCostUpdatedSnackMessage}'
+            '${hasZeroCostLines ? '\n\n${PostPurchasePriceHint.zeroCostLineNote}' : ''}';
       } else {
         snackText =
             'Compra registrada.\n\n'
             'Se actualizó el costo en ficha donde fue posible. '
             'No aplica o falló para: ${costFailures.join(", ")}.\n\n'
-            'El precio de lista no se modifica solo; revisalo en Catálogo si aplica.';
+            'El precio de lista no se modifica solo; revisalo en Catálogo si aplica.'
+            '${hasZeroCostLines ? '\n\n${PostPurchasePriceHint.zeroCostLineNote}' : ''}';
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -690,7 +747,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       Navigator.of(context).pop(true);
     } on ApiError catch (e) {
       if (!mounted) return;
-      var msg = e.userMessageForSupport;
+      var msg = e.purchaseReceiveMessageEs;
       if (e.statusCode == 400) {
         final blob = '${e.error} ${e.messages.join(' ')}'.toLowerCase();
         if (blob.contains('inactive') || blob.contains('inactivo')) {
@@ -1129,7 +1186,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     decoration: InputDecoration(
                       labelText:
                           'Costo unitario (${_selectedDocumentCurrency ?? "—"})',
-                      hintText: 'ej. 85.00',
+                      hintText: 'ej. 85.00 (0 = no cambia catálogo)',
                       border: const OutlineInputBorder(),
                     ),
                     keyboardType: const TextInputType.numberWithOptions(
