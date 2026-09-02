@@ -126,6 +126,7 @@ class _PayablesScreenState extends State<PayablesScreen> {
           shellOnline: widget.shellOnline,
           initialPaymentFilter: 'OPEN',
           initialSupplierId: row.supplierId,
+          initialSupplierName: row.supplierName,
           embeddedInModule: false,
         ),
       ),

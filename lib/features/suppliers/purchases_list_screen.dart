@@ -33,6 +33,7 @@ class PurchasesListScreen extends StatefulWidget {
     this.shellOnline = true,
     this.initialPaymentFilter,
     this.initialSupplierId,
+    this.initialSupplierName,
     this.embeddedInModule = true,
     this.hideFab = false,
   });
@@ -51,6 +52,9 @@ class PurchasesListScreen extends StatefulWidget {
   /// `OPEN` | `PAID` | `CREDIT` | `PARTIAL` | `VOID` | null = todas.
   final String? initialPaymentFilter;
   final String? initialSupplierId;
+
+  /// Nombre para mostrar mientras carga el catálogo de proveedores (ej. desde Deuda).
+  final String? initialSupplierName;
 
   /// false cuando se abre como ruta (ej. desde Deuda) → muestra AppBar.
   final bool embeddedInModule;
@@ -276,6 +280,26 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
       widget.initialSupplierId != null &&
       widget.initialSupplierId!.trim().isNotEmpty;
 
+  String get _lockedSupplierLabel {
+    final id = _supplierIdFilter?.trim();
+    if (id == null || id.isEmpty) return '—';
+    for (final s in _suppliers) {
+      if (s.id == id) {
+        return s.active ? s.name : '${s.name} (inactivo)';
+      }
+    }
+    final name = widget.initialSupplierName?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    return 'Proveedor';
+  }
+
+  String? get _dropdownSupplierValue {
+    final id = _supplierIdFilter;
+    if (id == null) return null;
+    if (_suppliers.any((s) => s.id == id)) return id;
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _visibleItems;
@@ -338,44 +362,65 @@ class _PurchasesListScreenState extends State<PurchasesListScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: InputDecorator(
-              decoration: const InputDecoration(
-                labelText: 'Proveedor',
-                border: OutlineInputBorder(),
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String?>(
-                  isExpanded: true,
-                  value: _supplierIdFilter,
-                  hint: Text(
-                    _loadingSuppliers ? 'Cargando…' : 'Todos los proveedores',
-                  ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Todos los proveedores'),
-                    ),
-                    ..._suppliers.map(
-                      (s) => DropdownMenuItem<String?>(
-                        value: s.id,
-                        child: Text(
-                          s.active ? s.name : '${s.name} (inactivo)',
-                          overflow: TextOverflow.ellipsis,
-                        ),
+            child: _supplierFilterLocked
+                ? InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Proveedor',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
                       ),
                     ),
-                  ],
-                  onChanged: _supplierFilterLocked || _loading
-                      ? null
-                      : (id) {
-                          setState(() => _supplierIdFilter = id);
-                          unawaited(_load(reset: true));
-                        },
-                ),
-              ),
-            ),
+                    child: Text(
+                      _lockedSupplierLabel,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                : InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Proveedor',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String?>(
+                        isExpanded: true,
+                        value: _dropdownSupplierValue,
+                        hint: Text(
+                          _loadingSuppliers
+                              ? 'Cargando…'
+                              : 'Todos los proveedores',
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Todos los proveedores'),
+                          ),
+                          ..._suppliers.map(
+                            (s) => DropdownMenuItem<String?>(
+                              value: s.id,
+                              child: Text(
+                                s.active ? s.name : '${s.name} (inactivo)',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: _loading
+                            ? null
+                            : (id) {
+                                setState(() => _supplierIdFilter = id);
+                                unawaited(_load(reset: true));
+                              },
+                      ),
+                    ),
+                  ),
           ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
