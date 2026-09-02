@@ -14,6 +14,7 @@ import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/models/inventory_line.dart';
+import '../../core/text/search_text_match.dart';
 import '../sale/barcode_scanner_screen.dart';
 import 'inventory_product_detail_screen.dart';
 import 'product_form_screen.dart';
@@ -486,13 +487,14 @@ class _InventoryStockTabState extends State<InventoryStockTab> {
 
   List<InventoryLine> get _filtered {
     final base = _stockFiltered;
-    final q = _searchController.text.trim().toLowerCase();
+    final q = _searchController.text.trim();
     if (q.isEmpty) return base;
     return base.where((line) {
-      final name = line.product?.name?.toLowerCase() ?? '';
-      final sku = line.product?.sku?.toLowerCase() ?? '';
-      final bc = line.product?.barcode?.toLowerCase() ?? '';
-      return name.contains(q) || sku.contains(q) || bc.contains(q);
+      return searchTextMatchesAnyField(q, [
+        line.product?.name,
+        line.product?.sku,
+        line.product?.barcode,
+      ]);
     }).toList();
   }
 

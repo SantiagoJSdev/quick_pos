@@ -919,7 +919,7 @@ class PosSaleCheckoutPanel extends StatelessWidget {
                 Expanded(
                   child: FilledButton(
                     onPressed:
-                        (cartNotEmpty && canChargeWithPayments && !chargeBusy)
+                        (cartNotEmpty && !chargeBusy)
                         ? onCharge
                         : null,
                     style: FilledButton.styleFrom(

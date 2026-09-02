@@ -32,6 +32,7 @@ import '../../core/pos/pos_terminal_info.dart';
 import '../../core/pos/recent_sale_functional_enricher.dart';
 import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/text/search_text_match.dart';
 import '../../core/sync/device_hydrate_sync.dart';
 import '../../core/sync/pending_sale_entry.dart';
 import '../../core/sync/sync_cycle.dart';
@@ -1169,17 +1170,6 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     return [PaymentMethod.fallbackCash(func)];
   }
 
-  PaymentMethod? _defaultCashMethod(String functionalCode) {
-    final code = 'CASH_${functionalCode.trim().toUpperCase()}';
-    for (final m in _activePaymentMethods) {
-      if (m.code.trim().toUpperCase() == code) return m;
-    }
-    for (final m in _activePaymentMethods) {
-      if (m.isCashLike) return m;
-    }
-    return null;
-  }
-
   /// Hay catálogo + settings en memoria/cache para vender sin esperar red.
   bool get _hasUsablePosLocalData =>
       _all.isNotEmpty && _settings != null && _selectedDocumentCurrency != null;
@@ -1698,6 +1688,18 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       );
       return;
     }
+    if (_appliedPayments.isEmpty) {
+      if (_activePaymentMethods.isEmpty) {
+        _showCheckoutPanelMessage(
+          'No hay métodos de pago activos. Sincronizá o configurá métodos en el servidor.',
+          error: true,
+        );
+        return;
+      }
+      await _openPaymentSheet();
+      if (!mounted) return;
+      if (_appliedPayments.isEmpty) return;
+    }
     if (!_canChargeWithMixedPayments) {
       _showCheckoutPanelMessage(_remainingMixedLabel, error: true);
       return;
@@ -1722,6 +1724,21 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       return;
     }
     final clientSoldAt = DateTime.now().toUtc().toIso8601String();
+    final payments = _buildPaymentsForPayload(
+      functionalCode: func,
+      documentCode: doc,
+      saleFxSnapshot: _currentSaleFxSnapshot(
+        functionalCode: func,
+        documentCode: doc,
+      ),
+    );
+    if (payments == null || payments.isEmpty) {
+      _showCheckoutPanelMessage(
+        'Seleccioná un método de pago antes de cobrar.',
+        error: true,
+      );
+      return;
+    }
     final restBody = SaleCheckoutPayload.build(
       documentCurrencyCode: doc,
       functionalCurrencyCode: func,
@@ -1729,14 +1746,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
       fxPair: _fxPair,
       deviceId: _terminal!.deviceId,
       appVersion: _terminal!.appVersion,
-      payments: _buildPaymentsForPayload(
-        functionalCode: func,
-        documentCode: doc,
-        saleFxSnapshot: _currentSaleFxSnapshot(
-          functionalCode: func,
-          documentCode: doc,
-        ),
-      ),
+      payments: payments,
       clientSaleId: _pendingSaleId,
       clientSoldAt: clientSoldAt,
       unitCostFunctionalByProductId: unitCostFunctionalByProductId,
@@ -1955,7 +1965,7 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   bool get _hasAnyMixedPaymentInput => _paymentFunctionalAmount > 0;
 
   bool get _canChargeWithMixedPayments {
-    if (!_hasAnyMixedPaymentInput) return true;
+    if (!_hasAnyMixedPaymentInput) return false;
     return _paymentTotalInDocument + 0.009 >= _cartTotalDocumentAmount;
   }
 
@@ -2097,21 +2107,9 @@ class _PosSaleScreenState extends State<PosSaleScreen>
     final payments = <Map<String, dynamic>>[];
     final fx = <String, dynamic>{...saleFxSnapshot};
     final totalSale = _cartTotalFunctionalAmount;
-    if (totalSale <= 0) return null;
+    if (totalSale <= 0 || _appliedPayments.isEmpty) return null;
 
-    final lines = _appliedPayments.isEmpty
-        ? () {
-            final cash = _defaultCashMethod(functionalCode);
-            if (cash == null) return <PosAppliedPayment>[];
-            return [
-              PosAppliedPayment(
-                methodCode: cash.code,
-                methodName: cash.name,
-                amountFunctional: totalSale,
-              ),
-            ];
-          }()
-        : List<PosAppliedPayment>.from(_appliedPayments);
+    final lines = List<PosAppliedPayment>.from(_appliedPayments);
 
     var remaining = totalSale;
     for (final p in lines) {
@@ -2314,12 +2312,10 @@ class _PosSaleScreenState extends State<PosSaleScreen>
   }
 
   List<CatalogProduct> get _searchPreview {
-    final q = _search.text.trim().toLowerCase();
+    final q = _search.text.trim();
     if (q.isEmpty) return const [];
     final found = _all.where((p) {
-      return p.name.toLowerCase().contains(q) ||
-          p.sku.toLowerCase().contains(q) ||
-          (p.barcode?.toLowerCase().contains(q) ?? false);
+      return searchTextMatchesAnyField(q, [p.name, p.sku, p.barcode]);
     }).toList();
     found.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     if (found.length > 100) {

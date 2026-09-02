@@ -13,6 +13,7 @@ import '../../core/catalog/pending_catalog_mutation_entry.dart';
 import '../../core/idempotency/client_mutation_id.dart';
 import '../../core/models/catalog_product.dart';
 import '../../core/storage/local_prefs.dart';
+import '../../core/text/search_text_match.dart';
 import '../sale/barcode_scanner_screen.dart';
 import 'product_form_screen.dart';
 
@@ -139,12 +140,10 @@ class _ProductCatalogTabState extends State<ProductCatalogTab> {
   }
 
   List<CatalogProduct> get _filtered {
-    final q = _searchController.text.trim().toLowerCase();
+    final q = _searchController.text.trim();
     if (q.isEmpty) return _all;
     return _all.where((p) {
-      return p.name.toLowerCase().contains(q) ||
-          p.sku.toLowerCase().contains(q) ||
-          (p.barcode?.toLowerCase().contains(q) ?? false);
+      return searchTextMatchesAnyField(q, [p.name, p.sku, p.barcode]);
     }).toList();
   }
 
