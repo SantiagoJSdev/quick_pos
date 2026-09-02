@@ -71,6 +71,8 @@ class _InventoryProductDetailScreenState
   List<StockMovement> _movements = [];
   bool _loading = true;
   String? _error;
+  String? _movementsError;
+  int _loadSeq = 0;
 
   @override
   void initState() {
@@ -108,10 +110,15 @@ class _InventoryProductDetailScreenState
       return;
     }
 
+    final seq = ++_loadSeq;
+    final firstPaint = _line == null && _catalogProduct == null;
+
     setState(() {
-      _loading = true;
+      if (firstPaint) _loading = true;
       _error = null;
+      _movementsError = null;
     });
+
     if (!widget.shellOnline) {
       final cachedProducts = await widget.localPrefs.loadCatalogProductsCache();
       CatalogProduct? cp;
@@ -121,50 +128,67 @@ class _InventoryProductDetailScreenState
           break;
         }
       }
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
-        _catalogProduct = cp;
-        _line = widget.initialLine;
-        _movements = const [];
+        _catalogProduct = cp ?? _catalogProduct;
+        _line = _line ?? widget.initialLine;
         _loading = false;
         _error = null;
       });
       return;
     }
-    try {
-      final detailFuture = widget.inventoryApi.getInventoryLine(
-        widget.storeId,
-        pid,
-      );
-      final movFuture = widget.inventoryApi.listMovements(
-        widget.storeId,
-        productId: pid,
-        limit: 100,
-      );
-      final productFuture = widget.productsApi.getProduct(widget.storeId, pid);
-      final detail = await detailFuture;
-      final mov = await movFuture;
-      final product = await productFuture;
-      if (!mounted) return;
-      setState(() {
-        _line = detail ?? widget.initialLine;
-        _catalogProduct = product;
-        _movements = mov;
-        _loading = false;
-      });
-    } on ApiError catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.userMessageForSupport;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+
+    InventoryLine? detail;
+    List<StockMovement>? movements;
+    CatalogProduct? product;
+    String? movementsError;
+
+    await Future.wait<void>([
+      () async {
+        try {
+          detail = await widget.inventoryApi.getInventoryLine(
+            widget.storeId,
+            pid,
+          );
+        } catch (_) {
+          // 404 u otro: se usa línea inicial o cache.
+        }
+      }(),
+      () async {
+        try {
+          movements = await widget.inventoryApi.listMovements(
+            widget.storeId,
+            productId: pid,
+            limit: 100,
+          );
+        } on ApiError catch (e) {
+          movementsError = e.userMessageForSupport;
+        } catch (e) {
+          movementsError = e.toString();
+        }
+      }(),
+      () async {
+        try {
+          product = await widget.productsApi.getProduct(widget.storeId, pid);
+        } catch (_) {
+          // Ficha opcional: no bloquea stock ni movimientos.
+        }
+      }(),
+    ]);
+
+    if (!mounted || seq != _loadSeq) return;
+
+    final resolvedLine = detail ?? _line ?? widget.initialLine;
+    setState(() {
+      _line = resolvedLine;
+      if (product != null) _catalogProduct = product;
+      if (movements != null) {
+        _movements = movements!;
+      }
+      _movementsError = movementsError;
+      _loading = false;
+      _error = null;
+    });
   }
 
   Future<void> _openAdjustment(String productId, String label) async {
@@ -244,26 +268,39 @@ class _InventoryProductDetailScreenState
   Future<void> _refreshInventoryLineAndMovementsOnly() async {
     final pid = widget._productId;
     if (pid.isEmpty || !widget.shellOnline) return;
-    try {
-      final detailFuture = widget.inventoryApi.getInventoryLine(
-        widget.storeId,
-        pid,
-      );
-      final movFuture = widget.inventoryApi.listMovements(
-        widget.storeId,
-        productId: pid,
-        limit: 100,
-      );
-      final detail = await detailFuture;
-      final mov = await movFuture;
-      if (!mounted) return;
-      setState(() {
-        _line = detail ?? _line;
-        _movements = mov;
-      });
-    } catch (_) {
-      // Secundario: el producto ya quedó actualizado desde el pop del formulario.
-    }
+    final seq = ++_loadSeq;
+    InventoryLine? detail;
+    List<StockMovement>? movements;
+    String? movementsError;
+    await Future.wait<void>([
+      () async {
+        try {
+          detail = await widget.inventoryApi.getInventoryLine(
+            widget.storeId,
+            pid,
+          );
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          movements = await widget.inventoryApi.listMovements(
+            widget.storeId,
+            productId: pid,
+            limit: 100,
+          );
+        } on ApiError catch (e) {
+          movementsError = e.userMessageForSupport;
+        } catch (e) {
+          movementsError = e.toString();
+        }
+      }(),
+    ]);
+    if (!mounted || seq != _loadSeq) return;
+    setState(() {
+      if (detail != null) _line = detail;
+      if (movements != null) _movements = movements!;
+      _movementsError = movementsError;
+    });
   }
 
   String _formatWhen(DateTime? t) {
@@ -569,7 +606,41 @@ class _InventoryProductDetailScreenState
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (_movements.isEmpty)
+                  if (_movementsError != null) ...[
+                    Card(
+                      color: Theme.of(context).colorScheme.errorContainer,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.cloud_off_outlined,
+                              size: 20,
+                              color: Theme.of(context).colorScheme.onErrorContainer,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'No se pudieron cargar los movimientos. '
+                                'Deslizá hacia abajo para reintentar.\n'
+                                '${_movementsError!}',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onErrorContainer,
+                                      height: 1.35,
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (_movements.isEmpty && _movementsError == null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 24),
                       child: Center(

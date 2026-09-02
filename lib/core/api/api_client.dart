@@ -86,7 +86,13 @@ class ApiClient {
             .toList();
       }
       if (decoded is Map<String, dynamic>) {
-        for (final key in ['data', 'items', 'results', 'lines']) {
+        for (final key in [
+          'data',
+          'items',
+          'results',
+          'lines',
+          'movements',
+        ]) {
           final inner = decoded[key];
           if (inner is List) {
             return inner

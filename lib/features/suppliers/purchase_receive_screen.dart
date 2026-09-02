@@ -18,7 +18,6 @@ import '../../core/api/suppliers_api.dart';
 import '../../core/network/network_errors.dart';
 import '../../core/pos/pos_terminal_info.dart';
 import '../../core/pos/purchase_unit_cost_convert.dart';
-import '../../core/pos/sale_checkout_payload.dart';
 import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_purchase_receive_entry.dart';
 import '../../core/sync/purchase_receive_payload.dart';
@@ -95,9 +94,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   List<CatalogProduct> _products = [];
   BusinessSettings? _settings;
   String? _contextError;
-  String? _fxLoadError;
-  SaleFxPair? _fxPair;
-  String? _selectedDocumentCurrency;
   Supplier? _selectedSupplier;
   CatalogProduct? _selectedProduct;
 
@@ -250,79 +246,13 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     return null;
   }
 
-  List<String> get _documentCurrencyOptions {
-    final s = _settings;
-    if (s == null) return const [];
-    final f = s.functionalCurrency.code;
-    final d = s.defaultSaleDocCurrency?.code;
-    if (d == null || d.toUpperCase() == f.toUpperCase()) {
-      return [f];
-    }
-    return [d, f];
+  /// Compras: solo moneda funcional (USD operativo).
+  String? get _purchaseDocumentCurrency {
+    final func = _functionalCode.trim();
+    return func.isEmpty ? null : func;
   }
 
   String get _functionalCode => _settings?.functionalCurrency.code ?? '';
-
-  Future<SaleFxPair?> _fetchFxPair(String func, String doc) async {
-    try {
-      final r = await widget.exchangeRatesApi.getLatest(
-        widget.storeId,
-        baseCurrencyCode: func,
-        quoteCurrencyCode: doc,
-      );
-      return SaleFxPair(rate: r, inverted: false);
-    } on ApiError catch (e) {
-      if (e.statusCode != 404) rethrow;
-      try {
-        final r2 = await widget.exchangeRatesApi.getLatest(
-          widget.storeId,
-          baseCurrencyCode: doc,
-          quoteCurrencyCode: func,
-        );
-        return SaleFxPair(rate: r2, inverted: true);
-      } on ApiError catch (e2) {
-        if (e2.statusCode == 404) return null;
-        rethrow;
-      }
-    }
-  }
-
-  Future<void> _reloadFxForDocumentCurrency() async {
-    final s = _settings;
-    final doc = _selectedDocumentCurrency;
-    if (s == null || doc == null) {
-      _fxPair = null;
-      _fxLoadError = null;
-      return;
-    }
-    final func = s.functionalCurrency.code;
-    if (func.toUpperCase() == doc.toUpperCase()) {
-      _fxPair = null;
-      _fxLoadError = null;
-      return;
-    }
-    if (!_shellOnline) {
-      final cached = await widget.localPrefs.loadPosFxPairCache(
-        storeId: widget.storeId,
-        functionalCode: func,
-        documentCode: doc,
-      );
-      _fxPair = cached;
-      _fxLoadError = cached == null
-          ? 'Sin tasa en caché. Conectate o cargá la tasa en Inicio.'
-          : null;
-      return;
-    }
-    try {
-      _fxPair = await _fetchFxPair(func, doc);
-      _fxLoadError = _fxPair == null
-          ? 'No hay tasa $func → $doc para esta tienda.'
-          : null;
-    } catch (e) {
-      _fxPair = null;
-      _fxLoadError = e.toString();
-    }
-  }
 
   Future<void> _bootstrapOfflineLoad() async {
     final cachedCatalog = await widget.localPrefs.loadCatalogProductsCache();
@@ -353,10 +283,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _settings = cached;
         _products = active;
         _contextError = null;
-        final opts = _documentCurrencyOptions;
-        _selectedDocumentCurrency = opts.isNotEmpty
-            ? opts.first
-            : cached.functionalCurrency.code;
         _reconcileSupplierDropdown();
         if (!_preserveReceiptDraft) {
           _selectedProduct = null;
@@ -365,7 +291,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           _reconcileSelectedProductAfterCatalogReload();
         }
       });
-      await _reloadFxForDocumentCurrency();
     } else {
       setState(() {
         _products = active;
@@ -373,7 +298,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _settings = null;
         _contextError =
             'Sin configuración en caché. Conectate para cargar la tienda.';
-        _selectedDocumentCurrency = null;
         _selectedSupplier = null;
         if (!_preserveReceiptDraft) {
           _selectedProduct = null;
@@ -413,10 +337,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _suppliers = suppliers;
         _settings = settings;
         _products = active;
-        final opts = _documentCurrencyOptions;
-        _selectedDocumentCurrency = opts.isNotEmpty
-            ? opts.first
-            : settings.functionalCurrency.code;
         _reconcileSupplierDropdown();
         if (!_preserveReceiptDraft) {
           _selectedProduct = null;
@@ -425,7 +345,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
           _reconcileSelectedProductAfterCatalogReload();
         }
       });
-      await _reloadFxForDocumentCurrency();
       if (mounted) setState(() => _loading = false);
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -440,13 +359,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         _contextError = e.toString();
       });
     }
-  }
-
-  Future<void> _onDocumentCurrencyChanged(String? code) async {
-    if (code == null || code == _selectedDocumentCurrency) return;
-    setState(() => _selectedDocumentCurrency = code);
-    await _reloadFxForDocumentCurrency();
-    if (mounted) setState(() {});
   }
 
   void _addLineToReceipt() {
@@ -548,7 +460,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
         unitCostDocument: draft.unitCost,
         documentCurrencyCode: documentCode,
         functionalCurrencyCode: functionalCode,
-        fxPair: _fxPair,
+        fxPair: null,
         productCurrencyCode: p.currency,
       );
       if (costStr == null) {
@@ -582,7 +494,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
   Future<void> _submit() async {
     setState(() => _formError = null);
     final s = _settings;
-    final doc = _selectedDocumentCurrency;
+    final doc = _purchaseDocumentCurrency;
     if (s == null || doc == null) {
       setState(() => _formError = 'Configuración de tienda no disponible.');
       return;
@@ -608,14 +520,6 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return;
     }
     final func = s.functionalCurrency.code;
-    if (func.toUpperCase() != doc.toUpperCase() && _fxPair == null) {
-      setState(() {
-        _formError =
-            _fxLoadError ??
-            'Definí la tasa del día antes de registrar la compra.';
-      });
-      return;
-    }
 
     final supplierInvoiceRef =
         PurchaseReceivePayload.buildSupplierInvoiceReferenceForApi(
@@ -669,7 +573,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
     final fxSnap = PurchaseReceivePayload.buildFxSnapshot(
       documentCurrencyCode: doc,
       functionalCurrencyCode: func,
-      fxPair: _fxPair,
+      fxPair: null,
     );
     final lines = _lines
         .map(
@@ -1015,35 +919,15 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                   ],
                 ],
                 const SizedBox(height: 16),
-                if (_documentCurrencyOptions.length > 1) ...[
+                if (_functionalCode.isNotEmpty) ...[
                   Text(
-                    'Moneda del documento',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButton<String>(
-                    value: _selectedDocumentCurrency,
-                    items: _documentCurrencyOptions
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                        .toList(),
-                    onChanged: _submitting ? null : _onDocumentCurrencyChanged,
-                  ),
-                ],
-                if (_functionalCode.isNotEmpty &&
-                    _selectedDocumentCurrency != null &&
-                    _functionalCode.toUpperCase() !=
-                        _selectedDocumentCurrency!.toUpperCase()) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _fxPair == null
-                        ? (_fxLoadError ?? 'Sin tasa de cambio.')
-                        : 'Ref.: 1 $_functionalCode = ${SaleCheckoutPayload.rateFunctionalPerDocumentSnapshot(functionalCode: _functionalCode, documentCode: _selectedDocumentCurrency!, pair: _fxPair)} ${_selectedDocumentCurrency!}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    'Moneda de la factura: $_functionalCode (moneda funcional)',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  const SizedBox(height: 16),
                 ],
-                const SizedBox(height: 16),
                 Text(
                   'Líneas de la recepción',
                   style: Theme.of(context).textTheme.labelLarge,
@@ -1069,7 +953,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         subtitle: Text(
-                          '${L.quantity} u. × ${L.unitCost} ${_selectedDocumentCurrency ?? ''}',
+                          '${L.quantity} u. × ${L.unitCost} ${_purchaseDocumentCurrency ?? ''}',
                         ),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete_outline),
@@ -1185,7 +1069,7 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     enabled: !_submitting,
                     decoration: InputDecoration(
                       labelText:
-                          'Costo unitario (${_selectedDocumentCurrency ?? "—"})',
+                          'Costo unitario (${_purchaseDocumentCurrency ?? "funcional"})',
                       hintText: 'ej. 85.00 (0 = no cambia catálogo)',
                       border: const OutlineInputBorder(),
                     ),
