@@ -22,6 +22,7 @@ import '../../core/storage/local_prefs.dart';
 import '../../core/sync/pending_purchase_receive_entry.dart';
 import '../../core/sync/purchase_receive_payload.dart';
 import '../../core/sync/sync_cycle.dart';
+import '../../core/text/search_text_match.dart';
 import '../shell/shell_online_scope.dart';
 import 'supplier_form_screen.dart';
 
@@ -197,6 +198,54 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
       return '${p.name} · ${p.sku} · $bc';
     }
     return '${p.name} · ${p.sku}';
+  }
+
+  String _catalogCostSummary(CatalogProduct p) {
+    final cost = p.cost.trim();
+    if (cost.isEmpty || cost == '0' || cost == '0.0' || cost == '0.00') {
+      return 'sin costo en catálogo';
+    }
+    final cur = p.currency.trim();
+    final doc = _purchaseDocumentCurrency?.trim() ?? '';
+    if (doc.isNotEmpty && cur.toUpperCase() == doc.toUpperCase()) {
+      return '$cost $cur';
+    }
+    return '$cost $cur (factura en $doc)';
+  }
+
+  String _productAutocompleteSubtitle(CatalogProduct p) {
+    final sku = p.sku.trim();
+    final bc = p.barcode?.trim();
+    final parts = <String>[
+      if (sku.isNotEmpty) sku,
+      if (bc != null && bc.isNotEmpty) bc,
+      'cat. ${_catalogCostSummary(p)}',
+    ];
+    return parts.join(' · ');
+  }
+
+  void _applyProductSelection(CatalogProduct p) {
+    setState(() {
+      _selectedProduct = p;
+      _productField.text = _productDisplay(p);
+      final doc = _purchaseDocumentCurrency?.trim().toUpperCase() ?? '';
+      final pc = p.currency.trim().toUpperCase();
+      final cost = p.cost.trim();
+      if (cost.isNotEmpty &&
+          pc == doc &&
+          (double.tryParse(cost.replaceAll(',', '.')) ?? 0) > 0) {
+        _unitCost.text = cost;
+      }
+    });
+  }
+
+  CatalogProduct? get _productForCostHint =>
+      _selectedProduct ?? _effectiveProduct();
+
+  String? get _unitCostHelperText {
+    final p = _productForCostHint;
+    if (p == null) return null;
+    return 'Catálogo hoy: ${_catalogCostSummary(p)}';
   }
 
   /// Hay datos del usuario que no deben borrarse si [_load] vuelve a correr
@@ -979,25 +1028,19 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     focusNode: _productFocus,
                     displayStringForOption: _productDisplay,
                     optionsBuilder: (TextEditingValue tv) {
-                      final q = tv.text.trim().toLowerCase();
+                      final q = tv.text.trim();
                       if (q.isEmpty) return _products.take(45);
                       return _products
-                          .where((p) {
-                            final n = p.name.toLowerCase();
-                            final s = p.sku.toLowerCase();
-                            final b = (p.barcode ?? '').toLowerCase();
-                            return n.contains(q) ||
-                                s.contains(q) ||
-                                b.contains(q);
-                          })
+                          .where(
+                            (p) => searchTextMatchesAnyField(q, [
+                              p.name,
+                              p.sku,
+                              p.barcode,
+                            ]),
+                          )
                           .take(80);
                     },
-                    onSelected: (p) {
-                      setState(() {
-                        _selectedProduct = p;
-                        _productField.text = _productDisplay(p);
-                      });
-                    },
+                    onSelected: _applyProductSelection,
                     fieldViewBuilder:
                         (context, controller, focusNode, onFieldSubmitted) {
                           return TextField(
@@ -1037,14 +1080,88 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                         subtitle: Text(
-                                          '${p.sku}${p.barcode != null && p.barcode!.isNotEmpty ? ' · ${p.barcode}' : ''}',
-                                          maxLines: 1,
+                                          _productAutocompleteSubtitle(p),
+                                          maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                         onTap: () => onSelected(p),
                                       );
                                     },
                                   ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  Builder(
+                    builder: (context) {
+                      final p = _productForCostHint;
+                      if (p == null) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Card(
+                          margin: EdgeInsets.zero,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.inventory_2_outlined,
+                                  size: 20,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Costo actual (catálogo)',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelLarge,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _catalogCostSummary(p),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
+                                              fontFeatures: const [
+                                                FontFeature.tabularFigures(),
+                                              ],
+                                            ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Costo unitario abajo = costo de esta factura '
+                                        '(actualiza catálogo al registrar, salvo 0).',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                              height: 1.3,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -1069,8 +1186,9 @@ class _PurchaseReceiveScreenState extends State<PurchaseReceiveScreen> {
                     enabled: !_submitting,
                     decoration: InputDecoration(
                       labelText:
-                          'Costo unitario (${_purchaseDocumentCurrency ?? "funcional"})',
+                          'Costo unitario factura (${_purchaseDocumentCurrency ?? "funcional"})',
                       hintText: 'ej. 85.00 (0 = no cambia catálogo)',
+                      helperText: _unitCostHelperText,
                       border: const OutlineInputBorder(),
                     ),
                     keyboardType: const TextInputType.numberWithOptions(
